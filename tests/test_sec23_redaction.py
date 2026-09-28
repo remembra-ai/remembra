@@ -314,8 +314,113 @@ def test_cli_rules_stay_linear_on_repeated_command_words():
         "docker login -p",
         "ASKPASS=",
         "--auth ",
+        # Labelled hex and encoded tokens (P-275).
+        "key ",
+        "A_key ",
+        "0x",
+        "Zm9v",
+        "ab",
     ):
         text = unit * (size // len(unit))
         started = time.perf_counter()
         redact_secrets(text)
         assert time.perf_counter() - started < 2.0, unit
+
+
+# ---------------------------------------------------------------------------
+# Encoded and hex credentials (audit P-275). A hex key has the same shape as a
+# digest, so bare hex is redacted only when a credential word labels it, or
+# when it decodes to a credential. Digests, commit ids and ids must survive.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", sorted(FAKE))
+@pytest.mark.parametrize("encoding", ["base64", "base64url", "hex"])
+def test_encoded_provider_keys_are_redacted(kind, encoding):
+    raw = FAKE[kind].encode()
+    encoded = {
+        "base64": base64.b64encode(raw).decode(),
+        "base64url": base64.urlsafe_b64encode(raw).decode().rstrip("="),
+        "hex": raw.hex(),
+    }[encoding]
+    result = redact_secrets(f"k8s secret data: {encoded} (rotate)")
+    assert encoded not in result.text, result.text
+    assert result.text == f"k8s secret data: [REDACTED:{kind}] (rotate)", result.text
+    assert redact_secrets(result.text).text == result.text
+
+
+def test_short_encoded_aws_key_is_redacted():
+    """Base64 of a 20-character access key id is 28 characters: too short for the
+    unlabelled fallback, but it decodes to a known key format."""
+    encoded = base64.b64encode(FAKE["aws_access_key"].encode()).decode()
+    assert redact_secrets(f"value {encoded}").text == "value [REDACTED:aws_access_key]"
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "datadog key {hex32}",
+        "Twilio auth token {hex32}",
+        "the api key is {hex64}",
+        "webhook secret {hex64}",
+        "signing key: {hex64}",
+        "REMEMBRA_ENCRYPTION_KEY={hex64}",
+        "private key 0x{hex64}",
+        "Access Token {HEX32}",
+        '{{"key": "{hex64}"}}',
+        "credentials {hex40}",
+    ],
+)
+def test_labelled_hex_keys_are_redacted(template):
+    values = {"hex32": _hex(32), "hex40": _hex(40), "hex64": _hex(64), "HEX32": _hex(32).upper()}
+    text = template.format(**values)
+    result = redact_secrets(text)
+    for value in values.values():
+        assert value not in result.text, result.text
+    assert "[REDACTED:" in result.text
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "commit {hex40} fixed the auth bug",
+        "git log shows {hex7} and {hex40}",
+        "image digest sha256:{hex64}",
+        "SHA-256 of the file is {hex64}",
+        "md5 {hex32}",
+        "{hex64}",
+        "the release tarball checksum {hex64}",
+        "cache key {hex64}",
+        "public key {hex64}",
+        "GPG key {HEX40}",
+        "key fingerprint {hex40}",
+        "root commit {hex40} keys the project",
+        "token id {hex32}",
+        "memory 3f2b8c1e-9a4d-4e2b-8f1a-2c3d4e5f6a7b",
+        "short base64 of plain text: {b64_text}",
+        "hex of plain text: {hex_text}",
+    ],
+)
+def test_digests_ids_and_encoded_prose_are_untouched(template):
+    values = {
+        "hex7": _hex(7),
+        "hex32": _hex(32),
+        "hex40": _hex(40),
+        "HEX40": _hex(40).upper(),
+        "hex64": _hex(64),
+        # Under 32 characters. A longer base64 token of any kind is still caught by the unlabelled fallback.
+        "b64_text": base64.b64encode(b"deploy done at noon").decode(),
+        "hex_text": b"the deploy finished at noon without errors".hex(),
+    }
+    text = template.format(**values)
+    result = redact_secrets(text)
+    assert result.text == text, result.text
+    assert not result.redacted
+
+
+def test_random_bytes_encoded_are_not_decoded_into_false_positives():
+    """Hex and base64 of random bytes (digests, nonces) never decode to text, so the
+    decode step adds nothing for them; only the existing fallback applies."""
+    for _ in range(200):
+        blob = secrets.token_bytes(32)
+        assert redact_secrets(blob.hex()).text == blob.hex()

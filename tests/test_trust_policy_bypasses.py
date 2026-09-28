@@ -15,10 +15,12 @@ from typing import Any
 
 import pytest
 
+from remembra.auth.middleware import AuthenticatedUser, get_current_user
 from remembra.relay.handoff import (
+    GRADE_BASIS_RELAY_DECLARED,
     GRADE_BASIS_REPORTED,
-    GRADE_BASIS_VERIFIED,
     assess_text,
+    facts_source_label,
     grade_basis,
     health_line,
 )
@@ -222,9 +224,9 @@ def test_health_line_says_when_facts_are_only_agent_reported(api) -> None:
     assert "Graded by the server from the recorded facts." not in brief["rendered"]
 
 
-def test_grade_basis_is_verified_only_for_key_verified_relay_facts() -> None:
-    assert grade_basis({"agent_verified": True, "facts_source": "relay-cli:git"}) == GRADE_BASIS_VERIFIED
-    assert grade_basis({"agent_verified": True, "facts_source": "relay-cli:git+transcript"}) == GRADE_BASIS_VERIFIED
+def test_grade_basis_names_a_relay_source_only_for_key_verified_closes() -> None:
+    assert grade_basis({"agent_verified": True, "facts_source": "relay-cli:git"}) == GRADE_BASIS_RELAY_DECLARED
+    assert grade_basis({"agent_verified": True, "facts_source": "relay-cli:git+transcript"}) == GRADE_BASIS_RELAY_DECLARED
     assert grade_basis({"agent_verified": True, "facts_source": "agent-declared"}) == GRADE_BASIS_REPORTED
     assert grade_basis({"agent_verified": False, "facts_source": "relay-cli:git"}) == GRADE_BASIS_REPORTED
     assert grade_basis(None) == GRADE_BASIS_REPORTED
@@ -239,7 +241,37 @@ def test_grade_basis_is_verified_only_for_key_verified_relay_facts() -> None:
             },
         },
     }
-    assert health_line(handoff, None) == f"Handoff health: Ready. {GRADE_BASIS_VERIFIED}"
+    assert health_line(handoff, None) == f"Handoff health: Ready. {GRADE_BASIS_RELAY_DECLARED}"
+
+
+def test_no_grade_line_or_facts_label_claims_the_server_verified_the_facts() -> None:
+    """The server never runs git: every fact, and the facts_source that names who collected them, comes from
+    the closing client. No line may say the facts were recorded or checked by the server."""
+    for basis in (GRADE_BASIS_RELAY_DECLARED, GRADE_BASIS_REPORTED):
+        assert "recorded facts" not in basis
+        assert "not verified" in basis or "does not verify" in basis
+    for source in ("relay-cli:git+transcript", "relay-cli:git", "agent-declared", None, "bogus"):
+        label = facts_source_label(source)
+        assert "(not checked)" in label
+        assert not label.startswith("collected by")
+
+
+def test_hand_typed_facts_that_claim_the_relay_are_not_graded_as_verified(api) -> None:
+    """P-234: a key scoped to the agent plus hand-typed facts that declare facts_source relay-cli:git used to
+    print "Graded by the server from the recorded facts." Nothing checks that declaration, so the line says
+    the facts were reported as collected by remembra-relay, and that the server does not verify them."""
+    scoped = AuthenticatedUser(user_id="default_user", api_key_id="k1", rate_limit_tier="standard", agent_id="claude-code")
+    api["app"].dependency_overrides[get_current_user] = lambda: scoped
+    http = api["http"]
+    close = _close(http, "typed", facts_source="relay-cli:git")
+    assert close["agent_verified"] is True
+    api["app"].dependency_overrides.pop(get_current_user)
+    brief = _brief(http, "typed")
+    rendered = brief["rendered"]
+    assert rendered.splitlines()[1] == f"Handoff health: Ready. {GRADE_BASIS_RELAY_DECLARED}"
+    assert "from the recorded facts." not in rendered
+    assert "(facts reported as collected by remembra-relay from git (not checked))" in rendered
+    assert "Facts: reported as collected by remembra-relay from git (not checked)." in close["rendered"]
 
 
 def test_close_grade_matches_the_brief_for_hidden_characters(api) -> None:

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import AuthenticatedUser, CurrentUser
 from remembra.auth.rbac import ROLE_LEVEL, ROLE_PERMISSIONS, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
-from remembra.auth.scopes import RequireAdmin, RequireAuditExport
+from remembra.auth.scopes import RequireAdmin, RequireAuditExport, RequireAuditRead
 from remembra.auth.superadmin import RequireSuperadmin, RequireSuperadminSession, is_superadmin
 from remembra.auth.users import UserManager
 from remembra.cloud.metering import UsageMeter
@@ -241,12 +241,12 @@ async def list_audit_events(
     request: Request,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireAuditExport,
+    _perm: RequireAuditRead,
     user_id: str | None = Query(None, description="Filter by user ID"),
     action: str | None = Query(None, description="Filter by action type"),
     limit: int = Query(100, ge=1, le=1000),
 ) -> AuditListResponse:
-    """List recent audit events. Requires admin:export permission."""
+    """List recent audit events. Requires admin:audit permission."""
     events = await audit_logger.get_recent_events(
         user_id=await _audit_scope(request, current_user, user_id),
         action=_parse_audit_action(action),
@@ -449,7 +449,7 @@ async def list_permissions(
     current_user: CurrentUser,
     _perm: RequireAdmin,
 ) -> dict[str, Any]:
-    """List all available permissions and default role mappings (admin only, like every route here)."""
+    """List all available permissions and the role table every route enforces (admin only, like every route here)."""
     return {
         "permissions": [p.value for p in Permission],
         # The enforced mapping (single source of truth): ADMIN excludes the human-only
@@ -548,6 +548,7 @@ async def consolidation_status(
 
     Returns:
     - Whether sleep-time compute is enabled
+    - Whether its decay cleanup may delete old notes (REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED)
     - Last run timestamp
     - Whether a consolidation is currently running
     """
@@ -556,11 +557,13 @@ async def consolidation_status(
     if sleep_worker is None:
         return {
             "enabled": False,
+            "decay_cleanup_enabled": False,
             "message": "Sleep-time compute is not enabled",
         }
 
     return {
         "enabled": True,
+        "decay_cleanup_enabled": getattr(sleep_worker, "decay_cleanup_enabled", False) is True,
         "running": sleep_worker.running,
         "last_run": sleep_worker.last_run.isoformat() if sleep_worker.last_run else None,
     }

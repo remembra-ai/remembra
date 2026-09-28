@@ -11,10 +11,22 @@ structural secrets (PEM private keys, JWTs, credentialed URLs, bearer tokens,
 ``password=…`` assignments) and a conservative high-entropy fallback for
 unlabelled random tokens. The fallback deliberately ignores hex digests, UUIDs
 and plain words so commit SHAs, memory ids and prose survive.
+
+A hex key has the shape of a digest, so hex is redacted only when a
+credential word labels it ("datadog key <hex>", "auth token <hex>") or when it
+decodes to a credential. A base64 or hex token that decodes to text holding a
+credential (a Kubernetes Secret's data field, a hex dump) is redacted with the
+kind of the credential it holds.
+
+``redact_value`` / ``scrub_value`` apply the same detection to every string
+inside a dict or list (memory and status metadata, handoff and inbox fields).
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import math
 import re
 from collections import Counter
@@ -406,6 +418,106 @@ def _is_high_entropy_token(token: str) -> bool:
     return classes == 3 and _entropy(stripped) >= 4.2
 
 
+# Hex after a credential word: "datadog key <hex>", "Twilio auth token <hex>", "the api key is <hex>",
+# "ENCRYPTION_KEY=<hex>", '"key": "<hex>"', "private key 0x<hex>". The word before the label is kept
+# in ``qual`` so a key that names a lookup or a public value keeps its hex (see _NOT_SECRET_KEY).
+_LABELLED_HEX_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:(?P<qual>[A-Za-z0-9]{1,40})[ _\-])?"
+    r"(?P<label>keys?|tokens?|secrets?|credentials?|passwords?|passphrase)"
+    r"[\"']?(?:[ \t]*[:=][ \t]*|[ \t]+(?:(?:is|was)[ \t]+)?)[\"']?"
+    r"(?:0x)?(?P<value>[0-9a-fA-F]{32,})(?![0-9A-Za-z_])"
+)
+# "cache key <sha256>", "public key <hex>", "GPG key <fingerprint>": the hex is an id, a digest or a public value.
+_NOT_SECRET_KEY = frozenset(
+    {
+        "cache",
+        "primary",
+        "foreign",
+        "partition",
+        "sort",
+        "hash",
+        "idempotency",
+        "dedup",
+        "dedupe",
+        "lookup",
+        "index",
+        "row",
+        "object",
+        "routing",
+        "shard",
+        "public",
+        "pub",
+        "verify",
+        "verification",
+        "gpg",
+        "pgp",
+        "ssh",
+        "host",
+    }
+)
+
+
+def _labelled_hex_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for match in _LABELLED_HEX_RE.finditer(text):
+        qual = (match.group("qual") or "").lower()
+        if match.group("label").lower().startswith("key") and qual in _NOT_SECRET_KEY:
+            continue
+        spans.append((*match.span("value"), "secret"))
+    return spans
+
+
+# Encoded credentials: a token of base64 (standard or URL-safe) or hex characters is decoded, and
+# redacted when the text it decodes to holds a credential. Digests, commit ids, nonces and other
+# random bytes never decode to text, so this finds nothing in them. Bounded: a longer token is not
+# decoded (the unlabelled fallback still applies to it).
+_ENCODED_RE = re.compile(r"(?<![A-Za-z0-9_+/=\-])[A-Za-z0-9_+/\-]{24,}={0,2}(?![A-Za-z0-9_+/=\-])")
+_MAX_ENCODED_CHARS = 4096
+
+
+def _decoded_text(token: str) -> str | None:
+    """The text ``token`` encodes (hex, ``0x`` hex, or base64), or None when it is not encoded text."""
+    body = token[2:] if token[:2] in ("0x", "0X") and _HEX_RE.fullmatch(token[2:]) else token
+    if _HEX_RE.fullmatch(body):
+        if len(body) % 2:
+            return None
+        raw = bytes.fromhex(body)
+    else:
+        stripped = body.rstrip("=")
+        if len(stripped) % 4 == 1:
+            return None
+        padded = stripped.replace("-", "+").replace("_", "/") + "=" * (-len(stripped) % 4)
+        try:
+            raw = base64.b64decode(padded, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not decoded.strip() or not all(c.isprintable() or c in "\t\n\r" for c in decoded):
+        return None
+    return decoded
+
+
+def _encoded_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for match in _ENCODED_RE.finditer(text):
+        token = match.group()
+        if len(token) > _MAX_ENCODED_CHARS or _looks_like_path(token):
+            continue
+        decoded = _decoded_text(token)
+        if decoded is None:
+            continue
+        inner = sorted(_spans(decoded, decode=False))
+        if not inner:
+            continue
+        # The first named credential in the decoded text names the span; else the fallback's kind.
+        kind = next((k for _, _, k in inner if k != "high_entropy_token"), inner[0][2])
+        spans.append((match.start(), match.end(), kind))
+    return spans
+
+
 @dataclass
 class RedactionResult:
     text: str
@@ -416,7 +528,9 @@ class RedactionResult:
         return bool(self.counts)
 
 
-def _spans(text: str) -> list[tuple[int, int, str]]:
+def _spans(text: str, decode: bool = True, fallback: bool = True) -> list[tuple[int, int, str]]:
+    """Every credential span in ``text``. ``decode=False`` skips encoded tokens (one level of
+    decoding only); ``fallback=False`` skips the unlabelled high-entropy fallback."""
     spans: list[tuple[int, int, str]] = []
     for rule in _RULES:
         for match in rule.pattern.finditer(text):
@@ -429,17 +543,31 @@ def _spans(text: str) -> list[tuple[int, int, str]]:
             if rule.check is not None and not rule.check(value):
                 continue
             spans.append((start, end, rule.kind))
-    for match in _TOKEN_RE.finditer(text):
-        if _is_high_entropy_token(match.group()):
-            spans.append((match.start(), match.end(), "high_entropy_token"))
+    spans.extend(_labelled_hex_spans(text))
+    # Before the fallback: a decoded span covering the same token keeps the decoded credential's kind.
+    if decode:
+        spans.extend(_encoded_spans(text))
+    if fallback:
+        for match in _TOKEN_RE.finditer(text):
+            if _is_high_entropy_token(match.group()):
+                spans.append((match.start(), match.end(), "high_entropy_token"))
     return spans
 
 
-def redact_secrets(text: str) -> RedactionResult:
-    """Replace every detected credential in ``text`` with ``[REDACTED:<kind>]``."""
-    if not text:
+# No rule matches fewer characters than this ("PASS=abc", "pwd=abcd"): shorter text is returned as is.
+_MIN_SECRET_TEXT = 8
+
+
+def redact_secrets(text: str, *, fallback: bool = True) -> RedactionResult:
+    """Replace every detected credential in ``text`` with ``[REDACTED:<kind>]``.
+
+    ``fallback=False`` applies the named formats (provider keys, JWTs, PEM keys,
+    labelled assignments, encoded credentials) but not the unlabelled
+    high-entropy fallback: for identifiers such as a random session id.
+    """
+    if not text or len(text) < _MIN_SECRET_TEXT:
         return RedactionResult(text=text)
-    spans = _spans(text)
+    spans = _spans(text, fallback=fallback)
     if not spans:
         return RedactionResult(text=text)
 
@@ -481,8 +609,86 @@ def scrub(text: str) -> str:
     return redact_secrets(text).text
 
 
+# Metadata values that identify things (the relay row key, session and agent ids,
+# commit shas, checksums, project fingerprints): a long random session id reads
+# like a token, and rewriting it would break the lookups that use it. Their
+# strings (and the strings in a list under them) are checked against the named
+# credential formats only, never the unlabelled high-entropy fallback: a
+# provider key is never an id. Dict keys are names, checked the same way.
+IDENTIFIER_KEYS = frozenset(
+    {
+        "relay_key",
+        "session_id",
+        "agent_id",
+        "user_id",
+        "project_id",
+        "memory_id",
+        "source_id",
+        "id",
+        "sha",
+        "head_commit",
+        "checksum",
+        "content_checksum",
+        "fingerprints",
+    }
+)
+
+
+def _redact_counted(text: str, counts: dict[str, int], fallback: bool) -> str:
+    result = redact_secrets(text, fallback=fallback)
+    for kind, n in result.counts.items():
+        counts[kind] = counts.get(kind, 0) + n
+    return result.text
+
+
+def redact_value(value: Any, counts: dict[str, int] | None = None, *, identifier: bool = False) -> Any:
+    """``value`` with credentials redacted from every string inside it.
+
+    Walks dicts (keys and values), lists and tuples (returned as lists) at any
+    depth; numbers, booleans and None are kept as they are. The input is not
+    modified. ``counts`` (when given) is incremented per redacted kind. Values
+    under :data:`IDENTIFIER_KEYS` skip the high-entropy fallback.
+    """
+    if counts is None:
+        counts = {}
+    if isinstance(value, str):
+        return _redact_counted(value, counts, fallback=not identifier)
+    if isinstance(value, dict):
+        return {
+            (_redact_counted(k, counts, fallback=False) if isinstance(k, str) else k): redact_value(
+                v, counts, identifier=k in IDENTIFIER_KEYS
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [redact_value(v, counts, identifier=identifier) for v in value]
+    return value
+
+
+def scrub_value(value: Any) -> Any:
+    """:func:`redact_value` if redaction is enabled (default); ``value`` unchanged otherwise."""
+    if not redaction_enabled():
+        return value
+    return redact_value(value)
+
+
+def _scrub_metadata_field(metadata: Any) -> Any:
+    """A metadata dict, or its JSON text as a raw row stores it, with credentials redacted."""
+    if isinstance(metadata, str) and metadata:
+        try:
+            parsed = json.loads(metadata)
+        except (TypeError, ValueError):
+            return scrub(metadata)
+        if not isinstance(parsed, dict | list):
+            return scrub(metadata)
+        cleaned = scrub_value(parsed)
+        return metadata if cleaned == parsed else json.dumps(cleaned)
+    return scrub_value(metadata)
+
+
 def scrub_memory_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a raw memory row/dict with credentials redacted from its text fields."""
+    """Return a copy of a raw memory row/dict with credentials redacted from its content,
+    extracted facts and metadata."""
     if not redaction_enabled():
         return record
     cleaned = dict(record)
@@ -493,4 +699,6 @@ def scrub_memory_record(record: dict[str, Any]) -> dict[str, Any]:
         cleaned["extracted_facts"] = [scrub(f) if isinstance(f, str) else f for f in facts]
     elif isinstance(facts, str):
         cleaned["extracted_facts"] = scrub(facts)
+    if cleaned.get("metadata") is not None:
+        cleaned["metadata"] = _scrub_metadata_field(cleaned["metadata"])
     return cleaned

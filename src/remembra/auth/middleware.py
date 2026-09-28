@@ -3,7 +3,7 @@
 import contextvars
 import hmac
 import ipaddress
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from remembra.auth.keys import APIKeyManager
+from remembra.auth.rbac import PERMISSION_ATTR, Permission, effective_permissions
 from remembra.config import get_settings
 
 log = structlog.get_logger(__name__)
@@ -267,10 +268,14 @@ async def authenticate_jwt(request: Request, token: str) -> AuthenticatedUser | 
     )
 
 
-async def authenticate_api_key(request: Request, api_key: str) -> AuthenticatedUser | None:
-    """Validate an API key and the owning account's active status."""
+async def authenticate_api_key(request: Request, api_key: str, *, record_use: bool = True) -> AuthenticatedUser | None:
+    """Validate an API key and the owning account's active status.
+
+    ``record_use=False`` re-checks a key already in use (an open WebSocket)
+    without moving its last-used time.
+    """
     key_manager = await get_api_key_manager(request)
-    key_info = await key_manager.validate_key(api_key)
+    key_info = await key_manager.validate_key(api_key, record_use=record_use)
     if not key_info:
         return None
     if not await _account_is_active(request, key_info["user_id"]):
@@ -461,6 +466,44 @@ def resolve_project_access(
     )
 
 
+AGENT_HEADER = "X-Remembra-Agent-Id"
+
+
+def _agent_claim_text(value: Any) -> str | None:
+    """An agent id a request names, stripped (None when it names none)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def enforce_agent_scope(user: AuthenticatedUser, claims: Iterable[tuple[Any, str]]) -> str | None:
+    """The agent an agent-scoped key writes as, after refusing any other agent the request names.
+
+    ``claims`` are ``(value, where)`` pairs, such as ``(body.agent_id, "request")`` or
+    ``(header, "X-Remembra-Agent-Id header")``. With an agent-scoped key, a non-empty
+    value that is not the key's agent is a 403, the same answer ``POST /session/close``
+    gives. Returns the key's agent, or None for an unscoped key (nothing is checked:
+    an unscoped key may name any agent).
+    """
+    scoped = getattr(user, "agent_id", None)
+    if not scoped:
+        return None
+    for value, where in claims:
+        other = _agent_claim_text(value)
+        if other and other != scoped:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This API key is scoped to agent '{scoped}'; the {where} claims '{other}'.",
+            )
+    return str(scoped)
+
+
+def enforce_agent_scope_header(request: Request, user: AuthenticatedUser, *claims: tuple[Any, str]) -> str | None:
+    """:func:`enforce_agent_scope` over ``claims`` plus the ``X-Remembra-Agent-Id`` header."""
+    return enforce_agent_scope(user, [*claims, (request.headers.get(AGENT_HEADER), f"{AGENT_HEADER} header")])
+
+
 def resolve_project_or_default(user: AuthenticatedUser, project_id: str | None) -> str:
     """Resolve the project for a write/scoped operation.
 
@@ -530,48 +573,14 @@ RequireMasterKey = Annotated[None, Depends(require_master_key)]
 # RBAC Permission Checking
 # ---------------------------------------------------------------------------
 
-# Role hierarchy: admin > editor > viewer
-# Permission names aligned with remembra.auth.rbac.Permission
-ROLE_PERMISSIONS = {
-    "admin": {
-        "memory:store",
-        "memory:recall",
-        "memory:delete",
-        "entity:read",
-        "entity:merge",
-        "webhook:manage",
-        "admin:audit",
-        "admin:users",
-        "key:create",
-        "key:list",
-        "key:revoke",
-    },
-    "editor": {
-        "memory:store",
-        "memory:recall",
-        "memory:delete",
-        "entity:read",
-        "key:list",
-        "webhook:manage",
-        "conflict:manage",
-    },
-    "viewer": {
-        "memory:recall",
-        "entity:read",
-        "key:list",
-    },
-}
-
 
 def has_permission(user: AuthenticatedUser, permission: str) -> bool:
-    """Check if user has a specific permission based on their role."""
-    role_perms = ROLE_PERMISSIONS.get(user.role, set())
+    """True when the user's role holds ``permission`` and its scopes, if any, keep it.
 
-    # If user has explicit scopes, use those instead of role defaults
-    if user.scopes:
-        return permission in user.scopes
-
-    return permission in role_perms
+    The role table is ``remembra.auth.rbac.ROLE_PERMISSIONS`` (the only one).
+    Scopes narrow a role and never widen it.
+    """
+    return permission in {p.value for p in effective_permissions(user.role, user.scopes)}
 
 
 def require_permission(permission: str) -> Any:
@@ -579,32 +588,33 @@ def require_permission(permission: str) -> Any:
     Dependency factory that requires a specific permission.
 
     Usage:
-        @router.post("/memories")
-        async def store_memory(
-            _perm: RequirePermission("memory:create"),
-            current_user: CurrentUser,
-        ):
-            ...
+        @router.post("/memories", dependencies=[require_permission("memory:store")])
+        async def store_memory(current_user: CurrentUser): ...
+
+    Declared in the route decorator, the check runs before the request body is
+    validated. An unknown permission name fails at import time, not at request time.
     """
+    required = Permission(permission)
 
     async def check_permission(current_user: CurrentUser) -> None:
-        if not has_permission(current_user, permission):
+        if not has_permission(current_user, required.value):
             log.warning(
                 "permission_denied",
                 user_id=current_user.user_id,
                 role=current_user.role,
-                required_permission=permission,
+                required_permission=required.value,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {permission} required",
+                detail=f"Permission denied: {required.value} required",
             )
         return None
 
+    setattr(check_permission, PERMISSION_ATTR, required)
     return Depends(check_permission)
 
 
-# Permission dependency factories (aligned with remembra.auth.rbac.Permission)
+# Permission dependency factories (one per remembra.auth.rbac.Permission a route checks this way)
 def require_memory_store() -> Any:
     return require_permission("memory:store")
 
@@ -621,17 +631,13 @@ def require_entity_read() -> Any:
     return require_permission("entity:read")
 
 
-def require_entity_merge() -> Any:
-    return require_permission("entity:merge")
-
-
 def require_webhook_manage() -> Any:
     return require_permission("webhook:manage")
 
 
-def require_audit_read() -> Any:
-    return require_permission("admin:audit")
+def require_conflict_manage() -> Any:
+    return require_permission("conflict:manage")
 
 
-def require_user_manage() -> Any:
-    return require_permission("admin:users")
+def require_account_manage() -> Any:
+    return require_permission("account:manage")

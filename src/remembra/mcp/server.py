@@ -889,8 +889,8 @@ def close_session(
     """Call this LAST, before you finish: leave a handoff for the next agent.
 
     The server builds ONE structured handoff (Done / Not done / Failing / Next
-    step) from the facts you give. Calling it again in the same session
-    updates that handoff instead of adding another.
+    step) from the facts you give. Calling it again in the same session and
+    project updates that handoff instead of adding another.
 
     Args:
         summary: Optional short narrative. It is checked against the facts
@@ -1648,7 +1648,7 @@ def send_to_inbox(
         subject: One-line subject.
         body: Message body with full context.
         metadata: Optional key/value metadata. project_id defaults to this client's project.
-        from_agent: Sender id; defaults to REMEMBRA_AGENT_ID.
+        from_agent: Sender id; defaults to REMEMBRA_AGENT_ID. A key scoped to one agent may only send as that agent.
         expires_in: Optional expiry ("12h", "7d", "2w"); expired rows are hidden.
 
     Returns:

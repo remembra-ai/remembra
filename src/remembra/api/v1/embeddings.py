@@ -209,11 +209,11 @@ async def list_providers(
 @limiter.limit("3/minute")
 async def switch_provider(
     request: Request,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
     body: SwitchProviderRequest,
     embedding_service: EmbeddingServiceDep,
     reindex_manager: ReindexManagerDep,
-    current_user: CurrentUser,
-    _superadmin: RequireSuperadmin,
 ) -> SwitchProviderResponse:
     """Hot-swap the embedding provider/model. **Platform superadmin only.**
 
@@ -356,9 +356,9 @@ async def reindex_status(
 @limiter.limit("5/minute")
 async def cancel_reindex(
     request: Request,
-    reindex_manager: ReindexManagerDep,
     current_user: CurrentUser,
     _superadmin: RequireSuperadmin,
+    reindex_manager: ReindexManagerDep,
 ) -> dict[str, Any]:
     """Cancel the currently running re-indexing job."""
     cancelled = await reindex_manager.cancel()

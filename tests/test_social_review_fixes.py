@@ -246,13 +246,14 @@ async def test_preregistered_account_reset_revokes_nothing_and_opens_a_review(tm
         assert ok, err
 
         user = await h.db.get_user_by_id(uid)
-        assert user["email_verified"] and user["totp_enabled"]
+        # Verified; the squatter's 2FA (set up before anyone proved the mailbox) is off.
+        assert user["email_verified"] and not user["totp_enabled"]
         assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": squat["key"]})).status_code == 200
         assert await count(h, "SELECT COUNT(*) FROM webhooks WHERE user_id = ? AND active = 1", uid) == 1
         assert await count(h, "SELECT COUNT(*) FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL", uid) == 1
         assert await count(h, "SELECT COUNT(*) FROM account_reviews WHERE user_id = ? AND completed_at IS NULL", uid) == 1
 
-        # The victim signs in with the new password without the squatter's 2FA, and
+        # The victim signs in with the new password (no 2FA is on any more), and
         # that session may act on the review (tests/test_account_review.py).
         r = await h.client.post("/api/v1/auth/login", json={"email": "victim@gmail.com", "password": "N3w!Passw0rdX"})
         assert r.status_code == 200 and r.json().get("access_token")
@@ -260,7 +261,7 @@ async def test_preregistered_account_reset_revokes_nothing_and_opens_a_review(tm
         assert claims.get("rvw")
 
         # Google now links into the (verified) account. It proves the address again,
-        # so that Google account may act on the review too (the squatter's 2FA does not apply).
+        # so that Google account may act on the review too.
         body = (await exchange(h, (await sign_in(h, providers, "google"))["code"])).json()
         assert body["user"]["id"] == uid and body["requires_2fa"] is False
         assert jwt.decode(body["access_token"], JWT_SECRET, algorithms=["HS256"]).get("rvw") == claims["rvw"]

@@ -59,15 +59,21 @@ export interface DegradedCopy {
   body: string;
 }
 
+/** Stores without enrichment the Free plan allows per day (cloud/plans.py max_unenriched_writes_per_day). */
+export const FREE_UNENRICHED_PER_DAY = 300;
+
 /** What degraded means, in words; null when enrichment is running normally. */
 export function degradedCopy(summary: UsageSummaryResponse): DegradedCopy | null {
   if (summary.enrichment.status !== 'degraded') return null;
   const reset = resetLabel(summary).replace(/^Resets /, 'on ').replace(/^Yearly bank, renews /, 'on ');
+  // The server refuses (429) stores without enrichment past the Free plan's daily cap (cloud/plans.py).
+  const freeCap = summary.plan === 'free' ? `On Free, at most ${FREE_UNENRICHED_PER_DAY} a day are saved this way. ` : '';
   if (summary.enrichment.reason === 'free_breaker_open') {
     return {
       title: 'Free-tier enrichment is paused for now',
       body:
         "The free tier's shared AI budget for this month is spent, so new memories are saved without enrichment until it refills. " +
+        freeCap +
         'Relay, pickups, inbox, trail and recall keep working. Paid plans are never paused.',
     };
   }
@@ -75,6 +81,7 @@ export function degradedCopy(summary: UsageSummaryResponse): DegradedCopy | null
     title: 'Out of smart credits: stores are degraded',
     body:
       `New memories still save and stay searchable, but skip AI enrichment (fact extraction and entity linking) until credits come back ${reset}. ` +
+      freeCap +
       'Relay, pickups, inbox, trail and recall never use credits and keep working.',
   };
 }

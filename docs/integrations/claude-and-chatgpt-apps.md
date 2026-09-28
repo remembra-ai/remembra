@@ -115,8 +115,9 @@ Following [OpenAI's developer-mode guide](https://developers.openai.com/api/docs
       ChatGPT uses those static values and the sign-in fails with "Unknown client".
 3. ChatGPT opens the Remembra sign-in page. Sign in, choose projects and an agent name
    (defaults to `chatgpt`), and click **Allow**.
-4. In a chat, enable the Remembra app. ChatGPT asks you to confirm each write
-   (`send_to_inbox`, `store_memory`) before it runs.
+4. In a chat, enable the Remembra app. `send_to_inbox` and `store_memory` are marked as write
+   tools (`readOnlyHint: false`), so ChatGPT is expected to ask you before running them. This
+   has not been checked in the live ChatGPT app yet.
 
 ## Connect Claude Code (optional)
 
@@ -142,9 +143,15 @@ Code" above.
 - **From Remembra**: `GET /api/v1/connector/connections` lists every connected app (with the
   dashboard login token as `Authorization: Bearer <jwt>`), and
   `DELETE /api/v1/connector/connections/<connection_id>` disconnects one immediately.
-- Changing or resetting your password, or deactivating the account, disconnects all apps,
-  including a sign-in that was still on the consent page: approving it after the password
-  change is refused.
+- Changing your password, deactivating the account, or a password reset on an account with a
+  verified email and no open account check disconnects all apps.
+- A password reset on an account whose email was never verified keeps its app connections and
+  lists them in the new account check, where you keep or revoke each one. A reset while an
+  account check is open disconnects the apps connected since the check opened; apps connected
+  before the email was verified stay listed in the check. See
+  [Accounts made before email verification](../guides/sign-in-providers.md#accounts-made-before-email-verification).
+- In every case, a sign-in still on the consent page is refused after a password change or
+  reset.
 
 ## Security model
 
@@ -175,7 +182,8 @@ Code" above.
   other clients stay out of the connector's view.
 - **The connector token only works at `/mcp`.** Tools reach your memory through the same
   REST routes and checks every other client goes through (project restriction, PII policy,
-  content sanitizer, usage limits, audit log). Audit entries carry `oauth:<connection_id>`.
+  content sanitizer, usage limits). Memory stores and recalls are written to the audit log,
+  with `oauth:<connection_id>`; inbox messages are not audited.
 - Sign-in shares the dashboard's per-account lockout (5 failed attempts locks the account for
   15 minutes) and is rate limited per IP.
 

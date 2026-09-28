@@ -19,6 +19,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { api, type ApiKeyInfo, type CreateApiKeyResponse, type ProjectScopeOption } from '../lib/api';
+import { ADMIN_KEY_NOTE, CREATABLE_KEY_ROLES, KEY_ROLE_SUMMARIES, type CreatableKeyRole } from '../lib/keyRoles';
 
 type ApiKey = ApiKeyInfo;
 type CreateKeyResponse = CreateApiKeyResponse;
@@ -285,9 +286,50 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode, onClos
   );
 }
 
+/** The role choice in "Generate Access Token": only the roles the server lets a dashboard session create. */
+export function KeyRolePicker({ value, onChange }: { value: CreatableKeyRole; onChange: (role: CreatableKeyRole) => void }) {
+  return (
+    <div className="space-y-2">
+      {CREATABLE_KEY_ROLES.map((perm) => (
+        <label
+          key={perm}
+          className={clsx(
+            'flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200',
+            value === perm
+              ? 'border-purple-500/50 bg-purple-500/10 shadow-[inner_0_0_0_1px_rgba(168,85,247,0.2)]'
+              : 'border-[hsl(var(--border))/0.8] bg-[hsl(var(--card))/0.4] hover:bg-[hsl(var(--muted))/0.55]'
+          )}
+        >
+          <input
+            type="radio"
+            name="permission"
+            value={perm}
+            checked={value === perm}
+            onChange={() => onChange(perm)}
+            className="hidden"
+          />
+          <div className={clsx(
+            "w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors",
+            value === perm ? "border-purple-500 bg-purple-500" : "border-gray-600"
+          )}>
+            {value === perm && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-[hsl(var(--foreground))] text-sm">{PERMISSION_LABELS[perm]}</span>
+            </div>
+            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">{KEY_ROLE_SUMMARIES[perm]}</p>
+          </div>
+        </label>
+      ))}
+      <p className="text-xs text-[hsl(var(--muted-foreground))] px-1">{ADMIN_KEY_NOTE}</p>
+    </div>
+  );
+}
+
 function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated: (result: CreateKeyResponse) => void }) {
   const [name, setName] = useState('');
-  const [permission, setPermission] = useState<'admin' | 'editor' | 'viewer'>('editor');
+  const [permission, setPermission] = useState<CreatableKeyRole>('editor');
   const [scopeMode, setScopeMode] = useState<'all' | 'selected'>('all');
   const [projects, setProjects] = useState<ProjectScopeOption[]>([]);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -381,44 +423,7 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
             <Shield className="w-4 h-4 inline mr-1.5 opacity-70" />
             Authorization Scope
           </label>
-          <div className="space-y-2">
-            {(['admin', 'editor', 'viewer'] as const).map((perm) => (
-              <label
-                key={perm}
-                className={clsx(
-                  'flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200',
-                  permission === perm
-                    ? 'border-purple-500/50 bg-purple-500/10 shadow-[inner_0_0_0_1px_rgba(168,85,247,0.2)]'
-                    : 'border-[hsl(var(--border))/0.8] bg-[hsl(var(--card))/0.4] hover:bg-[hsl(var(--muted))/0.55]'
-                )}
-              >
-                <input
-                  type="radio"
-                  name="permission"
-                  value={perm}
-                  checked={permission === perm}
-                  onChange={() => setPermission(perm)}
-                  className="hidden"
-                />
-                <div className={clsx(
-                  "w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors",
-                  permission === perm ? "border-purple-500 bg-purple-500" : "border-gray-600"
-                )}>
-                  {permission === perm && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[hsl(var(--foreground))] text-sm">{PERMISSION_LABELS[perm]}</span>
-                  </div>
-                  <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
-                    {perm === 'admin' && 'Full root access. Can delete workspaces and manage billing.'}
-                    {perm === 'editor' && 'Standard access. Can read, write, and modify memory blocks.'}
-                    {perm === 'viewer' && 'Strict read-only access. Cannot create or alter data.'}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </div>
+          <KeyRolePicker value={permission} onChange={setPermission} />
         </div>
 
         <div>

@@ -59,7 +59,7 @@ export const CODEX_TRUST_LINE = say(SHARED_RULES.CODEX_TRUST_MISSING.what, {
  * The Codex row's reminder while nothing from Codex is on the trail. A reminder, not a call: the account
  * may not use Codex, and only doctor on the machine can see its trust records.
  */
-export const CODEX_TRUST_HINT = `using Codex? trust its ${plural(CODEX_TRUST_EVENTS.length, 'hook')} once: Codex Settings > Hooks > Trust`;
+export const CODEX_TRUST_HINT = `using Codex? trust its ${plural(CODEX_TRUST_EVENTS.length, 'hook')}, and again when one changes: Codex Settings > Hooks > Trust`;
 /** The one Codex trust step (the app or the CLI), as the doctor and remembra_setup give it. */
 export const CODEX_TRUST_FIX = say(SHARED_RULES.CODEX_TRUST_MISSING.fix, { events: joinNames(CODEX_TRUST_EVENTS) });
 export const KEY_CAVEAT =
@@ -235,7 +235,7 @@ function endOneSession(name: string): string {
 export type RowState = 'connected' | 'codex-waiting' | 'briefed' | 'waiting' | 'unverified';
 
 /**
- * Codex skips hooks the user has not trusted, without a message. Until a Codex
+ * Codex skips hooks the user has not trusted. Until a Codex
  * brief (a pickup) or close (an entry) reaches the trail, the Codex row waits
  * like any other and carries a dim reminder of the trust step. Only a
  * reminder: an account with no Codex entry may not use Codex at all, and the
@@ -306,7 +306,8 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     return build({
       code: 'KEY_NEVER_USED',
       proven: true,
-      verdict: 'Your keys have never been used: the install never saved one, or no hook ran.',
+      verdict:
+        'Your keys have never been used: nothing sent with them has reached Remembra. The install never saved one, no hook ran, or its request was blocked or went to another server.',
       detail: null,
       causes: [],
       unverified: null,

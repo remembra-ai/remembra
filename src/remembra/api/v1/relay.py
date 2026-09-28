@@ -13,12 +13,14 @@
 
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
-rejected. Unscoped keys may name the agent in the body or the header (they
-must agree). Writes (close, links) require a well-formed agent id; the brief
-is lenient (a malformed id is ignored for attribution and only used, as
-before, to look up the inbox). Every stored string passes ``redact_secrets``;
-access to each project is checked with the key's project restrictions, and
-project-restricted keys never create or move location bindings.
+rejected (403), on close, links and the brief alike. Unscoped keys may name the
+agent in the body or the header (they must agree). Close requires an agent id;
+link calls take one optionally, in the header. An agent id that is sent must be
+well-formed on writes; the brief is lenient (a malformed id is ignored for
+attribution and only used, as before, to look up the inbox). Every stored
+string passes ``redact_secrets``; access to each project is checked with the
+key's project restrictions, and project-restricted keys never create or move
+location bindings.
 
 Reads never bind: GET brief and trail compute the project for an unseen
 location without recording it; only close and ``POST /projects/resolve``
@@ -41,10 +43,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from remembra.api.v1.agent_session import screen_text
 from remembra.auth.middleware import (
+    AGENT_HEADER,
     AuthenticatedUser,
     CurrentUser,
+    enforce_agent_scope,
     get_client_ip,
     has_permission,
+    require_memory_store,
     resolve_project_access,
 )
 from remembra.client.project import normalize_project_id
@@ -58,7 +63,6 @@ from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, Rela
 router = APIRouter(tags=["relay"])
 log = structlog.get_logger(__name__)
 
-AGENT_HEADER = "X-Remembra-Agent-Id"
 _AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
 _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
@@ -170,14 +174,8 @@ def effective_agent(
     else:
         header_agent = _lenient_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header", warnings, keep=False)
         claimed = _lenient_agent(body_agent, "agent_id", warnings, keep=True)
-    scoped = getattr(user, "agent_id", None)
+    scoped = enforce_agent_scope(user, ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")))
     if scoped:
-        for other, where in ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")):
-            if other and other != scoped:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"This API key is scoped to agent '{scoped}'; the {where} claims '{other}'.",
-                )
         return scoped, True
     if claimed and header_agent and claimed != header_agent:
         if not strict:
@@ -612,10 +610,9 @@ def _relation(value: str) -> str:
     return relation
 
 
-@router.post("/projects/links", summary="Link two projects")
+@router.post("/projects/links", summary="Link two projects", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def add_link(request: Request, body: LinkRequest, current_user: CurrentUser) -> dict[str, Any]:
-    _require(current_user, "memory:store")
     source = _check_project(current_user, normalize_project_id(body.from_project))
     target = _check_project(current_user, normalize_project_id(body.to_project))
     agent, _ = effective_agent(request, current_user, None)
@@ -640,7 +637,7 @@ async def list_links(
     return {"project_id": project, "count": len(items), "items": items}
 
 
-@router.delete("/projects/links", summary="Remove a project link")
+@router.delete("/projects/links", summary="Remove a project link", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def remove_link(
     request: Request,
@@ -649,9 +646,9 @@ async def remove_link(
     to_project: Annotated[str, Query(min_length=1, max_length=128)],
     relation: Annotated[str, Query(max_length=40)] = "related",
 ) -> dict[str, Any]:
-    _require(current_user, "memory:store")
     source = _check_project(current_user, normalize_project_id(from_project))
     target = _check_project(current_user, normalize_project_id(to_project))
+    effective_agent(request, current_user, None)  # an agent-scoped key refuses another agent in the header
     removed = await _service(request).registry.remove_link(current_user.user_id, source, target, _relation(relation))
     return {"removed": removed}
 
@@ -661,7 +658,7 @@ async def remove_link(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/session/close", summary="Close a session: store ONE structured handoff")
+@router.post("/session/close", summary="Close a session: store ONE structured handoff", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def close_session(
     request: Request,
@@ -670,8 +667,10 @@ async def close_session(
     response: Response,
 ) -> dict[str, Any]:
     """Build the handoff (Done / Not done / Failing / Next) from the session's
-    facts. Idempotent per (agent_id, session_id): closing again updates the same
-    handoff (the previous version is superseded, never duplicated).
+    facts. Closing again with the same (agent_id, session_id) in the same
+    project updates that session's handoff, and the previous version is
+    superseded. A close in a different project stores a separate handoff there.
+    A close older than the stored one changes nothing.
 
     ``health`` in the response is the server's grade of the handoff (Ready,
     Ready with warnings, Incomplete, Conflicted, Blocked) with the ``missing``
@@ -680,7 +679,6 @@ async def close_session(
     A close is a relay event: it never uses smart credits (the handoff is stored
     without LLM enrichment); it counts toward the plan's relay burst limit and
     soft monthly cap."""
-    _require(current_user, "memory:store")
     await relay_guard(request, response, current_user.user_id)
     agent, verified = effective_agent(request, current_user, body.agent_id)
     if not agent:

@@ -32,7 +32,7 @@ Usage:
     memory = Memory(
         base_url="http://localhost:8787",
         user_id="user_123",
-        enable_shadow_ttl=True,  # Cache TTLs client-side for lower latency
+        enable_shadow_ttl=True,  # Record expiry locally; check it with is_memory_valid()
     )
 """
 
@@ -78,15 +78,22 @@ _warned_agent_ids: set[str] = set()
 
 # Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
 ENTITY_DELETE_MIN_SERVER = (0, 16, 1)
-_SERVER_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)(?:\.(\d+))?")
+_SERVER_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)(?:\.(\d+))?(\S*)")
+# What follows the number in a pre-release or dev build: 0.16.1rc1, 0.16.1.dev3, 0.16.1-beta.2.
+_PRE_RELEASE_RE = re.compile(r"[-.]?(?:a|alpha|b|beta|c|rc|pre|preview|dev)", re.IGNORECASE)
 
 
-def _server_version(version: Any) -> tuple[int, int, int] | None:
-    """``(major, minor, patch)`` from a server version string, or None."""
+def _server_version(version: Any) -> tuple[int, int, int, bool] | None:
+    """``(major, minor, patch, released)`` from a server version string, or None.
+
+    ``released`` is False for a pre-release or dev build, which comes before
+    the release with the same number (``0.16.1rc1`` is older than ``0.16.1``).
+    """
     match = _SERVER_VERSION_RE.match(str(version or ""))
     if not match:
         return None
-    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+    released = not _PRE_RELEASE_RE.match(match.group(4))
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0), released
 
 
 def _header_agent_id(agent: str | None) -> str | None:
@@ -136,7 +143,8 @@ class Memory:
         timeout: Request timeout in seconds (default: 30)
         auto_expire_temporal: Auto-detect temporal phrases and set TTL (v0.12+)
         temporal_min_confidence: Minimum confidence for temporal detection (0.0-1.0)
-        enable_shadow_ttl: Enable client-side TTL caching for lower latency (v0.12+)
+        enable_shadow_ttl: Record each stored memory's expiry locally, for is_memory_valid() (v0.12+).
+            The client does not skip any server call because of it.
         shadow_ttl_max_entries: Maximum entries in shadow TTL cache
         agent_id: Logical id of the agent using this client (e.g. "claude-code").
             Stamped on every store and used as the default inbox/brief agent.
@@ -292,7 +300,8 @@ class Memory:
         Args:
             content: The text content to memorize
             metadata: Optional key-value metadata to attach
-            ttl: Optional time-to-live (e.g., "30d", "1y")
+            ttl: Optional time-to-live: a number and a unit, e.g. "30d", "36h", "90min"
+                (units in :mod:`remembra.client.ttl`; ``min`` is minutes, ``mo`` months, a bare ``m`` is refused)
             auto_expire: Override auto_expire_temporal for this call (v0.12+)
             skip_extraction: Store as one atomic memory (no fact split/merge)
             memory_type: Optional type. Agent hygiene types: "checkpoint"
@@ -558,9 +567,10 @@ class Memory:
         """
         Forget (delete) memories.
 
-        GDPR-compliant deletion. Give exactly one of ``memory_id``,
-        ``entity`` or ``all_memories=True``; nothing is sent otherwise. The
-        server deletes only the authenticated account's memories. To delete
+        Give exactly one of ``memory_id``, ``entity`` or ``all_memories=True``;
+        nothing is sent otherwise. The server deletes only the authenticated
+        account's memories, with their vectors, at once; conflict records that
+        quote the text stay until the account is erased. To delete
         every memory in one project use ``forget_project(project_id)``.
 
         Args:
@@ -639,7 +649,7 @@ class Memory:
         except MemoryError as exc:
             raise MemoryError(f"Not sent: could not read the server version before a delete by entity ({exc})") from exc
         parsed = _server_version(version)
-        if parsed is None or parsed < ENTITY_DELETE_MIN_SERVER:
+        if parsed is None or parsed < (*ENTITY_DELETE_MIN_SERVER, True):
             raise MemoryError(
                 f"Not sent: the server reports {version or 'no version'}, and a server before 0.16.1 deletes every "
                 "memory in the account for a delete by entity. Upgrade the server, or delete by memory_id."

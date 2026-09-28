@@ -33,7 +33,7 @@ curl -s "${API%/v1}/health" | jq '.'
 ```json
 {
   "status": "ok",
-  "version": "0.7.x",
+  "version": "0.16.1",
   "dependencies": {
     "qdrant": { "status": "ok" }
   }
@@ -246,7 +246,7 @@ curl -s "$API/keys" \
 
 ```bash
 # Delete the test memory
-curl -s -X DELETE "$API/memories/$MEMORY_ID" \
+curl -s -X DELETE "$API/memories?memory_id=$MEMORY_ID" \
   -H "Authorization: Bearer $TOKEN"
 
 echo "Test memory deleted"

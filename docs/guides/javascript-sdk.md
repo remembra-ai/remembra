@@ -1,8 +1,15 @@
 # JavaScript / TypeScript SDK
 
-Complete reference for the `remembra` package.
+Reference for the `remembra` package.
 
-Works in Node.js 18+, Deno, Bun, and modern browsers.
+!!! note "npm and this page"
+    This page describes the SDK in the repository (`sdk/typescript`, version 0.13.2). The package on npm is still
+    0.12.1: it does not check the server version before a delete by entity (see [forget()](#forget)). Until a
+    newer npm release, update your server to 0.16.1 before deleting by entity from TypeScript.
+
+Works in Node.js 18+. The SDK uses only `fetch`, so Deno and Bun should work, but they are untested. In a
+browser, the hosted API accepts only Remembra's own origins (`https://app.remembra.dev`, `https://remembra.dev`),
+so a browser app needs a self-hosted server with `REMEMBRA_CORS_ORIGINS` set to its origin.
 
 ## Installation
 
@@ -24,12 +31,6 @@ Works in Node.js 18+, Deno, Bun, and modern browsers.
     pnpm add remembra
     ```
 
-=== "Deno"
-
-    ```typescript
-    import { Remembra } from "npm:remembra";
-    ```
-
 ## Quick Start
 
 ```typescript
@@ -37,8 +38,8 @@ import { Remembra } from 'remembra';
 
 const memory = new Remembra({
   url: 'http://localhost:8787',
-  apiKey: 'rem_xxx',     // optional for self-hosted
-  userId: 'user_123',    // optional
+  apiKey: 'rem_xxx',     // when the server has auth on
+  userId: 'user_123',    // required
   project: 'my_app',     // optional
 });
 
@@ -64,13 +65,14 @@ new Remembra(config: RemembraConfig)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | `string` | — | **Required.** Server URL |
+| `url` | `string` | `http://localhost:8787` | Server URL |
 | `apiKey` | `string` | — | API key for authentication |
-| `userId` | `string` | `"default"` | User ID for memory isolation |
+| `userId` | `string` | — | **Required** (the constructor throws without it). With auth on, the server takes the user from the API key |
 | `project` | `string` | `"default"` | Project namespace |
 | `timeout` | `number` | `30000` | Request timeout (ms) |
+| `debug` | `boolean` | `false` | Log requests to the console |
 
-## Core Methods
+## Methods
 
 ### store()
 
@@ -81,11 +83,9 @@ Store a memory with automatic fact and entity extraction.
 await memory.store('User prefers dark mode');
 
 // With options
-await memory.store({
-  content: 'Meeting notes: decided to use PostgreSQL',
+await memory.store('Meeting notes: decided to use PostgreSQL', {
   metadata: { source: 'meeting', date: '2024-03-01' },
   ttl: '30d',
-  project: 'backend',  // override default project
 });
 ```
 
@@ -95,7 +95,7 @@ await memory.store({
 {
   id: string;
   extracted_facts: string[];
-  entities: EntityItem[];
+  entities: EntityRef[];
 }
 ```
 
@@ -106,12 +106,11 @@ Search memories using hybrid search (semantic + keyword).
 ```typescript
 // Simple query
 const result = await memory.recall('What are user preferences?');
-console.log(result.context);    // synthesized context string
+console.log(result.context);    // context string for an LLM prompt
 console.log(result.memories);   // array of matching memories
 
 // With options
-const result = await memory.recall({
-  query: 'project decisions',
+const decisions = await memory.recall('project decisions', {
   limit: 10,
   threshold: 0.6,
   maxTokens: 4000,
@@ -124,11 +123,14 @@ const result = await memory.recall({
 
 ```typescript
 {
-  context: string;        // synthesized context for LLM injection
-  memories: MemoryItem[]; // individual matching memories
-  entities: EntityItem[]; // related entities
+  context: string;        // context string for an LLM prompt
+  memories: Memory[];     // individual matching memories
+  entities: EntityRef[];  // related entities
 }
 ```
+
+The TypeScript SDK has no `slim` option. The REST API and the Python SDK take `slim=true`, which caps the context
+at 800 tokens.
 
 ### get()
 
@@ -137,15 +139,13 @@ Get a specific memory by ID.
 ```typescript
 const detail = await memory.get('01HQ...');
 console.log(detail.content);
-console.log(detail.entities);
-console.log(detail.access_count);
 ```
-
-**Returns:** `MemoryDetail` with full metadata.
 
 ### forget()
 
-Delete memories. They leave the database and the vector store at once; copies in backups age out (see Retention on [remembra.dev/security](https://remembra.dev/security#retention)).
+Delete memories. They leave the database and the vector store at once. Conflict records that quoted the text
+are removed only when the account is deleted, and copies in backups age out (see Retention on
+[remembra.dev/security](https://remembra.dev/security#retention)).
 
 ```typescript
 // By ID
@@ -170,9 +170,10 @@ memories of the account your API key belongs to.
   cannot use it.
 
 !!! warning "Servers before 0.16.1"
-    A server before 0.16.1 deleted every memory in the account for a delete by `entity`. `forget({ entity })`
-    reads the server version from `/health` first and throws a `RemembraError` with code `SERVER_TOO_OLD`,
-    deleting nothing, when the server is older than 0.16.1 or does not report a version.
+    A server before 0.16.1 deleted every memory in the account for a delete by `entity`. In the repository's
+    SDK, `forget({ entity })` reads the server version from `/health` first and throws a `RemembraError` with code
+    `SERVER_TOO_OLD`, deleting nothing, when the server is older than 0.16.1, reports a pre-release or dev build
+    of 0.16.1, or reports no version. The npm package (0.12.1) does not have this check.
 
 **Returns:** `ForgetResult`
 
@@ -184,226 +185,98 @@ memories of the account your API key belongs to.
 }
 ```
 
+### ingestConversation()
+
+Extract memories from a chat conversation. See [Conversation Ingestion](conversation-ingestion.md).
+
+```typescript
+const result = await memory.ingestConversation(
+  [
+    { role: 'user', content: 'My name is Sarah and I lead the design team' },
+    { role: 'assistant', content: 'Nice to meet you, Sarah!' },
+  ],
+  { minImportance: 0.5 },
+);
+console.log(result.stats.facts_stored);
+```
+
+### listEntities()
+
+```typescript
+const entities = await memory.listEntities();
+for (const e of entities) {
+  console.log(`${e.canonical_name} (${e.type})`);
+}
+```
+
 ### health()
 
 Check server health.
 
 ```typescript
 const health = await memory.health();
-console.log(health.status);  // "ok" | "degraded" | "down"
+console.log(health.status);   // "ok" or "degraded"
 console.log(health.version);
 ```
 
-## Entity Methods
-
-### listEntities()
-
-```typescript
-const result = await memory.listEntities({
-  type: 'person',  // "person" | "company" | "location" | "concept"
-  limit: 50,
-});
-
-for (const entity of result.entities) {
-  console.log(`${entity.canonical_name} (${entity.type})`);
-}
-```
-
-### getEntityRelationships()
-
-```typescript
-const rels = await memory.getEntityRelationships('entity_123');
-for (const r of rels.relationships) {
-  console.log(`${r.from_entity_name} → ${r.type} → ${r.to_entity_name}`);
-}
-```
-
-### getEntityMemories()
-
-```typescript
-const result = await memory.getEntityMemories('entity_123', { limit: 20 });
-console.log(`${result.entity_name}: ${result.total} memories`);
-```
-
-## Temporal Methods
-
-### decayReport()
-
-See memory relevance scores and prune candidates.
-
-```typescript
-const report = await memory.decayReport({ limit: 100 });
-console.log(`Total: ${report.total_memories}`);
-console.log(`Prune candidates: ${report.prune_candidates}`);
-
-for (const m of report.memories) {
-  if (m.should_prune) {
-    console.log(`${m.content_preview} — relevance: ${m.relevance_score}`);
-  }
-}
-```
-
-### cleanup()
-
-Clean up expired and decayed memories.
-
-```typescript
-// Preview (dry run)
-const preview = await memory.cleanup({ dryRun: true });
-console.log(`Would delete ${preview.expired_found} expired memories`);
-
-// Actually clean up
-const result = await memory.cleanup({
-  dryRun: false,
-  includeDecayed: true,
-});
-```
-
-## Ingest
-
-### ingestChangelog()
-
-Import a CHANGELOG.md as searchable memories.
-
-```typescript
-import { readFileSync } from 'fs';
-
-const changelog = readFileSync('CHANGELOG.md', 'utf-8');
-const result = await memory.ingestChangelog({
-  content: changelog,
-  projectName: 'MyProject',
-  maxReleases: 20,
-});
-
-console.log(`Stored ${result.memories_stored} releases`);
-```
+Entity relationships, decay reports, cleanup, changelog ingest and user profiles have no TypeScript methods. Use
+the REST API for them (see the [REST API guide](rest-api.md)).
 
 ## Error Handling
 
-All errors are thrown as `RemembraError`:
+Errors are thrown as `RemembraError` or one of its subclasses: `AuthenticationError` (401), `NotFoundError` (404),
+`ValidationError` (422, or a bad call caught before sending), `RateLimitError` (429, with `retryAfter`),
+`ServerError` (500), `NetworkError` and `TimeoutError`.
 
 ```typescript
-import { Remembra, RemembraError } from 'remembra';
+import { Remembra, RemembraError, RateLimitError } from 'remembra';
 
 try {
   await memory.store('some content');
 } catch (error) {
-  if (error instanceof RemembraError) {
-    console.log(error.message);     // Human-readable message
-    console.log(error.statusCode);  // HTTP status (e.g., 401, 429)
-    console.log(error.detail);      // Server error detail
+  if (error instanceof RateLimitError) {
+    console.log(`Retry after ${error.retryAfter}s`);
+  } else if (error instanceof RemembraError) {
+    console.log(error.message); // Human-readable message
+    console.log(error.status);  // HTTP status (e.g., 401, 429)
+    console.log(error.code);    // e.g. "AUTH_ERROR", "SERVER_TOO_OLD"
   }
 }
 ```
 
-Common status codes:
-
-| Code | Meaning |
-|------|---------|
-| 401 | Invalid API key |
-| 404 | Memory not found |
-| 422 | Invalid request parameters |
-| 429 | Rate limited |
-| 500 | Server error |
-| 503 | Server degraded (Qdrant down) |
-
-## Zero Dependencies
-
-`remembra` has zero runtime dependencies. It uses the native `fetch()` API available in:
-
-- Node.js 18+
-- Deno
-- Bun
-- All modern browsers
-
 ## TypeScript Types
 
-All types are exported for full IntelliSense:
+These types are exported:
 
 ```typescript
 import type {
   RemembraConfig,
+  StoreOptions,
   StoreResult,
-  RecallResult,
   RecallOptions,
+  RecallResult,
+  ForgetOptions,
   ForgetResult,
-  HealthResult,
-  MemoryItem,
-  MemoryDetail,
-  EntityItem,
-  EntityDetail,
-  DecayInfo,
-  DecayReportResult,
+  Message,
+  IngestOptions,
+  IngestResult,
+  Memory,
+  EntityRef,
 } from 'remembra';
 ```
-_ߍ{i]<\Vmusx5
----
 
-## User Profiles API (v0.12.0)
+## Expiry (TTL)
 
-Get aggregated user intelligence.
-
-```typescript
-const profile = await memory.getUserProfile();
-
-console.log(profile);
-// {
-//   user_id: "user_123",
-//   memory_count: 47,
-//   entity_breakdown: { PERSON: 12, ORG: 8, LOCATION: 5 },
-//   top_topics: ["AI", "meetings", "projects"],
-//   last_active: "2026-03-22T15:30:00Z",
-//   aggregated_facts: [
-//     "Works at Acme Corp as senior engineer",
-//     "Prefers morning meetings"
-//   ]
-// }
-```
-
----
-
-## Slim Recall Mode (v0.12.0)
-
-Get a smaller response: just the context string, without the metadata.
+`store()` takes a `ttl`: a number and a unit, such as `'36h'` or `'30d'`. Every unit is in
+[TTL formats](temporal.md#ttl-formats).
 
 ```typescript
-// Standard recall (full response with metadata)
-const full = await memory.recall('What does the user prefer?');
-// { context: "...", memories: [...], entities: [...], ... }
-
-// Slim mode (just the context)
-const slim = await memory.recall('What does the user prefer?', { slim: true });
-// "User prefers dark mode and morning meetings."
+// Expires 36 hours after it is stored
+await memory.store('Meeting tomorrow', { ttl: '36h' });
 ```
 
----
+The TypeScript SDK has no `expiresAt` option. For an exact expiry time, send `expires_at` to the REST API
+(`POST /api/v1/memories`).
 
-## Event-Driven Expiry (v0.12.0)
-
-Set explicit expiration timestamps.
-
-```typescript
-// Expires at specific time
-await memory.store('Conference call at 3pm', {
-  expiresAt: new Date('2026-03-23T16:00:00Z')
-});
-
-// Or use TTL string
-await memory.store('Meeting tomorrow', {
-  ttl: '36h'
-});
-```
-
----
-
-## Smart Auto-Forgetting (v0.12.0)
-
-Temporal phrases automatically get appropriate TTLs:
-
-```typescript
-// No explicit TTL needed - auto-detected
-await memory.store('Meeting tomorrow at 3pm');  // → 36h TTL
-await memory.store('Deadline in 2 hours');      // → 3h TTL
-await memory.store('Call next week');           // → 8 days TTL
-```
-
+It does not read temporal phrases either: Smart Auto-Forgetting ("Meeting tomorrow" gets a 36h TTL) is in the
+Python SDK only, with `auto_expire_temporal=True`.

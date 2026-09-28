@@ -121,7 +121,9 @@ async def invalidate_user_sessions(db: Any, user_id: str, *, keep_app_connection
     listed in the review and revoked one by one).
 
     Sign-in-method connects still in flight for the account are cancelled
-    either way (they were started by a session that no longer counts).
+    either way (they were started by a session that no longer counts), and
+    its open WebSockets are re-checked at once, so the ones opened with those
+    sessions are closed.
     """
     await _ensure_schema(db)
     cutoff = int(time.time() * 1000)
@@ -138,9 +140,12 @@ async def invalidate_user_sessions(db: Any, user_id: str, *, keep_app_connection
         (user_id, cutoff),
     )
     await db.conn.commit()
+    from remembra.api.v1.websocket import recheck_user_connections
     from remembra.auth import social
 
     await social.cancel_link_flows(db, user_id)
+    # Close the dashboard WebSockets these sessions opened (and any whose key or account is off).
+    await recheck_user_connections(user_id)
     log.info("user_sessions_invalidated", user_id=user_id, keep_app_connections=keep_app_connections)
     return cutoff
 

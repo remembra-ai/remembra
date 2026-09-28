@@ -1,7 +1,7 @@
 """API Key management endpoints – /api/v1/keys."""
 
 import hmac
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,8 +13,9 @@ from remembra.auth.middleware import (
     AuthenticatedUser,
     JWTOrAPIKeyUser,
     get_client_ip,
+    has_permission,
 )
-from remembra.auth.rbac import ROLE_LEVEL, Role, RoleManager
+from remembra.auth.rbac import PERMISSION_ATTR, ROLE_LEVEL, Permission, Role, RoleManager
 from remembra.cloud import notify
 from remembra.cloud.limits import EnforceKeyLimit
 from remembra.config import get_settings
@@ -42,7 +43,7 @@ class CreateKeyRequest(BaseModel):
     user_id: str | None = Field(None, description="User ID to create key for (required for master key, ignored for JWT)")
     name: str | None = Field(None, description="Human-readable name for the key")
     rate_limit_tier: str = Field("standard", description="Rate limit tier: standard or premium")
-    role: str = Field("editor", description="Role: admin, editor, or viewer")
+    role: str = Field("editor", description="Role: editor or viewer (admin only with the master key)")
     permission: str | None = Field(None, description="Alias for role (dashboard compatibility)")
     project_ids: list[str] | None = Field(
         None,
@@ -114,7 +115,7 @@ class UpdateKeyRequest(BaseModel):
     """Request to update an API key."""
 
     name: str | None = Field(None, description="New name for the key")
-    role: str | None = Field(None, description="New role: admin, editor, or viewer")
+    role: str | None = Field(None, description="New role: editor or viewer (dashboard session only)")
     project_ids: list[str] | None = Field(
         None,
         description="Replace the key's allowed projects. Use an empty list to remove restrictions.",
@@ -161,6 +162,60 @@ def get_limiter(request: Request) -> Limiter:
 APIKeyManagerDep = Annotated[APIKeyManager, Depends(get_api_key_manager)]
 RoleManagerDep = Annotated[RoleManager, Depends(get_role_manager)]
 AuditLoggerDep = Annotated[AuditLogger, Depends(get_audit_logger)]
+
+
+def require_key_permission(permission: Permission) -> Any:
+    """Dependency: 403 unless the caller's role (narrowed by its scopes) holds ``permission``.
+
+    Runs before the request body is validated. A request with neither a session nor
+    an API key (the master-key path of ``POST /keys``) is left to the route,
+    which checks the master key itself and answers 401 otherwise.
+    """
+
+    async def check(current_user: JWTOrAPIKeyUser) -> None:
+        if current_user is not None and not has_permission(current_user, permission.value):
+            log.warning(
+                "permission_denied",
+                user_id=current_user.user_id,
+                role=current_user.role,
+                required_permission=permission.value,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission.value} required",
+            )
+
+    setattr(check, PERMISSION_ATTR, permission)
+    return Depends(check)
+
+
+def require_revoke_permission() -> Any:
+    """Dependency for ``DELETE /keys/{key_id}``: ``key:revoke``, except that a key may revoke itself.
+
+    Any API key may revoke (soft-revoke) itself, whatever its role or scopes, so
+    a read-only agent can cut off its own key. Revoking any other key, and
+    permanently deleting any key (``?hard=true``, itself included), still needs
+    ``key:revoke``; the route then applies the "no more access than itself" rule.
+    """
+
+    async def check(key_id: str, current_user: JWTOrAPIKeyUser, hard: bool = False) -> None:
+        if current_user is None or has_permission(current_user, Permission.KEY_REVOKE.value):
+            return
+        if not hard and not _is_session(current_user) and key_id == current_user.api_key_id:
+            return  # a key revoking itself
+        log.warning(
+            "permission_denied",
+            user_id=current_user.user_id,
+            role=current_user.role,
+            required_permission=Permission.KEY_REVOKE.value,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: {Permission.KEY_REVOKE.value} required",
+        )
+
+    setattr(check, PERMISSION_ATTR, Permission.KEY_REVOKE)
+    return Depends(check)
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +314,7 @@ async def get_key_with_role(
     response_model=CreateKeyResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new API key",
+    dependencies=[require_key_permission(Permission.KEY_CREATE)],
 )
 @limiter.limit("10/hour")
 async def create_api_key(
@@ -275,15 +331,17 @@ async def create_api_key(
 
     **Authentication options:**
     - **JWT token** (Authorization: Bearer): Creates key for authenticated user
+    - **API key** holding `key:create` (X-API-Key): Creates a key for the key's own account,
+      never above the key's own role or outside its projects
     - **Master key** (X-API-Key): Creates key for any user (requires user_id in body)
 
     The full key is returned ONLY in this response.
     Store it securely - it cannot be retrieved again.
 
     **Roles:**
-    - `admin` - Full access: manage keys, users, memories, audit logs
-    - `editor` - Read/write memories, manage own keys (default)
-    - `viewer` - Read-only: recall memories, list entities
+    - `admin` - Every permission. Only the master key can create one.
+    - `editor` - Every permission except `admin:*` (default)
+    - `viewer` - Read-only: recall memories, read entities, list keys
 
     **Rate limit:** 10 requests/hour.
     """
@@ -403,6 +461,7 @@ async def create_api_key(
     "",
     response_model=ListKeysResponse,
     summary="List your API keys",
+    dependencies=[require_key_permission(Permission.KEY_LIST)],
 )
 @limiter.limit("30/minute")
 async def list_api_keys(
@@ -470,6 +529,7 @@ async def list_api_keys(
     "/{key_id}",
     response_model=KeyInfo,
     summary="Get API key info",
+    dependencies=[require_key_permission(Permission.KEY_LIST)],
 )
 @limiter.limit("30/minute")
 async def get_api_key_info(
@@ -518,6 +578,7 @@ async def get_api_key_info(
     "/{key_id}",
     response_model=UpdateKeyResponse,
     summary="Update an API key",
+    dependencies=[require_key_permission(Permission.KEY_CREATE)],
 )
 @limiter.limit("10/minute")  # Prevent abuse
 async def update_api_key(
@@ -532,13 +593,13 @@ async def update_api_key(
     """
     Update an API key's name or role.
 
-    Users can update their own keys.
+    Users can update their own keys. Renaming needs `key:create`; role and
+    project changes need a dashboard session.
     Only the fields provided will be updated.
 
     **Roles:**
-    - `admin` - Full access
-    - `editor` - Read/write memories (default)
-    - `viewer` - Read-only access
+    - `editor` - Every permission except `admin:*`
+    - `viewer` - Read-only: recall memories, read entities, list keys
     """
     if not current_user:
         raise HTTPException(
@@ -627,6 +688,7 @@ async def update_api_key(
     "/{key_id}",
     response_model=RevokeKeyResponse,
     summary="Revoke or permanently delete an API key",
+    dependencies=[require_revoke_permission()],
 )
 @limiter.limit("5/minute")  # Prevent abuse
 async def revoke_api_key(
@@ -641,7 +703,10 @@ async def revoke_api_key(
     """
     Revoke or permanently delete an API key.
 
-    Users can only manage their own keys.
+    Users can only manage their own keys. Any API key may revoke itself. To
+    revoke another key, or to permanently delete any key, an API key needs
+    `key:revoke`, and it can only act on keys that hold no more access than
+    itself.
 
     **Query Parameters:**
     - `hard` (bool): If true, permanently delete the key from the database.
@@ -692,12 +757,6 @@ async def revoke_api_key(
 
     # Clean up role assignment
     await role_manager.remove_role(key_id)
-
-    # Close live WebSocket connections that authenticated with this key now,
-    # rather than at their next 60 s re-validation (crew spec §4.4).
-    from remembra.api.v1.websocket import connection_manager
-
-    await connection_manager.revoke(api_key_id=key_id, reason="API key revoked")
 
     # Audit log
     await audit_logger.log_event(

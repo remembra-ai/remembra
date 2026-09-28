@@ -2,7 +2,7 @@
 
 Ask the user before each step that installs or writes anything. Run only the step they said yes to, then show them what it printed.
 
-This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in another tool or on another machine, starts with a short brief.
+This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter. The relay hooks read commits, changed and uncommitted files, and unpushed commits from git. For Claude Code and Codex they also read test runs and open todos from the session transcript. An agent that hands off only through the MCP tools records what it reports. The next agent, in another tool or on another machine, starts with a short brief.
 
 ## Rules
 
@@ -57,7 +57,7 @@ Ask the user to run this in their own terminal, not through you:
 remembra-install --all
 ```
 
-It asks for the key at a hidden prompt (it never goes on the command line), shows what it will add to each agent it finds and writes only after they answer y. It saves the key to `~/.remembra/credentials`, where the relay hooks read it. A first install uses https://api.remembra.dev; on a self-hosted server, the user adds `--url` and their server's URL. Exit code 3 means it showed the changes and wrote nothing.
+It asks for the key at a hidden prompt (it never goes on the command line), shows what it will add to each agent it sets up and writes only after they answer y. It saves the key to `~/.remembra/credentials`, where the relay hooks read it. A first install uses https://api.remembra.dev; on a self-hosted server, the user adds `--url` and their server's URL. Exit code 3 means it showed the changes and wrote nothing.
 
 ## 6. Show the hook changes
 
@@ -83,11 +83,11 @@ The name is `cursor`.
 
 ## 8. Codex: the user trusts the hooks
 
-Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it, again without a message, until you trust it again. `remembra-relay doctor` shows which hooks need it.
+Codex runs a hook only after the user trusts it. Until then it skips the hook. The interactive Codex CLI asks at startup about hooks that need review; in our `codex exec` runs, Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it until you trust it again. `remembra-relay doctor` shows which hooks need it.
 
 ## 9. Restart the agents
 
-`remembra-install` added the Remembra MCP server to each agent it found. Ask the user to restart those agents so they load it.
+`remembra-install` added the Remembra MCP server to each verified agent it found: Claude Desktop (on macOS), Claude Code, Codex, Cursor and Gemini CLI. Windsurf is unverified, so `--all` skips it; only `remembra-install --agent windsurf` writes it. Qwen Code and Kimi get their hooks in step 7 but not the MCP server: the block to paste is at https://docs.remembra.dev/guides/relay/#mcp-by-hand. Ask the user to restart the agents it set up so they load it.
 
 ## 10. Check
 

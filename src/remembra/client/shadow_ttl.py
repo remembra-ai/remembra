@@ -1,10 +1,9 @@
 """
-Shadow TTL Cache for Client-Side Latency Optimization.
+Shadow TTL Cache: a local record of when stored memories expire.
 
-This module provides a local cache of memory expiry times to reduce
-unnecessary existence checks on writes. If a memory is known to be
-valid (not expired), we can skip the server round-trip for existence
-verification.
+With ``Memory(enable_shadow_ttl=True)`` the SDK records each stored memory's
+expiry here, and your code can call ``Memory.is_memory_valid(memory_id)``
+before asking the server. The SDK itself does not skip any server call.
 
 Usage:
     cache = ShadowTTLCache(default_ttl_seconds=3600)
@@ -27,6 +26,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from remembra.client.ttl import parse_ttl_seconds
 
 if TYPE_CHECKING:
     pass
@@ -266,72 +267,27 @@ class ShadowTTLCache:
 
 def parse_ttl_string(ttl: str) -> float | None:
     """
-    Parse a TTL string into seconds.
+    Parse a TTL string into seconds, exactly as the server reads it.
 
-    Supported formats:
-        - "30s" or "30sec" → 30 seconds
-        - "5m" or "5min" → 5 minutes
-        - "24h" or "24hr" → 24 hours
-        - "7d" or "7day" → 7 days
-        - "1w" or "1week" → 1 week
-        - "1mo" or "1month" → 30 days (approximate)
-        - "1y" or "1year" → 365 days (approximate)
+    The format is in :mod:`remembra.client.ttl`: a number (decimals allowed)
+    and a unit, e.g. "30d", "1.5d", "36h", "90min". ``min`` is minutes and
+    ``mo`` months (30 days); ``y`` is 365 days. A bare ``m`` is refused.
 
     Args:
         ttl: TTL string like "30d", "24h", "1y"
 
     Returns:
-        Number of seconds, or None if parsing fails
+        Number of seconds, or None if it is not a TTL
 
     Example:
         >>> parse_ttl_string("30d")
         2592000.0
-        >>> parse_ttl_string("1h")
-        3600.0
+        >>> parse_ttl_string("40min")
+        2400.0
+        >>> parse_ttl_string("40m") is None
+        True
     """
-    import re
-
-    ttl = ttl.strip().lower()
-
-    # Match number + unit
-    match = re.match(r"^(\d+(?:\.\d+)?)\s*([a-z]+)$", ttl)
-    if not match:
+    try:
+        return parse_ttl_seconds(ttl)
+    except ValueError:
         return None
-
-    value = float(match.group(1))
-    unit = match.group(2)
-
-    # Map units to seconds
-    unit_map = {
-        "s": 1,
-        "sec": 1,
-        "second": 1,
-        "seconds": 1,
-        "m": 60,
-        "min": 60,
-        "minute": 60,
-        "minutes": 60,
-        "h": 3600,
-        "hr": 3600,
-        "hour": 3600,
-        "hours": 3600,
-        "d": 86400,
-        "day": 86400,
-        "days": 86400,
-        "w": 604800,
-        "week": 604800,
-        "weeks": 604800,
-        "mo": 2592000,  # 30 days
-        "month": 2592000,
-        "months": 2592000,
-        "y": 31536000,  # 365 days
-        "yr": 31536000,
-        "year": 31536000,
-        "years": 31536000,
-    }
-
-    multiplier = unit_map.get(unit)
-    if multiplier is None:
-        return None
-
-    return value * multiplier

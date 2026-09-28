@@ -5,7 +5,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import AuthenticatedUser, CurrentUser, ensure_project_access, has_permission
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    CurrentUser,
+    ensure_project_access,
+    has_permission,
+    require_conflict_manage,
+)
 from remembra.core.limiter import limiter
 from remembra.extraction.conflicts import ConflictManager, ConflictStatus
 
@@ -155,6 +161,7 @@ async def get_conflict(
 @router.post(
     "/{conflict_id}/resolve",
     summary="Resolve a conflict",
+    dependencies=[require_conflict_manage()],
 )
 @limiter.limit("10/minute")
 async def resolve_conflict(
@@ -164,8 +171,7 @@ async def resolve_conflict(
     manager: ConflictManagerDep,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Mark a conflict as resolved."""
-    _require(current_user, "memory:store")
+    """Mark a conflict as resolved. Needs ``conflict:manage``."""
     result = await manager.resolve(
         conflict_id=conflict_id,
         user_id=current_user.user_id,
@@ -183,6 +189,7 @@ async def resolve_conflict(
 @router.post(
     "/{conflict_id}/dismiss",
     summary="Dismiss a conflict",
+    dependencies=[require_conflict_manage()],
 )
 @limiter.limit("10/minute")
 async def dismiss_conflict(
@@ -191,8 +198,7 @@ async def dismiss_conflict(
     manager: ConflictManagerDep,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Dismiss a conflict as not needing resolution."""
-    _require(current_user, "memory:store")
+    """Dismiss a conflict as not needing resolution. Needs ``conflict:manage``."""
     result = await manager.dismiss(
         conflict_id=conflict_id,
         user_id=current_user.user_id,

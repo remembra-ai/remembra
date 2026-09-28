@@ -13,6 +13,8 @@ from remembra.auth.middleware import (
     CurrentUser,
     get_client_ip,
     has_permission,
+    require_memory_delete,
+    require_memory_store,
     resolve_project_access,
 )
 from remembra.cloud.limits import (
@@ -294,6 +296,7 @@ async def list_memories(
     response_model=StoreResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Store a new memory",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("30/minute")
 async def store_memory(
@@ -318,13 +321,6 @@ async def store_memory(
     Note: user_id is determined by API key (cannot be overridden).
     Rate limit: 30 requests/minute.
     """
-    # RBAC: Check permission
-    if not has_permission(current_user, "memory:store"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:store required",
-        )
-
     # Override user_id with authenticated user (security: prevent user spoofing)
     body.user_id = current_user.user_id
     body.project_id = resolve_project_access(current_user, body.project_id) or "default"
@@ -540,6 +536,7 @@ async def store_memory(
     response_model=BatchStoreResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Store multiple memories in one request",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("30/minute")
 async def batch_store(
@@ -580,13 +577,6 @@ async def batch_store(
     Items are stored with bounded concurrency (``batch_store_concurrency``).
     Rate limit: 30 requests/minute.
     """
-    # RBAC: Check permission
-    if not has_permission(current_user, "memory:store"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:store required",
-        )
-
     # BatchStoreRequest.resolve_items_alias validates that items is non-empty
     # (raising otherwise), so it is always populated by the time we get here.
     assert body.items is not None, "items is guaranteed non-None by request validation"
@@ -693,6 +683,7 @@ async def batch_store(
     "/bulk",
     status_code=status.HTTP_201_CREATED,
     summary="Fast bulk import for pre-structured data",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def bulk_import(
@@ -743,13 +734,6 @@ async def bulk_import(
 
     Rate limit: 10 requests/minute (100 items/request = 1000 items/minute max)
     """
-    # RBAC: Check permission
-    if not has_permission(current_user, "memory:store"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:store required",
-        )
-
     # BatchStoreRequest.resolve_items_alias validates that items is non-empty
     # (raising otherwise), so it is always populated by the time we get here.
     assert body.items is not None, "items is guaranteed non-None by request validation"
@@ -1114,6 +1098,7 @@ async def get_memory(
     "/{memory_id}",
     response_model=UpdateResponse,
     summary="Update an existing memory",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("20/minute")
 async def update_memory(
@@ -1146,13 +1131,6 @@ async def update_memory(
 
     Rate limit: 20 requests/minute.
     """
-    # RBAC: Check permission (update requires store permission)
-    if not has_permission(current_user, "memory:store"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:store required",
-        )
-
     existing = await memory_service.get(memory_id)
     if not existing or existing.get("user_id") != current_user.user_id:
         raise HTTPException(
@@ -1254,6 +1232,7 @@ async def update_memory(
     "/{memory_id}/supersede",
     response_model=SupersedeResponse,
     summary="Supersede a memory with new information",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("20/minute")
 async def supersede_memory(
@@ -1288,12 +1267,6 @@ async def supersede_memory(
 
     Rate limit: 20 requests/minute.
     """
-    # RBAC: Check permission (supersede requires store permission)
-    if not has_permission(current_user, "memory:store"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:store required",
-        )
     # Ownership + project scope of the memory being superseded (SEC-14).
     old = await _require_owned_memory(memory_service, memory_id, current_user)
 
@@ -1371,6 +1344,7 @@ async def supersede_memory(
     "/{memory_id}/feedback",
     response_model=FeedbackResponse,
     summary="Submit helpful/unhelpful feedback for a recalled memory",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("30/minute")
 async def submit_feedback(
@@ -1381,7 +1355,8 @@ async def submit_feedback(
     current_user: CurrentUser,
 ) -> FeedbackResponse:
     """
-    Record whether a recalled memory was useful.
+    Record whether a recalled memory was useful. Feedback changes how recall
+    ranks the memory, so it needs ``memory:store`` (viewer keys cannot send it).
 
     - **signal**: "helpful" or "unhelpful"
     - **comment**: Optional free-text comment
@@ -1391,13 +1366,7 @@ async def submit_feedback(
     """
     import uuid
 
-    # Verify memory exists and belongs to user
-    memory = await memory_service.get(memory_id)
-    if not memory or memory.get("user_id") != current_user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Memory {memory_id} not found",
-        )
+    await _require_owned_memory(memory_service, memory_id, current_user)
 
     feedback_id = str(uuid.uuid4())
     await memory_service.db.save_feedback(
@@ -1428,14 +1397,11 @@ async def _require_owned_memory(
     memory_service: Any,
     memory_id: str,
     user: Any,
-    permission: str = "memory:store",
 ) -> dict[str, Any]:
-    """Fetch a memory; 403 without ``permission``, 404 unless owned, 403 outside the key's projects."""
-    if not has_permission(user, permission):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied: {permission} required",
-        )
+    """Fetch a memory; 404 unless owned, 403 outside the key's projects.
+
+    The route's own dependency has already checked ``memory:store``.
+    """
     memory = await memory_service.get(memory_id)
     if not memory or memory.get("user_id") != user.user_id:
         raise HTTPException(
@@ -1447,7 +1413,12 @@ async def _require_owned_memory(
     return result
 
 
-@router.post("/{memory_id}/pin", response_model=SalienceResponse, summary="Pin a memory (never decays)")
+@router.post(
+    "/{memory_id}/pin",
+    response_model=SalienceResponse,
+    summary="Pin a memory (never decays)",
+    dependencies=[require_memory_store()],
+)
 @limiter.limit("60/minute")
 async def pin_memory(
     request: Request,
@@ -1462,7 +1433,12 @@ async def pin_memory(
     return SalienceResponse(memory_id=memory_id, pinned=True)
 
 
-@router.post("/{memory_id}/unpin", response_model=SalienceResponse, summary="Unpin a memory")
+@router.post(
+    "/{memory_id}/unpin",
+    response_model=SalienceResponse,
+    summary="Unpin a memory",
+    dependencies=[require_memory_store()],
+)
 @limiter.limit("60/minute")
 async def unpin_memory(
     request: Request,
@@ -1477,7 +1453,12 @@ async def unpin_memory(
     return SalienceResponse(memory_id=memory_id, pinned=False)
 
 
-@router.patch("/{memory_id}/importance", response_model=SalienceResponse, summary="Set memory importance")
+@router.patch(
+    "/{memory_id}/importance",
+    response_model=SalienceResponse,
+    summary="Set memory importance",
+    dependencies=[require_memory_store()],
+)
 @limiter.limit("60/minute")
 async def set_memory_importance(
     request: Request,
@@ -1506,6 +1487,7 @@ async def set_memory_importance(
 @router.post(
     "/cleanup-expired",
     summary="Clean up expired memories",
+    dependencies=[require_memory_delete()],
 )
 @limiter.limit("5/minute")
 async def cleanup_expired(
@@ -1522,13 +1504,6 @@ async def cleanup_expired(
 
     Rate limit: 5 requests/minute.
     """
-    # RBAC: Check permission
-    if not has_permission(current_user, "memory:delete"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:delete required",
-        )
-
     try:
         project_id = resolve_project_access(current_user, None)
         deleted = await memory_service.cleanup_expired(
@@ -1563,7 +1538,8 @@ async def cleanup_expired(
 @router.delete(
     "",
     response_model=ForgetResponse,
-    summary="Forget memories (GDPR-compliant deletion)",
+    summary="Forget memories",
+    dependencies=[require_memory_delete()],
 )
 @limiter.limit("10/minute")
 async def forget_memories(
@@ -1605,13 +1581,6 @@ async def forget_memories(
     Note: Can only delete your own memories.
     Rate limit: 10 requests/minute.
     """
-    # RBAC: Check permission
-    if not has_permission(current_user, "memory:delete"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: memory:delete required",
-        )
-
     if entity is not None and not entity.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -11,7 +11,7 @@ applies to the hosted service, Remembra Cloud. Prices are in USD and exclude tax
 | **Solo** | $12 / month or $120 / year | 2,200 / month | 50,000 | 50,000 | Up to 1,000 | 10 |
 | **Pro** | $29 / month or $290 / year | 5,000 / month | 125,000 | 250,000 | Up to 1,000 | 25 |
 | **Team** | $15 per seat / month or $150 per seat / year, 3-seat minimum | 2,200 per seat, pooled | 50,000 per seat, pooled | 50,000 per seat, pooled | Up to 1,000 | 10 per seat |
-| **Enterprise** | Custom (from $399 / month) | Contracted | Contracted | Contracted | Contracted | Contracted |
+| **Enterprise** | Custom pricing, contact sales | Contracted | Contracted | Contracted | Contracted | Contracted |
 
 **Founding 100.** The first 100 customers can take Solo at **$108 a year**,
 and the price never goes up while the subscription stays active. If it ends,

@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from remembra.client.ttl import parse_ttl_seconds
+
 
 def _scrub_secrets(value: str) -> str:
     """Remove terminal control characters (CLI-02) and redact credentials (SEC-23).
@@ -14,6 +16,17 @@ def _scrub_secrets(value: str) -> str:
     from remembra.security.untrusted import strip_controls
 
     return scrub(strip_controls(value))
+
+
+def _scrub_metadata(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Credentials redacted (SEC-23) from every string in client metadata, at any depth.
+    Imported lazily for the same reason as :func:`_scrub_secrets`."""
+    if value is None:
+        return None
+    from remembra.security.secrets import scrub_value
+
+    cleaned = scrub_value(value)
+    return cleaned if isinstance(cleaned, dict) else value
 
 
 # Agent-hygiene types (AGT-5): "checkpoint" = short-lived progress note (default
@@ -138,6 +151,12 @@ class Memory(BaseModel):
     def facts_without_secrets(cls, v: list[str]) -> list[str]:
         return [_scrub_secrets(f) for f in v]
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # SEC-23: metadata (status values, client tags, the relay block) is persisted like content.
+        return _scrub_metadata(v) or {}
+
 
 RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
 
@@ -145,6 +164,17 @@ RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
 # ---------------------------------------------------------------------------
 # API request / response shapes
 # ---------------------------------------------------------------------------
+
+
+def checked_ttl(ttl: str | None) -> str | None:
+    """A request's TTL, stripped; None when blank. Raises ValueError when the server cannot read it.
+
+    An unreadable TTL used to be stored as no expiry at all; now the request fails.
+    """
+    if ttl is None or not ttl.strip():
+        return None
+    parse_ttl_seconds(ttl)
+    return ttl.strip()
 
 
 class StoreRequest(BaseModel):
@@ -195,6 +225,11 @@ class StoreRequest(BaseModel):
         # source row, FTS) ever sees them.
         return _scrub_secrets(v.strip())
 
+    @field_validator("ttl")
+    @classmethod
+    def validate_ttl(cls, v: str | None) -> str | None:
+        return checked_ttl(v)
+
     @field_validator("visibility")
     @classmethod
     def validate_visibility(cls, v: str) -> str:
@@ -203,10 +238,19 @@ class StoreRequest(BaseModel):
             raise ValueError(f"visibility must be one of: {', '.join(valid)}")
         return v
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
+
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl: str | None = Field(
         default=None,
-        description="Optional time-to-live, e.g. '30d', '1y'. Use expires_at for explicit expiry timestamps.",
+        description=(
+            "Optional time-to-live: a number and a unit, e.g. '30d', '1.5d', '36h', '90min'. "
+            "Units: s, min, h, d, w, mo (months, 30 days), y (365 days); a bare m is refused. "
+            "A TTL the server cannot read is refused (422). Use expires_at for explicit expiry timestamps."
+        ),
         examples=["30d"],
     )
     expires_at: datetime | None = Field(
@@ -495,6 +539,11 @@ class RecallResult(BaseModel):
         # scrubbed on the way out.
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
+
 
 class DivergenceDetail(BaseModel):
     """Details about a detected divergence between recency and semantic signals."""
@@ -579,6 +628,11 @@ class MemorySummary(BaseModel):
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
+
 
 class UpdateRequest(BaseModel):
     content: str
@@ -588,6 +642,11 @@ class UpdateRequest(BaseModel):
     @classmethod
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class UpdateResponse(BaseModel):
@@ -623,6 +682,11 @@ class SupersedeRequest(BaseModel):
     @classmethod
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class SupersedeResponse(BaseModel):
@@ -738,6 +802,11 @@ class ConversationMessage(BaseModel):
         # SEC-23: redact before conversation extraction sends it to the LLM.
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
+
 
 class IngestOptions(BaseModel):
     """Options for conversation ingestion."""
@@ -779,6 +848,11 @@ class ConversationIngestRequest(BaseModel):
         description="Context metadata (channel, timezone, etc.)",
     )
     options: IngestOptions = Field(default_factory=IngestOptions)
+
+    @field_validator("context")
+    @classmethod
+    def context_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class ExtractedFact(BaseModel):

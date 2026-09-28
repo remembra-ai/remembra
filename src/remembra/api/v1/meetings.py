@@ -2,7 +2,7 @@
 
 Phase 1. These endpoints are intentionally lightweight: they assemble briefs
 and summaries from calendar + memory data. Audio transcription lives in
-/api/v1/audio.
+/api/v1/audio (self-hosted servers only: it answers 404 in cloud mode).
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ async def summarize_meeting(current_user: CurrentUser, body: dict[str, Any] = Bo
       segments:  [ { start, end, speaker, text, confidence }, ... ]
 
     Server-side file paths (``transcript_path``) are not accepted: send
-    transcript ``segments`` (use /api/v1/audio to capture + transcribe).
+    transcript ``segments`` (on a self-hosted server, /api/v1/audio can capture + transcribe).
     """
     meeting = body.get("meeting") or {}
     segs_raw = body.get("segments")

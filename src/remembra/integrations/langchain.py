@@ -31,7 +31,6 @@ Requires: pip install remembra langchain-core
 
 from __future__ import annotations
 
-import contextlib
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -47,18 +46,26 @@ from langchain_core.messages import (
 )
 
 from remembra.client.memory import Memory, MemoryError
+from remembra.integrations._session_records import MARKER_KEY, delete_session_records, session_records
+
+#: The ``remembra_integration`` value on every message this history stores.
+MARKER = "langchain"
 
 
 class RemembraChatMessageHistory(BaseChatMessageHistory):
     """LangChain chat message history backed by Remembra.
 
     Each message is stored as a Remembra memory with metadata
-    indicating the role, session, and sequence number. This enables:
+    indicating the role, session, and sequence number, and
+    ``remembra_integration: "langchain"``. Reading and ``clear()`` touch only
+    those memories: another memory with the same ``session_id`` in the
+    user/project (an app note, another integration) is never read as a
+    message or deleted. This enables:
 
     - Full entity resolution across conversations
     - Semantic search over past conversations
     - Temporal decay for old messages
-    - GDPR-compliant deletion
+    - ``clear()`` deletes only the messages this history stored
 
     Args:
         base_url: Remembra server URL.
@@ -103,7 +110,7 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
         self._user_id = user_id
         self._project = project
         self._ttl = ttl
-        self._message_count = 0
+        self._message_count: int | None = None  # seeded from the stored messages on first add
 
     @property
     def messages(self) -> list[BaseMessage]:  # type: ignore[override]  # LangChain's base declares `messages` as a writeable attr; we intentionally back it with a read-only property sourced from Remembra.
@@ -118,7 +125,7 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
 
             # Order by the stored sequence number (falls back to created_at).
             def _seq(m: Any) -> tuple[int, Any]:
-                return (int((m.metadata or {}).get("sequence", 0) or 0), m.created_at)
+                return (_sequence(m), m.created_at)
 
             messages: list[BaseMessage] = []
             for memory in sorted(items, key=_seq):
@@ -150,12 +157,8 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
     MAX_MESSAGES = 50
 
     def _recall_session(self) -> list[Any]:
-        """Return this session's most-recent stored memories (up to MAX_MESSAGES)."""
-        result = self._client.recall(
-            filters={"session_id": self._session_id},
-            limit=self.MAX_MESSAGES,
-        )
-        return list(result.memories)
+        """Return this session's most-recent stored messages (up to MAX_MESSAGES), none of other code's."""
+        return session_records(self._client, self._session_id, MARKER, "langchain_message", self.MAX_MESSAGES)
 
     def add_messages(self, messages: Sequence[BaseMessage]) -> None:
         """Store messages in Remembra.
@@ -163,6 +166,15 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
         Each message is stored as a separate memory with metadata
         for session tracking and ordering.
         """
+        if self._message_count is None:
+            # Continue the stored numbering: RunnableWithMessageHistory builds a
+            # new history object for every call, and restarting at 1 each time
+            # interleaved the turns when read back.
+            try:
+                stored = self._recall_session()
+            except MemoryError:
+                stored = []
+            self._message_count = max((_sequence(m) for m in stored), default=0)
         for message in messages:
             self._message_count += 1
 
@@ -178,6 +190,7 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
                 "role": role,
                 "sequence": self._message_count,
                 "langchain_message": json.dumps(msg_dict),
+                MARKER_KEY: MARKER,
             }
 
             try:
@@ -195,26 +208,15 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
                 pass
 
     def clear(self) -> None:
-        """Delete only THIS session's messages from Remembra.
+        """Delete the messages this history stored for its session, and nothing else.
 
-        Recalls the session's memories by metadata filter and forgets each by
-        id. This must never delete the user's other memories — the previous
-        implementation called forget(user_id=...), which wiped the user's
-        entire memory when a single chat session was cleared.
+        Other memories with the same ``session_id`` in the user/project (an
+        app note, another integration, anything a client created with that
+        ``session_id`` stored) are kept. Messages are deleted one by one by
+        id, in pages of 50, so sessions longer than 50 messages are cleared
+        too.
         """
-        # Recall is capped at 50 with no offset, so delete in batches until the
-        # session is empty — this fully clears sessions longer than 50 messages.
-        with contextlib.suppress(MemoryError):
-            for _ in range(200):  # safety bound: up to 10k messages
-                result = self._client.recall(
-                    filters={"session_id": self._session_id},
-                    limit=50,
-                )
-                if not result.memories:
-                    break
-                for memory in result.memories:
-                    with contextlib.suppress(MemoryError):
-                        self._client.forget(memory_id=memory.id)
+        delete_session_records(self._client, self._session_id, MARKER, "langchain_message")
         self._message_count = 0
 
 
@@ -310,6 +312,14 @@ class RemembraMemory:
     def memory_variables(self) -> list[str]:
         """Return the memory variable names."""
         return [self.memory_key]
+
+
+def _sequence(memory: Any) -> int:
+    """The message's stored sequence number (0 when missing or unreadable)."""
+    try:
+        return int((memory.metadata or {}).get("sequence", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _message_role(message: BaseMessage) -> str:

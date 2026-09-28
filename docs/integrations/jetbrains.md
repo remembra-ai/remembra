@@ -2,7 +2,7 @@
 
 Add persistent memory to IntelliJ IDEA, PyCharm, WebStorm, and other JetBrains IDEs in 2 minutes.
 
-JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, PhpStorm, Rider, CLion, RubyMine) support MCP through the built-in AI Assistant. With Remembra, the AI Assistant remembers your project context and preferences across sessions.
+JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, PhpStorm, Rider, CLion, RubyMine) support MCP through the built-in AI Assistant. With Remembra, the AI Assistant can store your project context and preferences and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 

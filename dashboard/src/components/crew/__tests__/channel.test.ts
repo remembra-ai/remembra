@@ -156,7 +156,7 @@ describe('delivery expectation', () => {
     expect(deliveryLines('@crew standup', state)[0]).toMatch(/^Every live agent \(4\)/);
     expect(deliveryLines('@mani', state)[0]).toContain('is you');
     const s2 = crewState({ sessions: [session('cs_x', 'qwen-1', { agent_id: 'qwen', state: 'ended' })] });
-    expect(deliveryLines('@qwen', s2)).toEqual(["No qwen session is live: it goes to qwen's agent inbox and leads its next session brief."]);
+    expect(deliveryLines('@qwen', s2)).toEqual(["No qwen session is live: it goes to qwen's agent inbox and shows in its next session brief, after the last session."]);
     expect(deliveryLines('@nobody', state)).toEqual(['@nobody matches no live agent, zone or task: nobody is notified for it.']);
     expect(deliveryLines('just a note', state)[0]).toMatch(/^Nobody is mentioned/);
   });

@@ -29,7 +29,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 
 from remembra.auth.middleware import AuthenticatedUser, get_current_user
-from remembra.auth.rbac import SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
+from remembra.auth.rbac import PERMISSION_ATTR, ROLE_LEVEL, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 
 logger = logging.getLogger(__name__)
 
@@ -80,19 +80,18 @@ def require_permission(perm: Permission) -> Any:
             )
         return key_role
 
+    setattr(_check, PERMISSION_ATTR, perm)
     return _check
 
 
 def require_role(role: Role) -> Any:
-    """Factory: create a dependency that requires at least a given role level."""
-    # Role hierarchy: admin > editor > viewer
-    hierarchy = {Role.ADMIN: 3, Role.EDITOR: 2, Role.VIEWER: 1}
+    """Factory: create a dependency that requires at least a given role level (admin > editor > viewer)."""
 
     async def _check(
         key_role: KeyRole = Depends(_get_key_role),
     ) -> KeyRole:
-        required_level = hierarchy.get(role, 0)
-        actual_level = hierarchy.get(key_role.role, 0)
+        required_level = ROLE_LEVEL.get(role, 0)
+        actual_level = ROLE_LEVEL.get(key_role.role, 0)
         if actual_level < required_level:
             logger.warning(
                 "Role denied: key=%s required=%s actual=%s",
@@ -139,6 +138,7 @@ RequireKeyCreate = Annotated[KeyRole, Depends(require_permission(Permission.KEY_
 RequireWebhook = Annotated[KeyRole, Depends(require_permission(Permission.WEBHOOK_MANAGE))]
 RequireConflict = Annotated[KeyRole, Depends(require_permission(Permission.CONFLICT_MANAGE))]
 RequireAdmin = Annotated[KeyRole, Depends(require_role(Role.ADMIN))]
+RequireAuditRead = Annotated[KeyRole, Depends(require_permission(Permission.ADMIN_AUDIT))]
 RequireAuditExport = Annotated[KeyRole, Depends(require_permission(Permission.ADMIN_EXPORT))]
 
 # Crew mode (spec §3.1, §6). These check only the API-key side of crew access; every

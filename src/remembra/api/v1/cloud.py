@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser, RequireMasterKey, require_master_key
+from remembra.auth.middleware import CurrentUser, RequireMasterKey, require_account_manage, require_master_key
 from remembra.cloud.metering import AccountState, CreditPeriod, UsageMeter, now_utc
 from remembra.cloud.plans import CREDIT_USD, RESERVE_CREDITS_PER_CHUNK, PlanLimits, PlanTier, get_plan
 from remembra.config import Settings, get_settings
@@ -356,6 +356,7 @@ async def _send_tenant_verification(email_service: Any, email: str, token: str) 
     "/verify-email/request",
     response_model=TenantVerifyEmailResponse,
     summary="Email a verification link to an API-signup account",
+    dependencies=[require_account_manage()],
 )
 @limiter.limit("3/minute")
 async def request_tenant_email_verification(
@@ -363,7 +364,7 @@ async def request_tenant_email_verification(
     current_user: CurrentUser,
     meter: UsageMeterDep,
 ) -> TenantVerifyEmailResponse:
-    """For accounts created by ``POST /cloud/signup`` (authenticate with the account's API key).
+    """For accounts created by ``POST /cloud/signup`` (authenticate with an account API key holding ``account:manage``).
 
     Dashboard accounts use ``POST /api/v1/auth/verify-email/request`` instead.
     The link (valid 24h, single use) opens the dashboard's /verify-email page.
@@ -772,7 +773,8 @@ async def validate_promo_code(
     "/promo/redeem",
     response_model=PromoResponse,
     summary="Redeem a promo code",
-    description="Apply a promo code to get free access or a discount.",
+    description="Apply a promo code to get free access or a discount. API keys need account:manage.",
+    dependencies=[require_account_manage()],
 )
 @limiter.limit("5/minute")
 async def redeem_promo_code(

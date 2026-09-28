@@ -8,6 +8,8 @@ from typing import Annotated, Any
 from pydantic import AliasChoices, Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from remembra.client.ttl import parse_ttl_seconds
+
 # A list setting read from the environment. pydantic-settings would JSON-decode
 # it (and crash the boot on "a.com,b.com"); NoDecode hands the raw string to
 # Settings.parse_env_list, which accepts a JSON array or a comma-separated list.
@@ -340,6 +342,7 @@ class Settings(BaseSettings):
     enable_temporal_decay: bool = True
     default_ttl_days: int | None = None
     # memory_type="checkpoint" stores get this TTL unless the caller sets ttl/expires_at (AGT-5).
+    # Same format as a store ttl (remembra.client.ttl); checked at startup. Blank: no default TTL.
     checkpoint_default_ttl: str = "7d"
     max_memories_per_recall: int = 10
     recall_score_threshold: float = 0.70
@@ -570,10 +573,6 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(
         "remembra-jwt-secret-change-in-production", description="Secret key for JWT token signing (MUST change in production)"
     )
-    jwt_expiration_hours: int = Field(
-        24,  # 24 hours (OWASP recommendation: 1 day max for web sessions)
-        description="JWT token expiration in hours",
-    )
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(True, description="Enable rate limiting")
@@ -713,6 +712,20 @@ class Settings(BaseSettings):
         None,
         description="Not read yet: the sleep-time consolidation pass uses extraction_model.",
     )
+    sleep_time_decay_cleanup_enabled: bool = Field(
+        False,
+        description=(
+            "Let the sleep-time pass delete old notes nobody recalled. Off by default: the pass then deletes "
+            "nothing. When on, each run deletes up to 100 of an active account's ordinary notes that are older "
+            "than sleep_time_decay_cleanup_days, were never returned by a search and have no expiry. Handoffs, "
+            "checkpoints, status values, pinned memories and source records are never deleted."
+        ),
+    )
+    sleep_time_decay_cleanup_days: int = Field(
+        90,
+        ge=1,
+        description="Age in days a never-recalled note must reach before decay cleanup (when on) deletes it",
+    )
 
     # -----------------------------------------------------------------------
     # Reliability: provider failure handling, readiness, background work
@@ -811,6 +824,18 @@ class Settings(BaseSettings):
             except json.JSONDecodeError as e:
                 raise ValueError(f"{info.field_name}: invalid JSON array ({e.msg})") from e
         return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @field_validator("checkpoint_default_ttl")
+    @classmethod
+    def readable_checkpoint_ttl(cls, value: str) -> str:
+        """Refuse to start with a TTL the server cannot read (it used to mean checkpoints never expire).
+
+        Blank keeps its old meaning: checkpoints get no default TTL.
+        """
+        if not value.strip():
+            return ""
+        parse_ttl_seconds(value)
+        return value.strip()
 
     @field_validator("public_url", "memory_cap_notice_effective_at", "unverified_credit_cap_effective_at", mode="before")
     @classmethod

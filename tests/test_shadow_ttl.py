@@ -277,8 +277,7 @@ class TestParseTTLString:
             ("30sec", 30),
             ("30second", 30),
             ("30seconds", 30),
-            # Minutes
-            ("5m", 300),
+            # Minutes (a bare "5m" is refused: see test_invalid_ttl_strings)
             ("5min", 300),
             ("5minute", 300),
             ("5minutes", 300),
@@ -320,6 +319,8 @@ class TestParseTTLString:
         assert parse_ttl_string("") is None
         assert parse_ttl_string("10x") is None
         assert parse_ttl_string("abc") is None
+        # Owner decision 9: a bare m is neither minutes nor months; the server refuses it too.
+        assert parse_ttl_string("5m") is None
 
     def test_whitespace_handling(self):
         """Test TTL parsing handles whitespace."""

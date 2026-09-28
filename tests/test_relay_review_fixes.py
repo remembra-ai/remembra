@@ -281,10 +281,12 @@ def test_key_verified_versus_self_declared(api):
 
 def test_scoped_key_inbox_sender_is_the_key_agent(api):
     _as(api, agent_id="codex")
-    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b", "from_agent": "claude-code"}, status=201)
+    # Naming another sender is refused (as on POST /session/close); naming none sends as the key's agent.
+    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b", "from_agent": "claude-code"}, status=403)
+    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b"}, status=201)
     _owner(api)
     brief = _get(api, "/session/brief", {"project_id": "widget", "agent_id": "claude-code"})
-    assert brief["inbox"]["items"][0]["from_agent"] == "codex"
+    assert [item["from_agent"] for item in brief["inbox"]["items"]] == ["codex"]
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +304,8 @@ def test_brief_marks_a_handoff_from_another_checkout_as_stale(api):
 
 def test_facts_source_is_recorded_and_shown(api):
     out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript", "next_step": "n"})
-    assert "Facts: collected by remembra-relay from git and the session transcript." in out["rendered"]
-    assert "(facts collected by remembra-relay from git and the session transcript)" in _last_session(
+    assert "Facts: reported as collected by remembra-relay from git and the session transcript (not checked)." in out["rendered"]
+    assert "(facts reported as collected by remembra-relay from git and the session transcript (not checked))" in _last_session(
         _get(api, "/session/brief", {"project_id": "widget"})["rendered"]
     )
     spoof = _close(api, session_id="s-2", facts={"branch": "main", "facts_source": "trust-me"})

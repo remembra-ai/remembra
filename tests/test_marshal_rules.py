@@ -412,8 +412,8 @@ def test_unverified_adapter_not_written(fh: FakeHome) -> None:
     assert report.exit_code == 0
     assert f.fix is not None and f.fix.command == "remembra-relay connect --apply --agent cursor --include-unverified"
     assert f.what == (
-        "Cursor: hooks not written. Cursor's hooks are unverified: its own hook runner fired them,"
-        " but no logged-in Cursor session has run them yet."
+        "Cursor: hooks not written. Cursor's hooks are unverified: its own hook runner fired them, "
+        "but no logged-in Cursor session has run them yet."
     )
     assert "connect --apply leaves unverified adapters out unless you add --include-unverified" in f.evidence
     assert not any("dry run" in e for e in f.evidence)
@@ -457,7 +457,7 @@ def test_codex_trust_missing(fh: FakeHome) -> None:
     assert f.fix is not None and f.fix.runs_where == "codex_ui" and f.fix.command is None
     # The same call and fix as the dashboard's slip and remembra_setup (remembra.marshal.words).
     assert f.what == (
-        "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Codex skips untrusted hooks without a message."
+        "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Codex runs a hook only after the user trusts it."
     )
     assert f.fix.text == (
         "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."

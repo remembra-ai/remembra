@@ -1,7 +1,7 @@
 """R-23: the cloud entrypoint runs litestream with an explicit replica retention.
 
-The privacy page promises that erased data leaves the continuous backup within
-48 hours; that holds because the replica keeps 24 hours of history. The script
+When the replica is on, erased data leaves it within about 25 hours: it keeps
+24 hours of history and litestream checks retention every hour. The script
 is executed for real with a stand-in ``litestream`` binary on PATH that records
 its arguments and the config file it was given (restore and startup paths are
 covered in tests/test_rel_ops.py).

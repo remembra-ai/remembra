@@ -2,7 +2,7 @@
 
 Add persistent memory to VS Code with GitHub Copilot in 2 minutes.
 
-VS Code is the most popular code editor in the world. With Remembra, GitHub Copilot remembers your project context, coding preferences, and architecture decisions across sessions.
+VS Code is a code editor from Microsoft. With Remembra, GitHub Copilot can store your project context, coding preferences and architecture decisions and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 

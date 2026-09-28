@@ -5,9 +5,11 @@
 ## Remembra Relay
 
 When an agent's session ends, Remembra Relay saves a **handoff**: what was done, what is not done, what is
-failing and the next step, read from git and (for Claude Code and Codex) the session's test runs, not written by an
-LLM. When the next session starts, in another tool or on another machine, that agent gets a **brief**: a short summary of
-where the work stands, led by the last handoff. Every handoff stays on the **trail**.
+failing and the next step. With the `remembra-relay` hooks, it is read from git and (for Claude Code and Codex) the
+session's test runs, not written by an LLM. Agents that hand off through the `close_session` MCP tool (Cursor and
+other MCP agents) declare their own facts, and the handoff labels them that way. When the next session starts, in
+another tool or on another machine, that agent gets a **brief**: a short summary of where the work stands, led by the
+last handoff. Every handoff stays on the **trail**.
 
 First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:
 
@@ -19,7 +21,8 @@ remembra-relay connect --apply
 
 `remembra-install` asks for the key at a hidden prompt, so it never goes on the command line or into your shell
 history. `connect --apply` writes the hooks and keeps a backup of each file; run `remembra-relay connect` alone first
-to see every change without writing. Codex runs the hooks only after you trust them: run `/hooks` in Codex once.
+to see every change without writing. Codex runs the hooks only after you trust them: Settings > Hooks > Trust in
+the Codex app, or `/hooks` in the Codex CLI (again whenever a hook's command changes).
 [Hosting the server yourself](getting-started/docker.md)? Add `--url <your server>` to `remembra-install`. remembra 0.16.0 is the first
 release with `remembra-relay`.
 
@@ -27,8 +30,8 @@ release with `remembra-relay`.
 - [Agent setup](getting-started/agent-setup.md): connect Claude Code, Codex, Cursor and other agents.
 - [Remembra and other handoff tools](comparisons/handoff-tools.md): how it compares with claude-mem, agentmemory and local tools.
 
-Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease;
-run `/hooks` in Codex once to trust them). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too (Gemini CLI
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease, and
+the same tests also pass on the stable 0.157.1; trust them once in Codex). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too (Gemini CLI
 0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1, each run with a local stand-in for the model). The Cursor hooks are
 unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet; Cursor uses the MCP tools
 `session_brief` and `close_session` until it has.
@@ -60,7 +63,7 @@ Remembra Relay runs on Remembra's memory layer, which you can also call directly
     ```typescript
     import { Remembra } from 'remembra';
 
-    const memory = new Remembra({ url: 'http://localhost:8787' });
+    const memory = new Remembra({ url: 'http://localhost:8787', userId: 'user_123' });
 
     // Store memories
     await memory.store('User prefers dark mode and works at Acme Corp');
@@ -82,7 +85,8 @@ Remembra Relay runs on Remembra's memory layer, which you can also call directly
       -e REMEMBRA_URL=http://localhost:8787 \
       -- remembra-mcp
 
-    # Claude now has persistent memory across sessions!
+    # Claude Code can now store and recall memories across sessions through Remembra's MCP tools.
+    # For automatic handoffs at session start and end, run remembra-relay connect.
     ```
 
 ## Why Remembra?
@@ -91,10 +95,10 @@ Remembra Relay runs on Remembra's memory layer, which you can also call directly
 Every AI app needs memory. Developers hack together solutions using vector databases, embeddings, and custom retrieval logic. It's complex, fragmented, and everyone rebuilds the same thing.
 
 ### Our Approach
-- **Self-host in minutes**: One Docker command, everything bundled
-- **MCP-native**: Works with Claude Code and Cursor out of the box
+- **Self-host in minutes**: one command (`quickstart.sh`) starts Remembra, Qdrant and Ollama with Docker Compose
+- **MCP-native**: an MCP server for Claude Code, Cursor and other MCP clients
 - **Open source core**: MIT license, own your data
-- **Built for production**: Entity resolution, temporal decay, hybrid search
+- **Memory features**: entity resolution, temporal decay, hybrid search
 
 ## Core Features
 
@@ -110,7 +114,8 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Knows that "Adam", "Mr. Smith", and "my husband" are the same person.
+    An LLM matcher merges name variants that fit the context, such as "Mr. Smith" and "John Smith". Resolving a
+    mention like "my husband" to a named person is best-effort and untested.
 
 -   :material-clock-time-four:{ .lg .middle } __Temporal Memory__
 
@@ -122,7 +127,8 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Semantic + keyword search with CrossEncoder reranking for accurate recall.
+    Semantic + keyword (BM25) search. CrossEncoder reranking with the optional `rerank` extra (on in Remembra
+    Cloud).
 
 -   :material-graph:{ .lg .middle } __Entity Graph__
 
@@ -142,17 +148,26 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 ### 1. Start the Server
 
-=== "Docker (Recommended)"
-
-    ```bash
-    docker run -d -p 8787:8787 remembra/remembra
-    ```
-
 === "Quick Start (One Command)"
 
     ```bash
     curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
     ```
+
+    Starts Remembra, Qdrant and Ollama with Docker Compose, with auth off and local embeddings.
+
+=== "Docker"
+
+    ```bash
+    docker run -d -p 8787:8787 \
+      -e REMEMBRA_QDRANT_URL=http://your-qdrant:6333 \
+      -e REMEMBRA_OPENAI_API_KEY=sk-your-key \
+      -e REMEMBRA_JWT_SECRET=$(openssl rand -hex 32) \
+      -v remembra-data:/data \
+      remembra/remembra
+    ```
+
+    The image does not include Qdrant: run one next to it (see [Docker Deployment](getting-started/docker.md)).
 
 === "From Source"
 
@@ -162,6 +177,8 @@ Every AI app needs memory. Developers hack together solutions using vector datab
     pip install -e ".[server]"
     remembra-server
     ```
+
+    It needs a running Qdrant and a few settings first; see [Installation](getting-started/installation.md).
 
 ### 2. Use an SDK
 
@@ -212,7 +229,8 @@ Every AI app needs memory. Developers hack together solutions using vector datab
     claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
     ```
 
-    Claude Code now has persistent memory. It will automatically store and recall context across sessions.
+    Claude Code can now store and recall memories across sessions through Remembra's MCP tools. For automatic
+    handoffs at session start and end, run `remembra-relay connect`.
 
     [MCP Setup Guide :material-arrow-right:](integrations/mcp-server.md){ .md-button }
 
@@ -267,7 +285,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Python SDK, opt-in (`auto_expire_temporal=True`): 38 temporal patterns set a TTL, e.g. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 10 days.
+    Python SDK, opt-in (`auto_expire_temporal=True`): 38 temporal patterns suggest a TTL, e.g. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 10 days. SDK 0.16.1 sends some as values a 0.16.1 server cannot read (`1.5d`, `1mo`): with both, those memories get no expiry. Later SDKs send whole hours or days, and later servers read decimals and `mo`.
 
 -   :material-calendar-clock:{ .lg .middle } __Event-Driven Expiry__
 
@@ -299,7 +317,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    `remembra-install --all` auto-detects and configures Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI in one command.
+    `remembra-install --all` auto-detects and configures Claude Code, Codex, Cursor and Gemini CLI, and Claude Desktop on macOS, in one command.
 
 -   :material-stethoscope:{ .lg .middle } __Setup Diagnostics__
 
@@ -323,7 +341,9 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    `recall(query, slim=True)` returns just the context string, without the metadata, for a smaller payload.
+    The `recall_memories` MCP tool with `slim=true` returns only the context string (capped at 800 tokens) and a
+    count, without the memories or their metadata. In the Python SDK and REST API, `slim=True` only caps the
+    context at 800 tokens; memories and entities are still returned.
 
 -   :material-shield-check:{ .lg .middle } __Security Hardening__
 
@@ -343,19 +363,19 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Bi-temporal relationship model with `valid_from`, `valid_to`, and `superseded_by`. Ask "Where did Alice work in January 2022?" and get accurate historical answers.
+    Bi-temporal relationship model with `valid_from`, `valid_to`, and `superseded_by`, and point-in-time queries. A relationship gets an end date only when the stored text states one.
 
 -   :material-tools:{ .lg .middle } __6 New MCP Tools__
 
     ---
 
-    MCP server expanded from 5 → 11 tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, and `relationships_at`.
+    MCP server expanded from 5 → 11 tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, and `relationships_at`. (It has 31 tools today.)
 
 -   :material-graph:{ .lg .middle } __Entity Graph Visualization__
 
     ---
 
-    Interactive force-directed graph with flowing particle effects on relationship edges. Click-to-explore entity neighborhoods.
+    Interactive force-directed graph with flowing particle effects on relationship edges. Click-to-explore entity neighborhoods. (v0.9.0; the current dashboard's map shows agents, projects, trail entries and entities.)
 
 -   :material-calendar-search:{ .lg .middle } __Point-in-Time Queries__
 
@@ -367,7 +387,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    New relationships automatically supersede old ones. "Alice works at Meta" correctly supersedes "Alice works at Google" with full history preserved.
+    Planned in v0.9.0, not shipped for relationships: a new `WORKS_AT` does not end the old one. Outdated facts are superseded at the memory level instead (since v0.16.0).
 
 -   :material-share-variant:{ .lg .middle } __Cross-Agent Memory Sharing__
 
@@ -393,8 +413,8 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 │  Extraction  │   Entities   │   Retrieval   │   Temporal     │
 │  (LLM-based) │ (Resolution) │(Hybrid Search)│  (TTL/Decay)   │
 ├──────────────┼──────────────┼───────────────┼────────────────┤
-│  Ingestion   │  Sleep-Time  │  PII Detect   │   Anomaly      │
-│              │  Compute     │  (OWASP)      │   Detection    │
+│  Ingestion   │  Sleep-Time  │  PII Detect   │   Secret       │
+│              │  Compute     │  (OWASP)      │   Redaction    │
 ├──────────────┼──────────────┼───────────────┼────────────────┤
 │  Plugins     │ Spaces (RBAC)│               │                │
 ├──────────────┴──────────────┴───────────────┴────────────────┤

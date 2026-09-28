@@ -15,12 +15,20 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
+from remembra.auth.middleware import (
+    CurrentUser,
+    enforce_agent_scope_header,
+    has_permission,
+    require_memory_store,
+    resolve_project_access,
+)
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
+from remembra.models.memory import checked_ttl
+from remembra.security.secrets import scrub
 from remembra.services.agent_session import AgentSessionService
 from remembra.services.relay import strip_reserved_metadata
 
@@ -47,13 +55,16 @@ def _require(current_user: Any, permission: str) -> None:
 
 
 def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[str, float, str | None]:
-    """Same content protections as POST /memories: PII policy + sanitizer.
+    """Same content protections as POST /memories: credential redaction, PII policy, sanitizer.
 
+    Credentials are redacted first, as ``StoreRequest`` does for a memory, so
+    a PII pattern cannot cut a key apart and leave the rest of it readable.
     Returns ``(text, trust_score, checksum)``; raises 400 when the PII policy
     blocks the content outright. ``apply_pii=False`` is for text assembled
     from values that were already PII-scrubbed one by one (relay close-out):
-    only the sanitizer runs.
+    the PII policy is skipped.
     """
+    text = scrub(text)
     pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
     if pii_detector:
         pii_result = pii_detector.scan(text, source="user_input")
@@ -87,10 +98,16 @@ class StatusUpsertRequest(BaseModel):
     value: str = Field(..., min_length=1, max_length=5000, description="Current value for the key")
     project_id: str | None = Field(default=None, max_length=128)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    ttl: str | None = Field(default=None, description="Optional TTL for this value, e.g. '30d'")
+    ttl: str | None = Field(default=None, description="Optional TTL for this value, e.g. '30d', '36h', '90min'")
+
+    @field_validator("ttl")
+    @classmethod
+    def validate_ttl(cls, v: str | None) -> str | None:
+        # Refused here (422), before the plan gate runs, rather than after it.
+        return checked_ttl(v)
 
 
-@router.post("/session/status", summary="Set the current value for a status key")
+@router.post("/session/status", summary="Set the current value for a status key", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def upsert_status(
     request: Request,
@@ -104,8 +121,15 @@ async def upsert_status(
     A status write is a relay event: stored atomically, never enriched, never
     billed in smart credits (plan relay burst limit and memory cap apply).
     The plan gate runs only when the value changes: re-sending the current
-    value counts against no cap, burst or daily limit."""
-    _require(current_user, "memory:store")
+    value counts against no cap, burst or daily limit.
+
+    With an agent-scoped key the value is stamped with the key's agent
+    (``metadata.agent_id``); naming another agent there or in the
+    ``X-Remembra-Agent-Id`` header is refused (403), as on ``POST /session/close``."""
+    metadata = strip_reserved_metadata(body.metadata) or {}
+    scoped = enforce_agent_scope_header(request, current_user, (metadata.get("agent_id"), "request"))
+    if scoped:
+        metadata = {**metadata, "agent_id": scoped}
     project = resolve_project_access(current_user, body.project_id) or "default"
     value, trust_score, checksum = screen_text(request, body.value)
 
@@ -118,7 +142,7 @@ async def upsert_status(
             project_id=project,
             key=body.key,
             value=value,
-            metadata=strip_reserved_metadata(body.metadata),
+            metadata=metadata,
             ttl=body.ttl,
             trust_score=trust_score,
             checksum=checksum,

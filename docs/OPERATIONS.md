@@ -208,8 +208,9 @@ boot so the crew replica is never overwritten by an empty file. Without `LITESTR
 is inert and the entrypoint prints a warning on every boot that SQLite is not backed up (the scheduled
 snapshots above do not change that message).
 
-Retention: each replica keeps `LITESTREAM_RETENTION` of history (default `24h`), so data erased from a live
-database leaves its replica within about 48 hours. If you publish a retention promise, change both together.
+Retention: each replica keeps `LITESTREAM_RETENTION` of history (default `24h`) and litestream enforces it
+hourly, so data erased from a live database leaves the replica within about 25 hours. If you publish a
+retention promise, change both together.
 
 Restore drill, on a scratch host:
 
@@ -498,5 +499,6 @@ and every rollback copy a rebuild kept), then every SQLite row they own, in one 
 
 Inside the grace period, `POST /api/v1/admin/users/{id}/activate?active=true` undoes a deletion;
 `DELETE /api/v1/admin/users/{id}?confirm=true` erases at once. Backups are not rewritten: pre-migration
-copies age out after 3 more deploys, scheduled snapshots once `--keep` newer ones exist, the litestream replica
-within about 48 hours, and manual copies never, so delete those yourself.
+copies are deleted after 3 more deploys, scheduled snapshots once `--keep` newer ones exist, the litestream
+replica (when it is on) drops erased data within about 25 hours, and manual copies are never deleted, so delete
+those yourself.

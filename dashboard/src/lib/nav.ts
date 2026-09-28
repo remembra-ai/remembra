@@ -42,7 +42,11 @@ export const TABS: Record<TabType, TabMeta> = {
   crew: { label: 'Crew', title: 'Crews', subtitle: 'One project live: lanes, zones, tasks, channel and feed.' },
   trail: { label: 'Trail', title: 'Trail', subtitle: 'git log for your agents: every handoff, newest first.' },
   agents: { label: 'Agents', title: 'Agents', subtitle: 'Every agent identity that has left a trail.' },
-  inbox: { label: 'Inbox', title: 'Inbox', subtitle: 'What needs you, work any agent can pick up, and notes between agents.' },
+  inbox: {
+    label: 'Inbox',
+    title: 'Inbox',
+    subtitle: "What needs you, work any agent can pick up, and notes between agents. A note shows up in that agent's next brief, after the last session.",
+  },
   memories: { label: 'Memories', title: 'Memory', subtitle: 'Everything your agents and you have stored.' },
   timeline: { label: 'Timeline', title: 'Memory', subtitle: 'Memory creation and change over time.' },
   analytics: { label: 'Analytics', title: 'Memory', subtitle: 'Recall traffic, storage growth and usage.' },

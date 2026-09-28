@@ -20,8 +20,9 @@ What the run showed (and the docs say):
   added to the model's context as a developer message.
 - Codex runs a user hook only after it is trusted: trust is recorded per hook
   against its hash (``[hooks.state."<key>"] trusted_hash`` in config.toml,
-  written by ``/hooks``). Untrusted hooks are skipped without a message, so
-  ``connect`` prints the trust step.
+  written by ``/hooks``). Codex skips untrusted hooks (the interactive CLI
+  asks about new or changed ones when it starts), so ``connect`` prints the
+  trust step.
 - ``timeout`` is in seconds. SessionEnd defaults to 1 s and allows at most 3 s,
   shorter than a close takes, so the end hook detaches (``detach_close``).
 - SessionStart does not fire when bare ``codex`` auto-restores a thread

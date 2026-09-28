@@ -164,7 +164,11 @@ class TestMemoryClient:
             memory.forget(user_id="user_123")  # type: ignore[call-arg]
         mock_client.request.assert_not_called()
 
-    @pytest.mark.parametrize("version", ["0.16.0", "0.9.9", "", None, "unknown"])
+    @pytest.mark.parametrize(
+        "version",
+        # Pre-releases and dev builds of 0.16.1 come before the 0.16.1 fix.
+        ["0.16.0", "0.9.9", "", None, "unknown", "0.16.1rc1", "0.16.1.dev3", "0.16.1-beta.2", "0.16"],
+    )
     @patch("remembra.client.memory.httpx.Client")
     def test_forget_by_entity_is_not_sent_to_a_server_that_would_wipe_the_account(self, mock_client_class, version):
         """Before 0.16.1 the server deleted the whole account for a delete by entity."""
@@ -177,6 +181,13 @@ class TestMemoryClient:
         # Deleting one memory stays available.
         memory.forget(memory_id="mem_1")
         assert mock_client.request.call_args.kwargs["params"] == {"memory_id": "mem_1"}
+
+    @pytest.mark.parametrize("version", ["0.16.1", "v0.16.1", "0.16.1+e6277da", "0.16.1.post1", "0.17.0rc1", "1.0.0"])
+    @patch("remembra.client.memory.httpx.Client")
+    def test_forget_by_entity_is_sent_to_a_server_with_the_fix(self, mock_client_class, version):
+        mock_client = self._server(mock_client_class, version=version)
+        Memory(user_id="user_123").forget(entity="John")
+        assert [c.kwargs["method"] for c in mock_client.request.call_args_list] == ["GET", "DELETE"]
 
     @patch("remembra.client.memory.httpx.Client")
     def test_request_error(self, mock_client_class):

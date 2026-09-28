@@ -268,17 +268,43 @@ async def test_summary_counts_only_filtered_and_updated(tmp_path, monkeypatch):
             expect_silence(rws)
 
 
-async def test_key_revoked_mid_connection_closes_4003_by_revalidation(tmp_path, monkeypatch):
-    monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_S", 0.2)
+async def test_key_revoked_mid_connection_closes_4001_by_revalidation(tmp_path, monkeypatch):
+    monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_SECONDS", 0.2)
     async with crew_app(tmp_path, monkeypatch) as (h, crewdb, log):
         key, key_id = await h.api_key("owner-1", "editor", scopes=CREW_SCOPES)
         with TestClient(h.app) as client, connect(client, key) as ws:
             recv_type(ws, "connected")
             ws.send_text(sub())
             recv(ws)
-            # revoke directly in the DB: no push, the 60 s (here 0.2 s) re-validation must catch it
-            assert client.portal.call(lambda: h.keys.revoke_key(key_id, "owner-1"))
-            expect_close(ws, websocket.CLOSE_FORBIDDEN)
+
+            async def switch_off():  # directly in the DB: no hook runs, so no push
+                await h.db.conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (key_id,))
+                await h.db.conn.commit()
+
+            # the 30 s (here 0.2 s) re-validation must catch it; a key that no longer authenticates is 4001
+            client.portal.call(switch_off)
+            expect_close(ws, websocket.CLOSE_UNAUTHORIZED)
+
+
+async def test_revoked_key_gets_no_further_crew_frame(tmp_path, monkeypatch):
+    """The per-frame check (P-348): no hook and no periodic check ran, yet the next crew event is not sent."""
+    monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_SECONDS", 3600)
+    async with crew_app(tmp_path, monkeypatch) as (h, crewdb, log):
+        key, key_id = await h.api_key("owner-1", "editor", scopes=CREW_SCOPES)
+        with TestClient(h.app) as client, connect(client, key) as ws:
+            recv_type(ws, "connected")
+            ws.send_text(sub())
+            recv(ws)
+            emit(client, log, 1)
+            assert recv(ws)["type"] == "crew.event"
+
+            async def switch_off():
+                await h.db.conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (key_id,))
+                await h.db.conn.commit()
+
+            client.portal.call(switch_off)
+            emit(client, log, 1)
+            expect_close(ws, websocket.CLOSE_UNAUTHORIZED)
 
 
 async def test_rest_key_revocation_pushes_an_immediate_close(tmp_path, monkeypatch):
@@ -292,13 +318,13 @@ async def test_rest_key_revocation_pushes_an_immediate_close(tmp_path, monkeypat
             recv(ws)
             r = client.delete(f"/api/v1/keys/{other_id}", headers={"X-API-Key": key})
             assert r.status_code == 200, r.text
-            expect_close(ws, websocket.CLOSE_FORBIDDEN, timeout=1.0)
+            expect_close(ws, websocket.CLOSE_UNAUTHORIZED, timeout=1.0)  # the key no longer authenticates
             keep.send_text("ping")
             assert recv(keep) == "pong"  # other connections are untouched
 
 
 async def test_membership_loss_closes_4003_on_revalidation_and_on_push(tmp_path, monkeypatch):
-    monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_S", 0.2)
+    monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_SECONDS", 0.2)
     async with crew_app(tmp_path, monkeypatch) as (h, crewdb, log):
         await seed_member(crewdb, CREW_A, "member-1")
         await seed_member(crewdb, CREW_A, "member-2")
@@ -316,7 +342,7 @@ async def test_membership_loss_closes_4003_on_revalidation_and_on_push(tmp_path,
 
                 client.portal.call(remove_member)
                 expect_close(ws, websocket.CLOSE_FORBIDDEN)
-            monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_S", 3600)
+            monkeypatch.setattr(websocket, "REVALIDATE_INTERVAL_SECONDS", 3600)
             with connect(client, k2) as ws:
                 recv_type(ws, "connected")
                 ws.send_text(sub())

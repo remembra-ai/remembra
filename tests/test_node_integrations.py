@@ -278,10 +278,12 @@ def test_plugin_forget_entity_is_scoped_and_confirmed(proxy, node_dir):
     confirmed = ["remembra_forget", {"entity": "Alice", "dry_run": False, "confirm": phrase}]
 
     # A server before 0.16.1 deletes the whole account for this: the plugin does not send it.
-    proxy["api"]["app"].state.reported_version = "0.16.0"
-    old = _plugin(node_dir, _cfg(proxy), [confirmed])["results"][0]
-    assert old["status"] == "error" and "0.16.1" in old["error"]
-    assert not [r for r in proxy["seen"] if r["method"] == "DELETE"]
+    # A 0.16.1 pre-release or dev build comes before the fix too.
+    for version in ("0.16.0", "0.16.1rc1", "0.16.1.dev3"):
+        proxy["api"]["app"].state.reported_version = version
+        old = _plugin(node_dir, _cfg(proxy), [confirmed])["results"][0]
+        assert old["status"] == "error" and "0.16.1" in old["error"]
+        assert not [r for r in proxy["seen"] if r["method"] == "DELETE"]
     proxy["api"]["app"].state.reported_version = "0.16.1"
 
     out = _plugin(

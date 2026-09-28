@@ -436,7 +436,7 @@ function App() {
                 if (me) setCurrentUser((prev) => (prev ? { ...prev, is_admin: me.is_admin === true } : prev));
               })
               .catch(() => undefined);
-            toast.success(outcome.kept.length || outcome.removed.length ? 'Done. We emailed you what you kept.' : 'Done.');
+            toast.success(outcome.kept.length || outcome.removed.length ? 'Done. We emailed you what you kept and removed.' : 'Done.');
           }}
           onLater={() => {
             rememberDeferred(currentUser.id);

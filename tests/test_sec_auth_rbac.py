@@ -43,9 +43,9 @@ async def test_jwt_user_cannot_mint_admin_key(tmp_path):
 async def test_api_key_cannot_mint_above_itself_or_outside_projects(tmp_path):
     async with secure_app(tmp_path, ROUTERS) as h:
         uid = await h.create_user("b@example.com")
-        viewer, _ = await h.api_key(uid, "viewer", project_ids=["alpha"])
-        hdr = {"X-API-Key": viewer}
-        assert (await h.client.post("/api/v1/keys", json={"role": "editor"}, headers=hdr)).status_code == 403
+        editor, _ = await h.api_key(uid, "editor", project_ids=["alpha"])
+        hdr = {"X-API-Key": editor}
+        assert (await h.client.post("/api/v1/keys", json={"role": "admin"}, headers=hdr)).status_code == 403
         assert (
             await h.client.post("/api/v1/keys", json={"role": "viewer", "project_ids": ["beta"]}, headers=hdr)
         ).status_code == 403
@@ -53,16 +53,24 @@ async def test_api_key_cannot_mint_above_itself_or_outside_projects(tmp_path):
         r = await h.client.post("/api/v1/keys", json={"role": "viewer"}, headers=hdr)
         assert r.status_code == 201, r.text
         assert r.json()["project_ids"] == ["alpha"]
+        # A viewer key is read-only: it mints nothing, not even another viewer key (P-347).
+        viewer, _ = await h.api_key(uid, "viewer", project_ids=["alpha"])
+        r = await h.client.post("/api/v1/keys", json={"role": "viewer"}, headers={"X-API-Key": viewer})
+        assert r.status_code == 403, r.text
 
 
 async def test_scoped_key_mints_only_scoped_keys(tmp_path):
     async with secure_app(tmp_path, ROUTERS) as h:
         uid = await h.create_user("c@example.com")
-        scoped, _ = await h.api_key(uid, "editor", scopes=["memory:recall"])
+        scoped, _ = await h.api_key(uid, "editor", scopes=["memory:recall", "key:create"])
         r = await h.client.post("/api/v1/keys", json={"role": "editor"}, headers={"X-API-Key": scoped})
         assert r.status_code == 201, r.text
         role = await h.roles.get_role(r.json()["id"])
-        assert role.scopes == ["memory:recall"]
+        assert role.scopes == ["memory:recall", "key:create"]
+        # Scopes narrow the role: a key scoped away from key:create mints nothing.
+        recall_only, _ = await h.api_key(uid, "editor", scopes=["memory:recall"])
+        r = await h.client.post("/api/v1/keys", json={"role": "viewer"}, headers={"X-API-Key": recall_only})
+        assert r.status_code == 403, r.text
 
 
 async def test_master_key_can_still_provision_admin(tmp_path):
@@ -87,9 +95,14 @@ async def test_api_key_cannot_patch_own_role_or_projects(tmp_path):
         assert r.status_code == 403, r.text
         role = await h.roles.get_role(viewer_id)
         assert role.role.value == "viewer" and role.project_ids == ["alpha"]
-        # Renaming is still allowed.
+        # A viewer key cannot even rename itself (P-347); an editor key can rename.
         r = await h.client.patch(f"/api/v1/keys/{viewer_id}", json={"name": "renamed"}, headers=hdr)
+        assert r.status_code == 403, r.text
+        editor, editor_id = await h.api_key(uid, "editor", project_ids=["alpha"])
+        r = await h.client.patch(f"/api/v1/keys/{editor_id}", json={"name": "renamed"}, headers={"X-API-Key": editor})
         assert r.status_code == 200, r.text
+        r = await h.client.patch(f"/api/v1/keys/{editor_id}", json={"role": "editor"}, headers={"X-API-Key": editor})
+        assert r.status_code == 403, r.text
 
 
 async def test_dashboard_session_cannot_escalate_key_to_admin(tmp_path):

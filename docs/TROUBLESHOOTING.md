@@ -191,7 +191,7 @@ CONTENT=$(curl -s "$API/memories/YOUR_MEMORY_ID" \
   -H "Authorization: Bearer $TOKEN" | jq -r '.content')
 
 # Delete old memory
-curl -s -X DELETE "$API/memories/YOUR_MEMORY_ID" \
+curl -s -X DELETE "$API/memories?memory_id=YOUR_MEMORY_ID" \
   -H "Authorization: Bearer $TOKEN"
 
 # Store again (will create proper vector)
@@ -448,7 +448,7 @@ docker logs remembra 2>&1 | grep -i "qdrant\|collection\|initialized"
 
 **Expired Token**
 
-JWT tokens expire (default: 7 days). Get a new one:
+Dashboard sign-ins (JWTs) expire after a fixed 24 hours. Get a new one:
 ```bash
 TOKEN=$(curl -s -X POST "$API/auth/login" \
   -H "Content-Type: application/json" \
@@ -457,9 +457,11 @@ TOKEN=$(curl -s -X POST "$API/auth/login" \
 
 **Wrong API Key Format**
 
-API keys must be sent in the header, not the URL:
+API keys must be sent in a header, not the URL:
 ```bash
 # CORRECT
+curl -H "X-API-Key: YOUR_API_KEY" ...
+# also accepted for rem_ keys
 curl -H "Authorization: Bearer YOUR_API_KEY" ...
 
 # WRONG

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Subprocessors · Remembra</title>
-<meta name="description" content="Every company that handles data for Remembra Cloud and remembra.dev: Hetzner (US hosting), Cloudflare, OpenAI, Paddle, Resend, Formsubmit and Google Fonts. What each receives and where.">
+<meta name="description" content="Every company that handles data for Remembra Cloud and remembra.dev: Hetzner (US hosting), Cloudflare, OpenAI, Paddle, Resend, Formsubmit, Google Fonts, Google Workspace and Namecheap. What each receives and where.">
 <link rel="canonical" href="https://remembra.dev/subprocessors">
 <!-- @head -->
 <script>
@@ -57,7 +57,7 @@
   <section class="wrap page-head" aria-labelledby="doc-title">
     <p class="eyebrow">Legal</p>
     <h1 id="doc-title">Subprocessors</h1>
-    <p class="lede">Last updated: September 26, 2026. Every company that handles data for Remembra Cloud or our websites, what it gets and where. Self-hosted Remembra uses none of them.</p>
+    <p class="lede">Last updated: September 27, 2026. Every company that handles data for Remembra Cloud or our websites, what it gets and where. Self-hosted Remembra uses none of them.</p>
     <!-- requires counsel review of privacy.html, subprocessors.html, dpa.html and refunds.html (legal bases, transfers, retention, entity name) before paid plans go live -->
   </section>
   <div class="wrap doc-grid">
@@ -76,17 +76,17 @@
 <thead><tr><th>Company</th><th>What it does for us</th><th>What it receives</th><th>Where</th></tr></thead>
 <tbody>
 <tr><td>Hetzner Online GmbH</td><td>Rents us the servers Remembra Cloud and our websites run on</td><td>Everything stored in Remembra Cloud: accounts, notes, handoffs, inbox messages, keys, logs</td><td>United States (Ashburn, Virginia)</td></tr>
-<tr><td>Cloudflare, Inc.</td><td>DNS, HTTPS and attack protection in front of remembra.dev, app., api. and docs.; the bot check on sign-up</td><td>Every request in transit, including IP addresses and what is sent to the API</td><td>Its global network; a US company</td></tr>
-<tr><td>OpenAI, L.L.C.</td><td>Embeddings for search, and AI enrichment of new notes</td><td>The text of notes, handoffs and search queries</td><td>United States</td></tr>
+<tr><td>Cloudflare, Inc.</td><td>DNS, HTTPS and attack protection in front of remembra.dev, app., api. and docs. A bot check on sign-up is built but not switched on yet</td><td>Every request in transit, including IP addresses and what is sent to the API</td><td>Its global network; a US company</td></tr>
+<tr><td>OpenAI, L.L.C.</td><td>Embeddings for search, and AI enrichment of notes you store or edit</td><td>The text of notes, handoffs and search queries</td><td>United States</td></tr>
 <tr><td>Paddle.com Market Ltd</td><td>Sells our paid plans as Merchant of Record: checkout, tax, invoices, refunds. Its checkout script, Paddle.js, loads from cdn.paddle.com on every page of the dashboard (app.remembra.dev)</td><td>Your name, email, billing address, payment method and what you bought; from Paddle.js, your IP address and browser details whenever a dashboard page loads, even if you buy nothing</td><td>United Kingdom, with its own processors</td></tr>
 <tr><td>Resend, Inc.</td><td>Sends account email: verification, password resets, security and billing notices</td><td>Your email address and the email's content</td><td>United States</td></tr>
-<tr><td>Formsubmit (formsubmit.co)</td><td>Forwards messages from our contact form to our inbox</td><td>What you type in the form: name, email, company, message</td><td>Not published by the provider</td></tr>
+<tr><td>Formsubmit (formsubmit.co)</td><td>Forwards messages from our contact form to our inbox</td><td>What you type in the form: first and last name, email, company, the topic you pick and your message</td><td>Not published by the provider</td></tr>
 <tr><td>Google LLC (Google Fonts)</td><td>Serves the typefaces on remembra.dev and the dashboard (app.remembra.dev)</td><td>Your IP address and browser details when a page loads</td><td>United States and its global network</td></tr>
-<tr><td>Google LLC (Google Workspace)</td><td>Hosts our dolphytech.com mailboxes: the one mail to support@, sales@ and contact@remembra.dev is forwarded to, admin@ (privacy, erasure and DPA requests) and security@ (vulnerability reports)</td><td>The email you send those addresses: your address, name and what you write</td><td>United States and its global network</td></tr>
+<tr><td>Google LLC (Google Workspace)</td><td>Hosts our dolphytech.com mailboxes: the one mail to support@, sales@ and contact@remembra.dev is forwarded to, admin@ (privacy, erasure and DPA requests), security@ (vulnerability reports) and sales@ (enterprise questions from the dashboard)</td><td>The email you send those addresses: your address, name and what you write</td><td>United States and its global network</td></tr>
 <tr><td>Namecheap, Inc.</td><td>Email forwarding for remembra.dev: passes mail sent to support@, sales@ and contact@remembra.dev (which is where the contact form goes) on to our dolphytech.com mailbox at Google Workspace</td><td>The email you send those addresses: your address, name and what you write</td><td>United States</td></tr>
 </tbody>
 </table>
-<p>OpenAI processes API data under its API terms: it says it does not train on it unless the customer opts in, and may keep it for up to 30 days to detect abuse (<a href="https://developers.openai.com/api/docs/guides/your-data">details</a>). The <a href="/privacy#ai">privacy policy</a> explains what we send and when.</p>
+<p>OpenAI processes API data under its API terms: it says it does not train on it unless the customer opts in (we have not), and keeps abuse-monitoring logs, which can include API data, for up to 30 days, unless the law requires longer or it is reasonably necessary to protect its services or others from harm (<a href="https://developers.openai.com/api/docs/guides/your-data">details</a>). The <a href="/privacy#ai">privacy policy</a> explains what we send and when.</p>
 
 <h2 id="you-choose">Services you choose</h2>
 <p>These see your data only if you use them, under their own terms:</p>
@@ -100,11 +100,12 @@
 <ul>
 <li><strong>TypeSafe</strong> (typesafe.ai): would receive new facts and the existing facts they might duplicate, to decide whether they match.</li>
 <li><strong>Anthropic</strong>: would receive note text for entity extraction, in place of OpenAI.</li>
+<li><strong>Azure OpenAI, Cohere, Voyage AI or Jina AI</strong>: one of them would receive the text of notes, handoffs and search queries for embeddings, in place of OpenAI.</li>
 <li><strong>Backup storage</strong>: continuous copies of the database to an object store.</li>
 </ul>
 
 <h2 id="changes">Changes to this list</h2>
-<p>We update this page, and its date, before a new subprocessor starts handling your data. If you have a <a href="/dpa">data processing agreement</a> with us, it says how we give notice and how you can object.</p>
+<p>We update this page, and its date, before a new subprocessor starts handling your data. Our <a href="/dpa">data processing agreement</a>, when it is ready, will say how we give notice and how you can object.</p>
     </article>
   </div>
 </main>

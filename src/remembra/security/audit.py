@@ -23,6 +23,8 @@ class AuditAction(StrEnum):
     MEMORY_UPDATE = "memory_update"
     MEMORY_FORGET = "memory_forget"
     MEMORY_GET = "memory_get"
+    # Deleted by the sleep-time decay cleanup (only when an operator turns it on)
+    MEMORY_DECAYED = "memory_decayed"
 
     # API key operations
     KEY_CREATED = "key_created"

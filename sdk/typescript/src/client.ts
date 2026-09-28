@@ -56,11 +56,16 @@ import {
 
 const DEFAULT_URL = 'http://localhost:8787';
 // Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
-const ENTITY_DELETE_MIN_SERVER = [0, 16, 1];
+// The last element is 1 for a release: a pre-release of 0.16.1 comes before the fix.
+const ENTITY_DELETE_MIN_SERVER = [0, 16, 1, 1];
+// What follows the number in a pre-release or dev build: 0.16.1rc1, 0.16.1.dev3, 0.16.1-beta.2.
+const PRE_RELEASE = /^[-.]?(?:a|alpha|b|beta|c|rc|pre|preview|dev)/i;
 
+/** [major, minor, patch, 1 for a release or 0 for a pre-release or dev build], or null. */
 function serverVersion(version: unknown): number[] | null {
-  const match = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version ?? ''));
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)] : null;
+  const match = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?(\S*)/.exec(String(version ?? ''));
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0), PRE_RELEASE.test(match[4]) ? 0 : 1];
 }
 
 function olderThan(version: number[], minimum: number[]): boolean {
@@ -307,7 +312,8 @@ export class Remembra {
    * @returns Deletion counts
    * @throws ValidationError when no target or more than one is given
    * @throws RemembraError (code `SERVER_TOO_OLD`) for `entity` when the server is older than
-   *   0.16.1, which deletes the whole account for it; nothing is sent
+   *   0.16.1 (a 0.16.1 pre-release or dev build counts as older), or reports no version: those
+   *   delete the whole account for it; nothing is sent
    *
    * @example
    * ```typescript

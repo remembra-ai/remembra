@@ -372,7 +372,10 @@ async def test_inbox_reserved_senders_and_provenance(tmp_path):
 
         self_declared = (await h.client.post(send, json={**base, "from_agent": "gemini"}, headers=plain)).json()
         assert self_declared["sender_kind"] == "agent" and self_declared["sender_verified"] is False
-        verified = (await h.client.post(send, json={**base, "from_agent": "pretend"}, headers=scoped)).json()
+        # An agent-scoped key that names another sender is refused, not relabelled (owner decision 11).
+        spoof = await h.client.post(send, json={**base, "from_agent": "pretend"}, headers=scoped)
+        assert spoof.status_code == 403 and "scoped to agent 'codex'" in spoof.text, spoof.text
+        verified = (await h.client.post(send, json=base, headers=scoped)).json()
         assert verified["sender_verified"] is True
         from_human = (await h.client.post(send, json={**base, "from_agent": "mani", "kind": "pause"}, headers=human)).json()
         assert from_human["sender_kind"] == "human"

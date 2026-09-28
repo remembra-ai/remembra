@@ -25,8 +25,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
-from remembra.api.v1.relay import AGENT_HEADER, effective_agent
-from remembra.auth.middleware import AuthenticatedUser, get_current_user, resolve_project_access
+from remembra.api.v1.relay import effective_agent
+from remembra.auth.middleware import AGENT_HEADER, AuthenticatedUser, get_current_user, resolve_project_access
 from remembra.crew import schemas
 from remembra.crew.access import (
     CrewAccess,

@@ -81,13 +81,13 @@
   </section>
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <article class="prose">
-<p class="note">First published March 2026; rewritten September 25, 2026. The March version had our own old price and got Zep's MCP support wrong. Competitor facts below link to the page we read them from, on September 25, 2026. Prices change: check their pages before you decide.</p>
+<p class="note">First published March 2026; rewritten September 25, 2026. The March version had our own old price and got Zep's MCP support wrong. Prices and Zep's MCP support link to the pages we read on September 25, 2026; the other comparisons are our summary. Prices change: check their pages before you decide.</p>
 <p>Mem0, Zep and Remembra all give AI apps a memory that outlasts one conversation. They have grown in different directions, and the right pick depends on what you are building. This comparison is from the Remembra team, so read it knowing that.</p>
 
 <h2>The short answer</h2>
 <ul>
 <li><strong>Building a chatbot or an app that remembers its users?</strong> Mem0 and Zep are memory APIs built for exactly that, with more years of use behind them.</li>
-<li><strong>Running coding agents and switching between them?</strong> That is what Remembra is for now: when one agent stops, it leaves a handoff built from git facts, and the next agent, in another tool or on another machine, starts from it.</li>
+<li><strong>Running coding agents and switching between them?</strong> That is what Remembra is for now: when one agent stops, its hooks leave a handoff built from git facts, and the next agent, in another tool or on another machine, starts from it.</li>
 </ul>
 
 <h2>At a glance</h2>
@@ -111,10 +111,10 @@
 
 <h2>Where Remembra is different</h2>
 <ul>
-<li><strong>Facts, not paraphrase.</strong> A handoff's facts are read from git (commits, changed files, whether they are pushed) and, for Claude Code and Codex, from the session's commands and test runs. The agent's own summary is optional and is marked unverified, or contradicted when git disagrees.</li>
+<li><strong>Facts, not paraphrase.</strong> With the relay hooks, a handoff's facts are read from git (commits, changed files, whether they are pushed) and, for Claude Code and Codex, from the session's commands and test runs. A handoff an agent sends through the MCP tools holds the facts it reports, labelled as declared by the agent. The agent's own summary is optional and is marked unverified, or contradicted when git disagrees.</li>
 <li><strong>Across tools and machines.</strong> The same repository on a laptop, a server or a cloud VM is one project, so the next agent can be anywhere. Claude Code's, Codex's, Gemini CLI's, Qwen Code's and Kimi Code's hooks are verified today (Codex on the codex-cli 0.155.0-alpha.16.4 prerelease, Gemini CLI 0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1, each run against the real tool); the Cursor hooks are not yet, and any MCP agent can use the tools directly.</li>
 <li><strong>A trail.</strong> Every handoff stays in order, like a git log for your agents.</li>
-<li><strong>Handoffs are free</strong> on every plan; credits pay only for AI work on your notes (enrichment and de-duplication).</li>
+<li><strong>Handoffs are free</strong> on every plan; credits pay only for AI work on your notes, such as enriching a note you add or edit.</li>
 </ul>
 <p>What Remembra doesn't do yet is on our <a href="/security#not-yet">security page</a>.</p>
 

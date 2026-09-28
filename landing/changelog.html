@@ -106,14 +106,14 @@
             <li><strong>Gemini CLI, Qwen Code and Kimi Code verified.</strong> Each one's hooks were run against the real tool (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1), so <code>connect --apply</code> now writes them. Cursor is the one agent whose hooks are still unverified.</li>
             <li><strong><code>remembra-relay doctor</code>.</strong> When a brief doesn't arrive or a handoff never reaches the trail, the doctor reads this machine and your trail, says where it went missing and gives one fix for each problem. It only reads. Inside your agent, the local MCP server has the same checks as <code>remembra_doctor</code>, with <code>remembra_setup</code> and <code>remembra_help</code>. <a href="https://docs.remembra.dev/guides/relay/#doctor">Doctor</a></li>
             <li><strong>Setup your agent can follow.</strong> <a href="/setup.md">remembra.dev/setup.md</a> takes an agent through the install step by step: it stops for your key and asks before each write. On the dashboard, every agent still waiting on the setup checklist has a <b>why?</b> that shows what it checked and the one fix.</li>
-            <li><strong>One project per repository.</strong> Every git repository gets its own project, even with <code>REMEMBRA_PROJECT</code> set; the configured project names only folders that are not repositories.</li>
+            <li><strong>One project per repository.</strong> A git repository the server has not seen before gets its own project, even with <code>REMEMBRA_PROJECT</code> set; the configured project names only new folders that are not repositories. Repositories already bound to one project stay there until you split them, a key limited to certain projects keeps new repositories inside those projects, and an MCP agent that sends no repository details uses <code>REMEMBRA_PROJECT</code>.</li>
           </ul>
 
           <p class="k">Fixed</p>
           <ul>
-            <li><strong>Deleting by entity.</strong> <code>DELETE /api/v1/memories?entity=…</code>, which the SDKs' delete by entity sends, deleted every memory in the account. It now deletes only the memories linked to that entity, and the SDKs send it only to a server that has the fix.</li>
+            <li><strong>Deleting by entity.</strong> <code>DELETE /api/v1/memories?entity=…</code>, which the SDKs' delete by entity sends, deleted every memory in the account. It now deletes only the memories linked to that entity. The Python SDK sends it only to a server that reports version 0.16.1 or later. The TypeScript SDK has the same check in the repository, but no npm release has it yet: until one does, upgrade the server before you delete by entity from TypeScript.</li>
             <li><strong>Briefs.</strong> "Last session" is the last session that did something, Recent lists only this project's handoffs and checkpoints, Codex automation runs and sub-agents stay out of the trail, and a hook that another agent runs is filed under that agent.</li>
-            <li><strong>Security.</strong> Billing and plan limits hold on every path, request bodies are capped before sign-in, credentials typed on a command line are redacted from handoffs, other agents' text reaches the model only as untrusted data, and the dashboard and docs images run nginx as a non-root user.</li>
+            <li><strong>Security.</strong> Plan limits now apply to supersede, session close, conversation ingest without enrichment, restore and concurrent batch writes. Request bodies are capped before sign-in. Credentials typed on a command line are redacted from handoffs. The session brief and the MCP tools pass other agents' text to the model only as untrusted data; <code>remembra-relay trail</code> and the framework integrations print stored text as it is. The dashboard and docs images run nginx as a non-root user.</li>
           </ul>
         </div>
       </article>
@@ -131,13 +131,13 @@
           <ul>
             <li><strong>Handoffs.</strong> At session end, <code>remembra-relay close</code> reads the branch, commits, changed and uncommitted files and unpushed commits from git, and, for Claude Code and Codex, the commands, test runs and open items in the local session transcript (for Codex, its rollout file). The transcript itself never leaves your machine. The server keeps one handoff: done, not done, failing, next step.</li>
             <li><strong>Grounded summaries.</strong> An agent's own summary is optional and is checked against those facts. The brief shows it as unverified, or as contradicted when git disagrees.</li>
-            <li><strong>Briefs.</strong> At session start, <code>remembra-relay brief</code> or the <code>session_brief</code> MCP tool gives the next agent who worked last, what is done, what is failing and the suggested next step, in about 1,500 tokens. Everything another agent recorded is wrapped as untrusted data.</li>
+            <li><strong>Briefs.</strong> At session start, <code>remembra-relay brief</code> gives the next agent who worked last, what is done, what is failing and the suggested next step, in at most 6,000 characters (about 1,500 tokens). The <code>session_brief</code> MCP tool returns only that text with <code>compact=true</code>; by default it adds the structured data, which is several times larger. Everything another agent recorded is wrapped as untrusted data.</li>
             <li><strong>The trail.</strong> Every handoff and checkpoint in order: <code>remembra-relay trail</code>, and the Trail page in the dashboard.</li>
             <li><strong>One project on every machine.</strong> A repository is identified by its git remote, so the same repo on a laptop, a server or in a worktree is one project.</li>
             <li><strong>Agent-scoped keys.</strong> Give each agent its own key and its handoffs show as key-verified; that key cannot write as another agent. Handoffs closed with a shared key show as self-declared.</li>
             <li><strong>Agents.</strong> Claude Code's and Codex's session hooks are verified, Codex with codex-cli 0.155.0-alpha.16.4, a prerelease (run <code>/hooks</code> in Codex once to trust them). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi follow each tool's docs but have not been run against it yet, so <code>connect</code> leaves them out unless you add <code>--include-unverified</code>. Any agent that speaks MCP can use the <code>session_brief</code> and <code>close_session</code> tools.</li>
             <li><strong>The dashboard.</strong> Home shows what changed since your last visit and the command that continues the work; Trail, Agents and Inbox sit beside it.</li>
-            <li><strong>Lossless memory.</strong> The exact text a fact came from is kept as a source record, every derived fact points back to it, and a fact that does not match its source is stored flagged as unverified.</li>
+            <li><strong>Lossless memory.</strong> When extraction pulls facts out of a note, the exact text is kept as a source record and every fact points back to it. By default a fact that does not match its source is dropped, and the store response lists it; if every fact is dropped, the note's own text is stored. With <code>grounding_action</code> set to <code>flag</code>, a mismatched fact is stored flagged as unverified instead.</li>
             <li><strong>New plans.</strong> Free, Solo, Pro and Team, with <a href="/pricing">smart credits</a> for AI enrichment of new notes. Handoffs, briefs, the inbox, the trail and search never use credits. Billing moves to Paddle, which sells the plans as Merchant of Record.</li>
             <li><strong>Sign in with GitHub or Google</strong>, and email verification for new accounts.</li>
           </ul>
@@ -145,7 +145,7 @@
           <p class="k">What changes if you already use Remembra</p>
           <ul>
             <li><strong>Your plan.</strong> If you subscribed before this release, you keep your plan and its price on a grandfathered tier. That tier gets a monthly ceiling on AI enrichment, and a lower cap on notes kept takes effect only after we give you notice.</li>
-            <li><strong>Which project a repository uses.</strong> In 0.16.0 a repository the server had not seen joined the project you configured (<code>REMEMBRA_PROJECT</code>), so several repositories could share one trail. From 0.16.1 every git repository gets its own project; the configured project names only folders that are not repositories, and <code>REMEMBRA_RELAY_PROJECT</code> still keeps everything in one project on purpose. <code>remembra-relay projects split</code> separates repositories already bound together. To move a repository, run <code>remembra-relay resolve --project &lt;id&gt; --bind</code>.</li>
+            <li><strong>Which project a repository uses.</strong> In 0.16.0 a repository the server had not seen joined the project you configured (<code>REMEMBRA_PROJECT</code>), so several repositories could share one trail. From 0.16.1 every git repository the server has not seen before gets its own project; the configured project names only new folders that are not repositories, and <code>REMEMBRA_RELAY_PROJECT</code> still puts every new location in one project on purpose. <code>remembra-relay projects split</code> separates repositories already bound together. To move a repository, run <code>remembra-relay resolve --project &lt;id&gt; --bind</code>.</li>
             <li><strong>Briefs read differently.</strong> What other agents recorded now sits inside an untrusted-data block, an agent's next step is labelled a suggestion, low-trust text is withheld, and a handoff from another branch is flagged as possibly stale.</li>
             <li><strong>Reserved metadata.</strong> <code>POST /memories</code> drops the relay-only metadata keys <code>relay</code> and <code>relay_key</code>, and agent-scoped keys stamp their own <code>agent_id</code>.</li>
           </ul>
@@ -201,13 +201,13 @@
         <p class="when"><span class="ver">v0.12.0</span><time>March 22, 2026</time></p>
         <div>
           <h3 id="v0-12-0-t">User Profiles &amp; Smart Auto-Forgetting</h3>
-          <p>User Profiles API, 35+ temporal patterns for auto-TTL, strict mode expiry, event-driven expiry, and client-side shadow TTLs.</p>
+          <p>User Profiles API, TTLs from temporal phrases in the Python SDK, strict mode expiry, event-driven expiry, and client-side shadow TTLs.</p>
           <ul>
             <li><strong>User Profiles API</strong>: <code>GET /api/v1/users/{user_id}/profile</code> returns aggregated facts, activity, topics</li>
-            <li><strong>Smart Auto-Forgetting</strong>: 35+ temporal patterns auto-set TTL (<code>"meeting tomorrow"</code> → 36h)</li>
-            <li><strong>Strict Mode 410 GONE</strong>: Opt-in mode returns 410 for expired memories instead of silent accept</li>
+            <li><strong>Smart Auto-Forgetting</strong>: Python SDK, opt-in with <code>auto_expire_temporal=True</code>. 38 temporal patterns suggest a TTL that the SDK sends with the store (<code>"meeting tomorrow"</code> → 36 hours). Servers up to 0.16.1 cannot read many of the values that SDKs up to 0.16.1 send, such as <code>1.5d</code> for "meeting tomorrow" and <code>1mo</code> for "this month": those memories get no expiry. They read <code>40m</code> ("in 10 minutes") as 40 months.</li>
+            <li><strong>Strict Mode 410 GONE</strong>: with <code>REMEMBRA_STRICT_MODE=true</code>, a GET or PATCH of an expired memory returns 410</li>
             <li><strong>Event-Driven Expiry</strong>: <code>expires_at</code> parameter for explicit timestamps</li>
-            <li><strong>Client-side shadow TTLs</strong>: the SDK caches expiry locally, so it asks the server less often</li>
+            <li><strong>Client-side shadow TTLs</strong>: Python SDK, opt-in with <code>enable_shadow_ttl=True</code>. The SDK records each memory's expiry locally, so your code can call <code>is_memory_valid()</code>. The SDK itself does not skip any server call.</li>
           </ul>
         </div>
       </article>
@@ -218,7 +218,7 @@
           <p>Streamlined credential management, slim recall mode, and full bridge lifecycle control.</p>
           <ul>
             <li><strong>Centralized Credentials</strong>: <code>~/.remembra/credentials</code> with chmod 600</li>
-            <li><strong>Slim Recall Mode</strong>: 90% smaller payloads with <code>slim=True</code></li>
+            <li><strong>Slim Recall Mode</strong>: in the MCP <code>recall_memories</code> tool, <code>slim=True</code> returns only the context (capped at 800 tokens) and a count. The size saving was not measured.</li>
             <li><code>remembra-bridge --stop/--status</code>: Full lifecycle control</li>
             <li><strong>Port-in-use detection</strong> and health checks after startup</li>
           </ul>
@@ -231,7 +231,7 @@
           <p>One command configures the AI tools it detects. Setup diagnostics and local bridge for sandboxed agents.</p>
           <ul>
             <li><code>remembra-install --all</code>: Auto-detect and configure the supported agents</li>
-            <li><strong>6+ Agents Supported</strong>: Claude Desktop, Claude Code, Codex, Cursor, Windsurf, Gemini</li>
+            <li><strong>Agent setup</strong>: <code>remembra-install</code> wrote configs for Claude Desktop, Claude Code, Cursor, Windsurf and Gemini, and <code>remembra-install-codex</code> for Codex. Windsurf is now marked unverified, and <code>--all</code> leaves it out.</li>
             <li><code>remembra-doctor</code>: Diagnose setup issues with clear failure labels</li>
             <li><code>remembra-bridge</code>: Local proxy for sandboxed agents</li>
             <li><strong>RBAC Enforcement</strong>: Permissions on all memory endpoints</li>
@@ -244,11 +244,11 @@
         <p class="when"><span class="ver">v0.9.0</span><time>March 9, 2026</time></p>
         <div>
           <h3 id="v0-9-0-t">Temporal Knowledge Graph &amp; 11 MCP Tools</h3>
-          <p>Bi-temporal relationships with point-in-time queries, 6 new MCP tools, entity graph visualization, and contradiction detection.</p>
+          <p>Bi-temporal relationships with point-in-time queries, 6 new MCP tools and entity graph visualization.</p>
           <ul>
             <li><strong>Bi-Temporal Relationships</strong>: Track <code>valid_from</code>, <code>valid_to</code>, and <code>superseded_by</code></li>
             <li><strong>Point-in-Time Queries</strong>: Ask "Where did Alice work in January 2022?"</li>
-            <li><strong>Contradiction Detection</strong>: New relationships auto-supersede old ones with history preserved</li>
+            <li><strong>Contradiction detection for relationships</strong>: not wired in. A new relationship does not end an old one; a relationship gets an end date only when the stored text states one. Since v0.16.0, an outdated memory (not a relationship) is marked superseded.</li>
             <li><strong>Entity graph view</strong>: an interactive graph of entities and their relationships</li>
             <li><code>update_memory</code>: Update content without delete+recreate</li>
             <li><code>search_entities</code>: Search the entity graph by name, type, or alias</li>
@@ -263,7 +263,7 @@
         <p class="when"><span class="ver">v0.8.2</span><time>March 7, 2026</time></p>
         <div>
           <h3 id="v0-8-2-t">Encryption at rest and the MCP Registry</h3>
-          <p>AES-256-GCM encryption for memory content and metadata in the vector store (set <code>REMEMBRA_ENCRYPTION_KEY</code>), PII detection, and the MCP server listed in the MCP Registry as <code>io.github.remembra-ai/remembra</code>.</p>
+          <p>AES-256-GCM encryption for memory content and the text values of metadata in the vector store (set <code>REMEMBRA_ENCRYPTION_KEY</code>; the extracted facts and list values in the same record were not encrypted), PII detection, and the MCP server listed in the MCP Registry as <code>io.github.remembra-ai/remembra</code>.</p>
         </div>
       </article>
       <article class="rel" id="v0.7.2" aria-labelledby="v0-7-2-t">
@@ -281,8 +281,8 @@
           <ul>
             <li><strong>Security: CORS Configuration</strong>: Removed <code>allow_origins=["*"]</code>, now configurable via environment</li>
             <li><strong>API: PATCH /memories/{id}</strong>: Full implementation (was returning 501)</li>
-            <li><strong>API: Batch Operations</strong>: <code>/store/batch</code> and <code>/recall/batch</code> now functional</li>
-            <li><strong>Streaming: SSE Endpoint</strong>: <code>/ingest/stream</code> for conversation ingestion</li>
+            <li><strong>API: Batch Operations</strong>: <code>POST /api/v1/memories/batch</code> and <code>POST /api/v1/memories/batch/recall</code> now functional</li>
+            <li><strong>Streaming: SSE Endpoint</strong>: <code>POST /api/v1/ingest/conversation/stream</code> for conversation ingestion</li>
           </ul>
         </div>
       </article>
@@ -295,7 +295,7 @@
             <li><strong>Webhook System</strong>: Event-driven integrations with HMAC-SHA256 signing and automatic retry</li>
             <li><strong>RBAC</strong>: Three roles (admin, editor, viewer) with 12 granular permissions</li>
             <li><strong>Memory Conflict Detection</strong>: Detect contradictions with configurable resolution strategies</li>
-            <li><strong>Audit Logging</strong>: Complete audit trail with JSON/CSV export</li>
+            <li><strong>Audit Logging</strong>: an audit log of security events, with JSON/CSV export. It does not record every operation.</li>
             <li><strong>Stripe billing</strong>: subscriptions, usage metering and a customer portal (replaced by Paddle in v0.16.0)</li>
             <li><strong>Plan Limits</strong>: Configurable limits per plan with automatic enforcement</li>
             <li><strong>Spaces (Multi-tenancy)</strong>: Isolated memory spaces per organization</li>
@@ -367,7 +367,7 @@
             <li><strong>recall()</strong>: Semantic search across memories</li>
             <li><strong>forget()</strong>: delete memories</li>
             <li><strong>Smart Extraction</strong>: LLM transforms messy text into atomic facts</li>
-            <li><strong>Consolidation</strong>: ADD/UPDATE/DELETE/NOOP prevents duplicates</li>
+            <li><strong>Consolidation</strong>: ADD/UPDATE/DELETE/NOOP prevents duplicates (replaced by ADD/NOOP/SUPERSEDE in v0.16.0: an outdated memory is marked superseded, not deleted)</li>
           </ul>
         </div>
       </article>

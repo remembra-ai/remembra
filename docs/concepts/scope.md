@@ -43,8 +43,8 @@ Remembra is **persistent memory** for AI agents. It stores facts, recalls them s
 | **Knowledge Graph** | Track relationships between entities |
 | **Temporal Decay** | Recent memories rank higher than stale ones |
 | **Conflict Detection** | Flag contradictory facts |
-| **Multi-tenancy** | User isolation, project namespaces |
-| **TTL/Expiry** | Auto-cleanup of temporary context |
+| **Multi-tenancy** | One account per API key, project namespaces |
+| **TTL/Expiry** | Expired memories are hidden from recall; cleanup deletes them |
 
 ## What Remembra Doesn't Do ❌
 
@@ -79,14 +79,14 @@ Remembra is **persistent memory** for AI agents. It stores facts, recalls them s
 # Orchestrator handles coordination
 orchestrator = LangGraph(...)
 
-# Each agent gets its own memory
-research_agent = Agent(memory=Memory(project="research"))
-writer_agent = Agent(memory=Memory(project="writing"))
+# Both agents use the same project
+research_agent = Agent(memory=Memory(project="company-x"))
+writer_agent = Agent(memory=Memory(project="company-x"))
 
 # Agents share facts through memory, not orchestration
 research_agent.store("Company X revenue: $10M")
 # Later...
-writer_agent.recall("Company X financials")  # Gets the fact
+writer_agent.recall("Company X financials")  # Gets the fact (a different project would not)
 ```
 
 ### Example: RAG vs Memory
@@ -102,7 +102,7 @@ chunks = vector_db.search("quarterly earnings")
 ```python
 # Extract and persist key facts
 memory.store("Acme reported $10M Q4 revenue")
-# Available forever, decays over time
+# Kept until deleted or expired; ranks lower as it ages
 ```
 
 Use RAG for large document search. Use Memory for facts worth remembering.
@@ -114,7 +114,7 @@ Use RAG for large document search. Use Memory for facts worth remembering.
 ```python
 def agent_turn(user_message):
     # 1. Recall relevant context
-    context = memory.recall(user_message)
+    context = memory.recall(user_message).context
     
     # 2. Agent generates response (YOUR orchestration)
     response = agent.generate(

@@ -247,7 +247,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
   };
   const commands: CommandItem[] = [
     // Quick Actions
-    { id: 'write-agent', label: 'Write to an agent', description: 'Leads its next session brief', icon: PenLine, section: 'Actions', action: () => { navigate('inbox', { compose: '1' }); onClose(); }, keywords: ['message', 'inbox', 'send', 'note'], shortcut: 'c' },
+    { id: 'write-agent', label: 'Write to an agent', description: 'Shows up in its next session brief', icon: PenLine, section: 'Actions', action: () => { navigate('inbox', { compose: '1' }); onClose(); }, keywords: ['message', 'inbox', 'send', 'note'], shortcut: 'c' },
     { id: 'search-memories', label: 'Search memories', description: 'Semantic search across all memories', icon: Search, section: 'Actions', action: () => { setMode('search'); setQuery(''); }, keywords: ['find', 'recall', 'query'], shortcut: '/' },
     { id: 'new-memory', label: 'Store a memory', description: 'Create a new memory entry', icon: Plus, section: 'Actions', action: () => { onNewMemory(); onClose(); }, keywords: ['add', 'create', 'store'] },
     ...(onShowShortcuts ? [{ id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard, section: 'Actions', action: () => onShowShortcuts(), keywords: ['keys', 'help'], shortcut: '?' }] : []),

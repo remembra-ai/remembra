@@ -28,16 +28,7 @@ curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=chatgpt" 
   -F "file=@conversations.json"
 ```
 
-**Python SDK:**
-```python
-from remembra import Memory
-
-memory = Memory(base_url="http://localhost:8787", user_id="user_123")
-
-# Import ChatGPT export
-result = memory.import_from("chatgpt", "path/to/conversations.json")
-print(f"Imported {result.count} memories")
-```
+The Python SDK has no import method; use the API.
 
 ### Claude Conversations
 
@@ -117,12 +108,15 @@ curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=csv" \
 
 ## Export Formats
 
+`GET /api/v1/transfer/export` exports your memories, one project per request (`project_id`, default `default`),
+up to `limit` memories (default 10,000, at most 100,000). Credentials stored in them are redacted. Entities,
+relationships and inbox messages are not in the export; read them through the entities and inbox API. The
+dashboard has no export button yet.
+
 ### JSON Export
 
-Full-fidelity export with all metadata:
-
 ```bash
-curl "http://localhost:8787/api/v1/transfer/export?format=json&user_id=user_123" \
+curl "http://localhost:8787/api/v1/transfer/export?format=json&project_id=default" \
   -H "X-API-Key: your_api_key" \
   -o memories.json
 ```
@@ -131,29 +125,34 @@ curl "http://localhost:8787/api/v1/transfer/export?format=json&user_id=user_123"
 ```json
 {
   "version": "1.0",
-  "exported_at": "2026-03-02T12:00:00Z",
-  "user_id": "user_123",
-  "count": 150,
+  "exported_at": "2026-03-02T12:00:00+00:00",
+  "total": 150,
   "memories": [
     {
       "id": "mem_abc123",
       "content": "User prefers dark mode",
-      "extracted_facts": ["User prefers dark mode"],
-      "entities": [{"name": "User", "type": "person"}],
-      "metadata": {"source": "settings"},
+      "user_id": "user_123",
+      "project_id": "default",
       "created_at": "2026-01-15T10:00:00Z",
-      "updated_at": "2026-01-15T10:00:00Z"
+      "extracted_facts": ["User prefers dark mode"],
+      "entities": [],
+      "metadata": {"source": "settings"},
+      "expires_at": null,
+      "source": "unknown",
+      "trust_score": 1.0
     }
   ]
 }
 ```
 
+Add `include_metadata=false` to leave out the fields after `created_at`.
+
 ### JSONL Export
 
-Streaming-friendly format for large datasets:
+One memory per line:
 
 ```bash
-curl "http://localhost:8787/api/v1/transfer/export?format=jsonl&user_id=user_123" \
+curl "http://localhost:8787/api/v1/transfer/export?format=jsonl" \
   -H "X-API-Key: your_api_key" \
   -o memories.jsonl
 ```
@@ -163,34 +162,12 @@ curl "http://localhost:8787/api/v1/transfer/export?format=jsonl&user_id=user_123
 Spreadsheet-compatible export:
 
 ```bash
-curl "http://localhost:8787/api/v1/transfer/export?format=csv&user_id=user_123" \
+curl "http://localhost:8787/api/v1/transfer/export?format=csv" \
   -H "X-API-Key: your_api_key" \
   -o memories.csv
 ```
 
-## Filtering Exports
-
-### By Date Range
-
-```bash
-curl "http://localhost:8787/api/v1/transfer/export?format=json&user_id=user_123&from=2026-01-01&to=2026-02-01" \
-  -H "X-API-Key: your_api_key"
-```
-
-### By Project
-
-```bash
-curl "http://localhost:8787/api/v1/transfer/export?format=json&user_id=user_123&project=my_project" \
-  -H "X-API-Key: your_api_key"
-```
-
-### Include/Exclude Entities
-
-```bash
-# Include entity data
-curl "http://localhost:8787/api/v1/transfer/export?format=json&include_entities=true" \
-  -H "X-API-Key: your_api_key"
-```
+There are no date-range or entity filters on the export.
 
 ## Bulk Operations
 
@@ -201,13 +178,19 @@ counts (`imported`, `skipped`, `errors`). Split a larger export into several fil
 stores up to 100 pre-structured memories per call on paid plans (10 on Free), up to 50,000 characters each
 (8,000 on Free), in an 8 MiB request, without fact extraction.
 
+### Agent-scoped keys
+
+A key scoped to one agent imports as that agent. Every memory it imports gets that `agent_id`. If any item's
+`metadata.agent_id` (or the `X-Remembra-Agent-Id` header) names another agent, the whole import is refused
+(403) and nothing is stored. To keep other agents' ids, import with an unscoped key.
+
 ## Data Migration
 
 ### Between Remembra Instances
 
 ```bash
-# Export from source
-curl "http://source:8787/api/v1/transfer/export?format=jsonl" \
+# Export from source (one project per request)
+curl "http://source:8787/api/v1/transfer/export?format=jsonl&project_id=default" \
   -H "X-API-Key: source_key" \
   -o backup.jsonl
 
@@ -219,7 +202,7 @@ curl -X POST "http://destination:8787/api/v1/transfer/import/file?format=jsonl" 
 
 ## Best Practices
 
-1. **Use JSONL for large datasets** - Streams efficiently, handles millions of records
+1. **Use JSONL for large datasets** - One record per line; split files above 50 MB
 2. **Include metadata** - Makes memories more searchable
 3. **Test with small samples first** - Validate format before bulk import
 4. **Schedule exports** - Regular backups prevent data loss

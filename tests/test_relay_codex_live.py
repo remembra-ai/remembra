@@ -211,7 +211,7 @@ def test_codex_round_trip_after_claude(server, tmp_path):  # noqa: F811
         timeline = _api(server, "GET", "/timeline", params={"project_id": entry["project_id"], "memory_type": "handoff"})
         content = next(m["content"] for m in timeline["memories"] if m["content"].startswith("[HANDOFF] codex"))
         assert content.startswith("[HANDOFF] codex") and "ended: other" in content
-        assert "Facts: collected by remembra-relay from git and the session transcript." in content
+        assert "Facts: reported as collected by remembra-relay from git and the session transcript (not checked)." in content
         assert "`sh scripts/build.sh` exited 127" in content
         assert "FAILING: PYTHONDONTWRITEBYTECODE=1" in content and "(1 failed in" in content
         assert "1 commit(s) not pushed to origin/main" in content  # git facts too

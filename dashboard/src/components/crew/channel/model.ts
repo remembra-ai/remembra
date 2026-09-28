@@ -427,7 +427,7 @@ export function deliveryLines(body: string, state: CrewState | null): string[] {
       continue;
     }
     const knownAgent = Object.values(state.sessions).some((s) => s.agent_id.toLowerCase() === token);
-    if (knownAgent) lines.push(`No ${token} session is live: it goes to ${token}'s agent inbox and leads its next session brief.`);
+    if (knownAgent) lines.push(`No ${token} session is live: it goes to ${token}'s agent inbox and shows in its next session brief, after the last session.`);
     else lines.push(`@${token} matches no live agent, zone or task: nobody is notified for it.`);
   }
   return lines;

@@ -261,8 +261,13 @@ async def test_agent_and_project_scoped_key_needs_both(h):
     assert await _subjects(h, key, "/api/v1/inbox/messages") == ["alpha for claude"]
     resp = await h.client.get("/api/v1/inbox", headers=_hdr(key), params={"agent_id": "codex"})
     assert resp.status_code == 404
-    # Sending still works and is attributed to the key's agent, inside its project.
-    sent = await _send(h, key, "codex", "from scoped", from_agent="spoofed")
+    # Sending as another agent is refused (as on POST /session/close); naming no
+    # sender sends as the key's agent, inside its project.
+    spoofed = {"to_agent": "codex", "subject": "spoofed", "body": "b", "from_agent": "spoofed"}
+    resp = await h.client.post("/api/v1/inbox/send", headers=_hdr(key), json=spoofed)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == "This API key is scoped to agent 'claude-code'; the request claims 'spoofed'."
+    sent = await _send(h, key, "codex", "from scoped", from_agent=None)
     row = await h.app.state.inbox_manager.get_one(owner, sent["inbox_id"])
     assert row["from_agent"] == "claude-code" and row["metadata"]["project_id"] == "alpha"
 

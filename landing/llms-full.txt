@@ -10,7 +10,7 @@ Source: https://remembra.dev/setup.md
 
 Ask the user before each step that installs or writes anything. Run only the step they said yes to, then show them what it printed.
 
-This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in another tool or on another machine, starts with a short brief.
+This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter. The relay hooks read commits, changed and uncommitted files, and unpushed commits from git. For Claude Code and Codex they also read test runs and open todos from the session transcript. An agent that hands off only through the MCP tools records what it reports. The next agent, in another tool or on another machine, starts with a short brief.
 
 ### Rules
 
@@ -65,7 +65,7 @@ Ask the user to run this in their own terminal, not through you:
 remembra-install --all
 ```
 
-It asks for the key at a hidden prompt (it never goes on the command line), shows what it will add to each agent it finds and writes only after they answer y. It saves the key to `~/.remembra/credentials`, where the relay hooks read it. A first install uses https://api.remembra.dev; on a self-hosted server, the user adds `--url` and their server's URL. Exit code 3 means it showed the changes and wrote nothing.
+It asks for the key at a hidden prompt (it never goes on the command line), shows what it will add to each agent it sets up and writes only after they answer y. It saves the key to `~/.remembra/credentials`, where the relay hooks read it. A first install uses https://api.remembra.dev; on a self-hosted server, the user adds `--url` and their server's URL. Exit code 3 means it showed the changes and wrote nothing.
 
 ### 6. Show the hook changes
 
@@ -91,11 +91,11 @@ The name is `cursor`.
 
 ### 8. Codex: the user trusts the hooks
 
-Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it, again without a message, until you trust it again. `remembra-relay doctor` shows which hooks need it.
+Codex runs a hook only after the user trusts it. Until then it skips the hook. The interactive Codex CLI asks at startup about hooks that need review; in our `codex exec` runs, Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it until you trust it again. `remembra-relay doctor` shows which hooks need it.
 
 ### 9. Restart the agents
 
-`remembra-install` added the Remembra MCP server to each agent it found. Ask the user to restart those agents so they load it.
+`remembra-install` added the Remembra MCP server to each verified agent it found: Claude Desktop (on macOS), Claude Code, Codex, Cursor and Gemini CLI. Windsurf is unverified, so `--all` skips it; only `remembra-install --agent windsurf` writes it. Qwen Code and Kimi get their hooks in step 7 but not the MCP server: the block to paste is at https://docs.remembra.dev/guides/relay/#mcp-by-hand. Ask the user to restart the agents it set up so they load it.
 
 ### 10. Check
 
@@ -162,7 +162,7 @@ Start free for a key, or self-host. Run the three install lines on each machine:
 
 #### Work normally
 
-Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first.
+Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter. The relay hooks read commits, changed and uncommitted files, and unpushed commits from git. For Claude Code and Codex they also read test runs and open todos from the session transcript. An agent that hands off only through the MCP tools records what it reports. Secrets are redacted first.
 
 #### Switch anytime
 
@@ -176,7 +176,7 @@ Across agents and machines
 
 Your memory lives in the cloud, not on one laptop. Start at your desk, keep going on a server, finish from home, with whichever agent still has credits.
 
-Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install` sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
+Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install --all` sets up those tools for Claude Code, Claude Desktop (on macOS), Codex, Cursor and Gemini CLI, for each one it finds. Windsurf is unverified: `remembra-install --agent windsurf` writes its config, and `--all` leaves it out. Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
 
 The dashboard
 
@@ -186,9 +186,9 @@ See where each agent left off, what is failing, and the one command that continu
 
 Pick up from anywhere Coming, not live yet
 
-### Soon: check on Codex, Cursor or Claude Code from your phone.
+### Coming: check on Claude Code or Codex from your phone.
 
-Once the connector is switched on, you add it to the Claude apps or to ChatGPT, then ask where the work stands, read the trail, search your memory, or leave an agent an instruction. It sees it first thing in its next session.
+Once the connector is switched on and checked in the live apps, you add it to the Claude apps or to ChatGPT, then ask where the work stands, read the trail, search your memory, or leave an agent a message. The message shows in that agent's next session brief.
 
 - Claude: claude.ai, Claude Desktop and the Claude phone apps, as a custom connector.
 - ChatGPT: On the web, in developer mode (Plus, Pro, Business, Enterprise and Education).
@@ -201,11 +201,11 @@ Start
 ### Free to start. Every handoff stays free.
 
 - Redacted:
-  Keys, tokens and other secrets are stripped out before anything is saved.
+  Keys, tokens and other secrets Remembra recognises are replaced before a note, handoff, status value or inbox message is saved, metadata included. It matches known patterns, so a password written as plain prose can still get through.
 - Isolated:
   Every account's memory is walled off, and project-scoped keys only see their own projects.
 - Attributed:
-  Every handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.
+  A relay handoff records the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.
 - Open:
   The core is MIT-licensed open source. Read it, run it, [host it yourself](https://docs.remembra.dev/getting-started/docker/).
 
@@ -217,7 +217,7 @@ Pricing
 
 ## Every handoff is free. Credits are for AI work on notes.
 
-Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes: enriching new or edited notes and the background de-duplication pass. Run out, and your notes still save without enrichment (on Free, up to 300 a day).
+Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes: enriching new or edited notes. Run out, and your notes still save without enrichment (on Free, up to 300 a day).
 
 Yearly: 2 months free, and the whole year's credits in one bank. Twelve months of credits form a yearly bank you can spend in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.
 
@@ -243,7 +243,7 @@ Free forever.
 - Unlimited agents
 - 3 projects
 - 10,000 searches a month
-- 10,000 notes kept
+- 10,000 notes kept (25,000 until 30 days after our notice email)
 - Notes up to 8,000 characters
 
 ### Solo
@@ -298,7 +298,7 @@ That's $12.50/seat/mo. 3-seat minimum ($450/yr). · 3-seat minimum ($45/mo).
 
 Prices in US dollars, excluding tax. Sign up free, then pick a paid plan from Billing in your dashboard.
 
-Enterprise An SLA, audit logs, a dedicated instance or support for your own hosting, and custom limits. SSO on request. Custom pricing.
+Enterprise An SLA, audit logs, a dedicated instance or support for your own hosting, and custom limits. SSO is not built yet. Custom pricing.
 
 [Talk to us](https://remembra.dev/contact)
 
@@ -384,11 +384,11 @@ Security
 
 ## Your agents' memory, kept on a short leash.
 
-A memory that several agents read has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each, what it doesn't do yet, and when that changes.
+A memory that several agents read has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each, what it doesn't do yet, and what is planned.
 
 Redacted
 
-Keys, tokens and other secrets are stripped out before anything is saved.
+Keys, tokens and other credentials that Remembra recognises are replaced before anything is saved.
 
 Isolated
 
@@ -396,7 +396,7 @@ Every account's memory is walled off, and project-scoped keys only see their own
 
 Attributed
 
-Every handoff names the agent, session and time that wrote it, and whether its facts came from git or from the agent.
+A relay handoff names the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent.
 
 Open
 
@@ -406,29 +406,29 @@ The core is MIT-licensed open source. Read it, run it, host it yourself.
 
 Remembra Relay passes work between agents, so it is built on the assumption that what one agent wrote may be wrong, or may try to steer the next one.
 
-- Redacted before storage. Every string in a handoff passes secret redaction and the server's PII policy, value by value. A blocked value is replaced with `[REDACTED:pii]`; a close is never rejected for it.
+- Redacted before storage. Every string in a handoff passes secret redaction, value by value. All of them also pass the server's PII policy, except the git remote and first-commit keys that identify the repository. A blocked value is replaced with `[REDACTED:pii]`; a close is never rejected for it.
 - The raw transcript stays on your machine. Close-out reads git and, for Claude Code and Codex, the local session transcript (for Codex, its rollout file), and sends only the facts it pulled out.
 - Briefs are data, not instructions. Everything another agent or tool recorded is wrapped in one untrusted-data block with a fixed preamble. Text inside it cannot close the block.
-- One trust policy for every line. The handoff, inbox messages, status values, linked projects' headlines and recent memories all pass the same check. When recorded text matches prompt-injection patterns (instruction overrides, requests to keep something from you, hidden Unicode characters, including overrides spelled with look-alike or fullwidth letters), the brief shows a `LOW TRUST` marker and the id to review, not the text. This covers the brief's text and its JSON fields.
+- One trust policy for every line. The handoff, inbox messages, status values, linked projects' headlines and recent memories all pass the same check. When recorded text matches prompt-injection patterns (instruction overrides, requests to keep something from you, hidden Unicode characters, including overrides spelled with look-alike or fullwidth letters), the brief shows a `LOW TRUST` marker and the id to review, not the text. This covers the brief's text and its JSON fields. It is a fixed list of patterns, so a reworded injection can get through.
 - Commands are flagged, not trusted. Pipe-to-shell installs (also through `sudo`, `env` or a shell's full path), download-then-run commands, `base64 -d | sh`, `rm -rf`, force pushes, skipped git hooks, permission-bypass flags, reads of `~/.ssh`, `.env` or `~/.claude.json`, and links outside your repository (including hosts a download command names without `https://`, and links that climb out of it with `..`) are marked confirm with the user before running. Images (markdown inline or reference style, and HTML `<img>`) are removed from the brief's text and its JSON fields, so their URLs cannot carry data out.
 - Tool results are framed too. MCP tools that return stored content (recall, lists, the timeline, the inbox, the brief) wrap it in the same untrusted-data block, with the same escaping.
 - Inbox messages are redacted and scored. Secrets in a message's subject, body and metadata are removed before it is saved, and each message keeps its trust score. An inbox message is a request to confirm with you, never an instruction.
-- Graded, not taken on faith. Each handoff gets a health grade computed from its facts (Ready, Ready with warnings, Incomplete, Conflicted or Blocked) with what is missing, such as unpushed commits or tests that were not run. No language model is involved. The facts come from the closing client: unless remembra-relay collected them under a key scoped to that agent, the grade says it rests on facts the agent reported, not verified.
+- Graded, not taken on faith. Each handoff gets a health grade computed from its facts (Ready, Ready with warnings, Incomplete, Conflicted or Blocked) with what is missing, such as unpushed commits or tests that were not run. No language model is involved. The facts come from the closing client, and the server does not verify them. The grade says so. When the close used a key scoped to that agent and the client says remembra-relay collected the facts, the grade names remembra-relay as their source. Otherwise it says they are what the agent reported.
 - Attributed. A handoff closed with a key scoped to one agent is shown as key-verified, and that key cannot write as another agent. Otherwise it is shown as self-declared. An agent's own summary is marked unverified, or contradicted when the facts disagree.
 
 ### What we do today
 
 Each item links to the code or the doc that does it, so you can check.
 
-- Redaction on both ends. The relay client redacts secrets before a handoff leaves your machine ([relay/facts.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/facts.py)), and the server scans every stored value again for secrets and PII ([secret_scan.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/secret_scan.py), [pii_detector.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/pii_detector.py)).
+- Redaction on both ends. The relay client redacts secrets before a handoff leaves your machine ([relay/facts.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/facts.py)). The server redacts secrets again in memory text, facts and metadata, handoffs, status values and inbox messages ([security/secrets.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/secrets.py)). It applies the PII policy to memory text, handoffs and status values ([pii_detector.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/pii_detector.py)). Detection is pattern-based, so a password written in plain prose can still be stored.
 - Untrusted-data framing of everything agents recorded, in every brief ([relay/handoff.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/handoff.py)).
-- Key-verified attribution. The agent on a handoff comes from the API key, not from the request ([relay/identity.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/identity.py)).
+- Key-verified attribution. When a handoff is closed with a key scoped to one agent, the agent comes from the key, and a request that names another agent is refused. With an unscoped key the agent is whatever the request names, and the brief shows the handoff as self-declared ([api/v1/relay.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/api/v1/relay.py)). A key scoped to one agent also cannot put another agent on a status value, an imported memory, an inbox message or a project link ([auth/middleware.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/middleware.py)).
 - Scoped keys. Keys can be limited to one agent, to certain projects and to a role; keys are stored hashed ([auth/keys.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/keys.py), [auth/rbac.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/rbac.py)).
 - OAuth for the Claude and ChatGPT apps (coming: the connector is built but not switched on at api.remembra.dev yet) is authorization code with PKCE (S256 only), and you choose which projects a connection may see ([connector/oauth.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/connector/oauth.py)).
-- Encryption at rest for the vector store: memory content and metadata there are encrypted with AES-256-GCM, and two-factor secrets are encrypted ([security/encryption.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/encryption.py)).
+- Encryption at rest for the vector store: each record's memory text, extracted facts, entity names and every string in its metadata are encrypted with AES-256-GCM ([security/encryption.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/encryption.py)). Ids, dates, memory type and scope stay readable so the store can filter on them, and so do metadata key names, numbers and the embedding vectors. Older records still hold their facts and metadata lists in plaintext until we re-encrypt them, which we have not done yet. Two-factor secrets are encrypted in the account database.
 - HTTPS everywhere, with the API, dashboard and website behind Cloudflare, on servers rented from Hetzner in the United States.
 - Named subprocessors. Everyone who handles your data is on the [subprocessors](https://remembra.dev/subprocessors) page, with what they receive.
-- An audit log of sign-ins, key changes and other account events ([security/audit.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/audit.py)).
+- An audit log of API key changes, memory stores, searches, updates and deletions made through the memory API, sign-in method links and unlinks, account-review events and account erasures ([security/audit.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/audit.py)). Ordinary sign-ins, successful or failed, are not recorded there, and neither are handoffs.
 - Rate limits per plan and per minute, and a burst limit on handoffs.
 - Open source and self-hostable under the [MIT license](https://github.com/remembra-ai/remembra/blob/main/LICENSE). A [self-hosted server](https://docs.remembra.dev/getting-started/docker/) keeps your memory on your network and sends us nothing.
 
@@ -438,27 +438,27 @@ Most security questionnaires ask about these. The honest answers:
 
 - No SOC 2 report, and no outside penetration test. Remembra has had internal security reviews only. Cloudflare and Paddle have their own audits; Hetzner's ISO 27001 certificate covers its European data centers, not the US site Remembra runs in. Remembra itself is not audited.
 - No EU data region. Remembra Cloud is hosted in the United States only.
-- The metadata database is not field-encrypted. Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.
-- API keys don't expire. You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.
-- No SSO or SAML for the dashboard.
-- Backups are not edited when an account is erased. A deleted account is erased automatically 7 days later; the copies of it in backups age out instead (see retention).
+- The metadata database is not field-encrypted. Encryption at rest covers the vector store. The database that holds account records and the second copy of your notes is not field-encrypted, and neither are its keyword index and entity graph. The only field encrypted there is the two-factor secret. One encryption key protects the vector store, and it is not rotated yet.
+- API keys don't expire. You revoke them yourself. An agent-scoped key fixes who a handoff, memory or inbox message is from, and sees only its own agent's inbox. Otherwise it can read everything its account, or its project scope, can read, and with a write role it can change or delete memories other agents wrote. Limit reads with project-scoped keys.
+- No SAML or enterprise SSO. The dashboard offers Sign in with Google or GitHub.
+- Backups are not edited when an account is erased. A deleted account is erased automatically 7 days later; its copies in the backups taken at each deploy are deleted after 3 more deploys (see retention).
 
 ### Roadmap
 
 | What | When |
 | --- | --- |
-| Account erasure that also reaches backups (today backup copies age out) | Q4 2026 |
-| Key expiry, key rotation, and read limits for agent-scoped keys | Q1 2027 |
-| Field-level encryption for the metadata database, with key rotation | Q1 2027 |
-| SSO (SAML and OIDC) for Team plans | Q2 2027 |
-| An outside penetration test, with a summary published here | Q2 2027 |
+| Account erasure that also reaches backups (today a backup copy is deleted after 3 more deploys) | Planned; no date yet |
+| Key expiry, key rotation, and read limits for agent-scoped keys | Planned; no date yet |
+| Field-level encryption for the metadata database, with key rotation | Planned; no date yet |
+| SSO (SAML and OIDC) for Team plans | Planned; no date yet |
+| An outside penetration test, with a summary published here | Planned; no date yet |
 | EU data region; SOC 2 | When customers need them; no date yet |
 
 ### Retention and deletion
 
 - Handoffs and structured checkpoints never expire. They stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.
 - Notes and memories are kept while your account is open, unless you set an expiry on them.
-- Deleting your account cancels any subscription at once, with no further charges, and ends every session. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, and the database copy taken before each deploy is kept only until 3 newer deploys replace it. The [privacy policy](https://remembra.dev/privacy#retention) has the rest.
+- Deleting your account cancels any subscription at once, with no further charges, and ends every session. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet. The [privacy policy](https://remembra.dev/privacy#retention) has the rest.
 - Export your memories whenever you want, through the API.
 - No training on your data: we never use what you store to train AI models, and OpenAI, which embeds and enriches it, does not train on API data under its terms.
 
@@ -470,12 +470,12 @@ How Remembra lines up against the [OWASP Top 10 for Agentic Applications](https:
 | --- | --- | --- |
 | ASI01 Agent goal hijack | Partly | Recorded text reaches the next agent inside an untrusted-data block, and text that looks like prompt injection is withheld. An agent can still choose to follow what it reads. |
 | ASI02 Tool misuse | Partly | Nothing over the Claude and ChatGPT connector (not switched on yet) edits or deletes memories, and key roles limit what a key can do. The tools on your machine are outside Remembra. |
-| ASI03 Identity and privilege abuse | Partly | Agent- and project-scoped keys, roles, and PKCE-only OAuth with per-project consent. Keys don't expire yet, and agent-scoped keys can read the whole account. |
+| ASI03 Identity and privilege abuse | Partly | Agent- and project-scoped keys, roles, and PKCE-only OAuth with per-project consent. Keys don't expire yet, and an agent-scoped key can still read everything its account, or its project scope, can read. |
 | ASI04 Agentic supply chain | Partly | The code is open, and dependencies are pinned in `uv.lock`. From 0.16.0, one tagged GitHub workflow builds each release once, with every action pinned to a commit and the build tools pinned by hash. The wheel and sdist go to PyPI by trusted publishing (no stored token) with PEP 740 attestations (Sigstore) that tie each file to that workflow. The Docker image carries build provenance and an SBOM. The Python packages have no SBOM, the files attached to the GitHub release carry no separate signature, and 0.13.2 and earlier have no attestations. [SECURITY.md](https://github.com/remembra-ai/remembra/blob/main/SECURITY.md) shows how to verify. |
 | ASI05 Unexpected code execution | Covered | The server never runs stored content, and the relay hooks run fixed commands; nothing in a brief is executed. |
-| ASI06 Memory and context poisoning | Partly | Secrets are redacted, handoff facts come from git rather than an LLM, an agent's summary is checked against them, and facts that don't match their source are flagged unverified. A key with write access can still store a false note. |
-| ASI07 Insecure inter-agent communication | Partly | Handoffs and inbox messages travel over HTTPS, stay inside one account and project, and show whether the sender was key-verified or self-declared. Messages carry no end-to-end signature. |
-| ASI08 Cascading failures | Partly | Hooks time out in 10 seconds and never block an agent, AI-provider failures trip a circuit breaker, and running out of credits degrades a save instead of failing it. A wrong handoff can still mislead the next agent, which is why facts and claims are labelled apart. |
+| ASI06 Memory and context poisoning | Partly | Credentials that match Remembra's patterns are redacted. When remembra-relay closes a session in a git repository, it reads the facts from git and the local session transcript, not from an LLM. Facts an agent sends itself are labelled as declared by the agent. The server checks neither kind. An agent's summary is checked against the facts and marked unverified or contradicted. By default, a fact pulled from a note that the note's text does not support is dropped. A key with write access can still store a false note. |
+| ASI07 Insecure inter-agent communication | Partly | Handoffs and inbox messages travel over HTTPS and stay inside one account. A handoff belongs to one project, but an inbox message can be account-wide, and briefs can show linked projects' headlines. Handoffs show whether the sender was key-verified or self-declared. An inbox message shows only a sender name: with an agent-scoped key it is always the key's agent, otherwise the sender names itself. Messages carry no end-to-end signature. |
+| ASI08 Cascading failures | Partly | Relay hook commands finish within a 10-second budget and always exit 0, AI-provider failures trip a circuit breaker, and running out of credits degrades a save instead of failing it. A wrong handoff can still mislead the next agent, which is why facts and claims are labelled apart. |
 | ASI09 Human-agent trust exploitation | Partly | The brief and the dashboard show where each fact came from and mark agent-written text as unverified or contradicted. |
 | ASI10 Rogue agents | Not covered | The trail and audit log record what each key did, but Remembra cannot stop an agent on your machine. Crew mode's enforcement is planned. |
 
@@ -512,23 +512,23 @@ Legal
 
 ## Subprocessors
 
-Last updated: September 26, 2026. Every company that handles data for Remembra Cloud or our websites, what it gets and where. Self-hosted Remembra uses none of them.
+Last updated: September 27, 2026. Every company that handles data for Remembra Cloud or our websites, what it gets and where. Self-hosted Remembra uses none of them.
 
 ### Who handles data today
 
 | Company | What it does for us | What it receives | Where |
 | --- | --- | --- | --- |
 | Hetzner Online GmbH | Rents us the servers Remembra Cloud and our websites run on | Everything stored in Remembra Cloud: accounts, notes, handoffs, inbox messages, keys, logs | United States (Ashburn, Virginia) |
-| Cloudflare, Inc. | DNS, HTTPS and attack protection in front of remembra.dev, app., api. and docs.; the bot check on sign-up | Every request in transit, including IP addresses and what is sent to the API | Its global network; a US company |
-| OpenAI, L.L.C. | Embeddings for search, and AI enrichment of new notes | The text of notes, handoffs and search queries | United States |
+| Cloudflare, Inc. | DNS, HTTPS and attack protection in front of remembra.dev, app., api. and docs. A bot check on sign-up is built but not switched on yet | Every request in transit, including IP addresses and what is sent to the API | Its global network; a US company |
+| OpenAI, L.L.C. | Embeddings for search, and AI enrichment of notes you store or edit | The text of notes, handoffs and search queries | United States |
 | Paddle.com Market Ltd | Sells our paid plans as Merchant of Record: checkout, tax, invoices, refunds. Its checkout script, Paddle.js, loads from cdn.paddle.com on every page of the dashboard (app.remembra.dev) | Your name, email, billing address, payment method and what you bought; from Paddle.js, your IP address and browser details whenever a dashboard page loads, even if you buy nothing | United Kingdom, with its own processors |
 | Resend, Inc. | Sends account email: verification, password resets, security and billing notices | Your email address and the email's content | United States |
-| Formsubmit (formsubmit.co) | Forwards messages from our contact form to our inbox | What you type in the form: name, email, company, message | Not published by the provider |
+| Formsubmit (formsubmit.co) | Forwards messages from our contact form to our inbox | What you type in the form: first and last name, email, company, the topic you pick and your message | Not published by the provider |
 | Google LLC (Google Fonts) | Serves the typefaces on remembra.dev and the dashboard (app.remembra.dev) | Your IP address and browser details when a page loads | United States and its global network |
-| Google LLC (Google Workspace) | Hosts our dolphytech.com mailboxes: the one mail to support@, sales@ and contact@remembra.dev is forwarded to, admin@ (privacy, erasure and DPA requests) and security@ (vulnerability reports) | The email you send those addresses: your address, name and what you write | United States and its global network |
+| Google LLC (Google Workspace) | Hosts our dolphytech.com mailboxes: the one mail to support@, sales@ and contact@remembra.dev is forwarded to, admin@ (privacy, erasure and DPA requests), security@ (vulnerability reports) and sales@ (enterprise questions from the dashboard) | The email you send those addresses: your address, name and what you write | United States and its global network |
 | Namecheap, Inc. | Email forwarding for remembra.dev: passes mail sent to support@, sales@ and contact@remembra.dev (which is where the contact form goes) on to our dolphytech.com mailbox at Google Workspace | The email you send those addresses: your address, name and what you write | United States |
 
-OpenAI processes API data under its API terms: it says it does not train on it unless the customer opts in, and may keep it for up to 30 days to detect abuse ([details](https://developers.openai.com/api/docs/guides/your-data)). The [privacy policy](https://remembra.dev/privacy#ai) explains what we send and when.
+OpenAI processes API data under its API terms: it says it does not train on it unless the customer opts in (we have not), and keeps abuse-monitoring logs, which can include API data, for up to 30 days, unless the law requires longer or it is reasonably necessary to protect its services or others from harm ([details](https://developers.openai.com/api/docs/guides/your-data)). The [privacy policy](https://remembra.dev/privacy#ai) explains what we send and when.
 
 ### Services you choose
 
@@ -543,11 +543,12 @@ The code can send data to the services below, but each stays off until a setting
 
 - TypeSafe (typesafe.ai): would receive new facts and the existing facts they might duplicate, to decide whether they match.
 - Anthropic: would receive note text for entity extraction, in place of OpenAI.
+- Azure OpenAI, Cohere, Voyage AI or Jina AI: one of them would receive the text of notes, handoffs and search queries for embeddings, in place of OpenAI.
 - Backup storage: continuous copies of the database to an object store.
 
 ### Changes to this list
 
-We update this page, and its date, before a new subprocessor starts handling your data. If you have a [data processing agreement](https://remembra.dev/dpa) with us, it says how we give notice and how you can object.
+We update this page, and its date, before a new subprocessor starts handling your data. Our [data processing agreement](https://remembra.dev/dpa), when it is ready, will say how we give notice and how you can object.
 
 ---
 
@@ -557,13 +558,13 @@ Legal
 
 ## Privacy policy
 
-Last updated: September 26, 2026. What we collect when you use Remembra, who else handles it, and how long we keep it.
+Last updated: September 27, 2026. What we collect when you use Remembra, who else handles it, and how long we keep it.
 
 ### The short version
 
 - Self-hosted? Your server sends us nothing.
 - On Remembra Cloud, we keep your account, your notes, your handoffs and what we need to bill you.
-- Text you store is sent to OpenAI to make it searchable and, for notes, to pull out facts and names. OpenAI does not train on it under its API terms.
+- Text you store is sent to OpenAI to make it searchable and, for notes, to pull out facts and names and to compare them with similar things you stored earlier. OpenAI does not train on it under its API terms.
 - We name everyone else who handles your data on the [subprocessors](https://remembra.dev/subprocessors) page.
 - We don't sell your data, show you ads, or run analytics scripts on our websites.
 - Your data is stored in the United States.
@@ -572,21 +573,21 @@ Last updated: September 26, 2026. What we collect when you use Remembra, who els
 
 Remembra is made by DolphyTech ("we", "us"), 515 Centerpoint Drive, Suite #212, Middletown, CT 06457, USA. This policy covers our website (remembra.dev), our docs (docs.remembra.dev), the dashboard (app.remembra.dev) and the hosted service, Remembra Cloud (api.remembra.dev).
 
-We decide how your account and billing information is used, so for that we are the controller. If you use Remembra Cloud to store information about other people for your organization, we process that content on your instructions; our [data processing agreement](https://remembra.dev/dpa) covers that.
+We decide how your account and billing information is used, so for that we are the controller. If you use Remembra Cloud to store information about other people for your organization, we process that content on your instructions. Our [data processing agreement](https://remembra.dev/dpa) will cover that; it is not ready yet.
 
 ### What we collect
 
 #### When you visit our websites
 
-- Request logs. Our web server and Cloudflare, which sits in front of it, record each request: IP address, time, page, referrer and browser. We use them to keep the sites running and to stop abuse.
+- Request logs. Cloudflare, which sits in front of our sites, receives every request, including your IP address, and keeps its logs under its own policy. Our own web servers log the time, page, referrer and browser of each request; the IP address they record is our proxy's, not yours. We use these logs to keep the sites running and to stop abuse.
 - Fonts. remembra.dev and the dashboard (app.remembra.dev) load their typefaces from Google Fonts, so your browser sends your IP address and browser details to Google when a page loads. We plan to host the fonts ourselves. The docs site uses your system fonts and sends nothing to Google.
 - Paddle.js on the dashboard. Every page of the dashboard (app.remembra.dev) loads Paddle's checkout script, Paddle.js, from cdn.paddle.com, including the sign-in page and whether or not you buy anything. Your browser sends your IP address and browser details to Paddle when it loads; what Paddle.js does after that is covered by [Paddle's privacy policy](https://www.paddle.com/legal/privacy). remembra.dev itself does not load Paddle.js.
 - No analytics or ad trackers. We add no analytics, advertising or tracking scripts to our sites.
 
 #### When you write to us
 
-- The contact form sends your name, email, company (if given) and message through formsubmit.co to contact@remembra.dev.
-- Email to our remembra.dev addresses (support@, sales@, contact@) passes through Namecheap's email forwarding to a dolphytech.com mailbox hosted by Google Workspace, where we read it. Our other dolphytech.com addresses (admin@, security@) are hosted by Google Workspace too. Both are on the [subprocessors](https://remembra.dev/subprocessors) page.
+- The contact form sends your first and last name, email, company (if given), the topic you pick and your message through formsubmit.co to contact@remembra.dev.
+- Email to our remembra.dev addresses (support@, sales@, contact@) passes through Namecheap's email forwarding to a dolphytech.com mailbox hosted by Google Workspace, where we read it. Our other dolphytech.com addresses (admin@, security@, sales@) are hosted by Google Workspace too. Both are on the [subprocessors](https://remembra.dev/subprocessors) page.
 - Email you send us is kept in our inbox.
 
 #### When you use Remembra Cloud
@@ -594,19 +595,19 @@ We decide how your account and billing information is used, so for that we are t
 - Account: your email address, an optional name, a hash of your password (never the password), and, if you sign in with GitHub or Google, your account id and verified email from that provider. If you turn on two-factor sign-in, its secret is stored encrypted.
 - API keys: the keys you create, with the agent and projects each is limited to.
 - What you store: notes and memories, the facts and names pulled out of them, handoffs and checkpoints your agents leave, inbox messages between agents, and the project and repository names they belong to.
-- Handoffs: when an agent's session ends, `remembra-relay` reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code and Codex, from the local session transcript (commands run, test results, open items; for Codex, its rollout file). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.
-- Usage: API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records sign-ins, key changes and other account events with the IP address that made them.
-- Pickup events: when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted with the handoff.
-- Billing: Paddle takes the payment. It tells us your email, plan, country, subscription status and whether a payment went through. Your card details go to Paddle, never to us.
+- Handoffs: when an agent's session ends, `remembra-relay` reads facts from git on your machine: branch, commit ids and messages, changed file names, whether commits are pushed, the repository's remote URL (without credentials) and first commit, the folder's full path, and your computer's hostname. For Claude Code and Codex it also reads the local session transcript (for Codex, its rollout file) and sends what it pulls out: commands run and their exit codes, test results, the last line of output from each failed command, files edited and open to-dos. Secrets the redaction rules catch are removed on your machine before anything is sent. Personal data they catch, such as email addresses, is removed on our server before the handoff is stored, except in the remote URL and first commit id, which identify the repository. The transcript itself is never uploaded.
+- Usage: API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records API key changes, sign-in method links and unlinks, account-review events, and memory stores, searches, updates and deletions, with the IP address of the request that made them. Ordinary password and Google or GitHub sign-ins are not recorded there.
+- Pickup events: when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted when the handoff, its project or your account is deleted.
+- Billing: Paddle takes the payment. It tells our servers your plan, your subscription status and whether a payment went through, and we look up the email (and name, if given) on your Paddle customer record. Paddle's payment notices also show us your card type, last four digits, expiry date and cardholder name; we don't store them. Your full card number and security code go only to Paddle. Other billing details you give Paddle, such as your address and country, stay with Paddle.
 
 ### What goes to OpenAI
 
 Remembra Cloud uses OpenAI's API for two things:
 
-- Search. The text of each note and handoff you store is sent to OpenAI to compute an embedding, the list of numbers that makes it searchable. Your search queries are embedded the same way.
-- Enrichment. While you have credits, the text of each new note is sent to OpenAI's language models to pull out facts, people and projects and to merge duplicates. Handoffs are not enriched.
+- Search. The text of each note and handoff you store is sent to OpenAI to compute an embedding, the list of numbers that makes it searchable. Your search queries are embedded the same way. While you have credits, a background pass about every 6 hours embeds the notes stored or changed since its last run again.
+- Enrichment. While you have credits, the text of each new or edited note is sent to OpenAI's language models to pull out facts, people and projects. To merge duplicates, each new fact is sent with the text of up to 5 similar things you stored earlier, which can include handoffs. Handoffs are not enriched when stored; editing one through the API enriches it like a note.
 
-OpenAI processes this data for us under its API terms. It says it does not use API data to train its models unless the customer opts in (we have not), and that it may keep API data for up to 30 days to detect abuse. See [how OpenAI handles API data](https://developers.openai.com/api/docs/guides/your-data).
+OpenAI processes this data for us under its API terms. It says it does not use API data to train its models unless the customer opts in (we have not), and that it keeps abuse-monitoring logs, which can include API data, for up to 30 days, unless the law requires longer or it is reasonably necessary to protect its services or others from harm. See [how OpenAI handles API data](https://developers.openai.com/api/docs/guides/your-data).
 
 ### Why we use it
 
@@ -614,29 +615,29 @@ We use your information only to:
 
 - Run the service you signed up for: store and search your memory, build briefs and handoffs, bill your plan. (For visitors in the EEA and UK, the legal basis is our contract with you.)
 - Keep it secure: detect and stop abuse, fraud and attacks, and keep security logs. (Our legitimate interest in a secure service.)
-- Fix and improve it: look at errors and aggregate usage, not the content of your notes. (Our legitimate interest.)
+- Fix and improve it: look at errors and aggregate usage. Our error and warning logs can include short excerpts (up to 80 characters) of facts pulled from your notes, and a repair tool we run to rebuild missing search entries shows the first 100 characters of each note it finds. (Our legitimate interest.)
 - Tell you what you need to know: email verification, password resets, security notices and billing notices. We do not send marketing email without your consent.
 - Meet legal obligations, such as tax records, which Paddle keeps as the seller. (Legal obligation.)
 
-We do not sell your data, share it for advertising, or use what you store to train AI models. We look at the content of your account only when you ask us to for support, or when the law requires it.
+We do not sell your data, share it for advertising, or use what you store to train AI models. Apart from those excerpts, we look at the content of your account only when you ask us to for support, or when the law requires it.
 
 ### Who else handles it
 
-A small number of companies process data for us: hosting, the network edge, AI processing, email and payments. Each is named, with what it receives and where, on the [subprocessors](https://remembra.dev/subprocessors) page. We will update that page before adding a new one.
+A small number of companies process data for us: hosting, the network edge, AI processing, email and payments. Each is named on the [subprocessors](https://remembra.dev/subprocessors) page with what it receives, and with where it processes data when the provider publishes that. We will update that page before adding a new one.
 
-Paddle (Paddle.com Market Ltd) sells our paid plans as Merchant of Record. It receives your billing details (name, email, address, payment method) to take payment, charge tax and handle refunds, and it handles them under [its own privacy policy](https://www.paddle.com/legal/privacy).
+Paddle (Paddle.com Market Ltd) sells our paid plans as Merchant of Record. It receives your billing details (name, email, address, payment method) to take payment, charge tax and handle refunds, and it handles them under [its own privacy policy](https://www.paddle.com/legal/privacy). Our servers do not receive your address or country.
 
 We may also disclose information when the law requires it, to protect people from harm, or to a buyer if the business is sold, in which case we will tell you first.
 
 ### Where it is stored
 
-Remembra Cloud runs on servers rented from Hetzner in the United States. If you use it from outside the US, your data is transferred to and stored in the US. For transfers from the EEA, UK and Switzerland we rely on the European Commission's standard contractual clauses, which our [DPA](https://remembra.dev/dpa) includes. We do not offer an EU data region yet.
+Remembra Cloud runs on servers rented from Hetzner in the United States. If you use it from outside the US, your data is transferred to and stored in the US. We do not have standard contractual clauses in place for transfers from the EEA, UK and Switzerland yet. Our [data processing agreement](https://remembra.dev/dpa), which is not ready yet, will include the European Commission's standard contractual clauses and, for the UK, the UK addendum to them. We do not offer an EU data region yet.
 
 ### How it is protected
 
 - In transit: every connection to our sites and API uses HTTPS.
-- At rest: memory content and metadata in our vector store are encrypted with AES-256-GCM, and two-factor secrets are encrypted. The database that holds the other copy of your notes and your account records is not yet field-encrypted; we are extending encryption to it.
-- Redaction: keys, tokens and other secrets are stripped from what you store before it is saved.
+- At rest: in our vector store, the text of each memory, its extracted facts, entity names and the text values of its metadata are encrypted with AES-256-GCM. Older records still hold their facts and metadata lists there in plaintext until we re-encrypt them, which we have not done yet. Two-factor secrets are encrypted. The database that holds the other copy of your notes and your account records is not field-encrypted, and neither are its keyword index and entity graph.
+- Redaction: keys, tokens and other credentials that match our detection patterns are replaced with a placeholder before anything you store is saved: in notes, facts, metadata, handoffs, status values and inbox messages. Detection is pattern-based, so a password written in plain prose can still be stored. Something saved before a check existed is cleaned when it is shown; the stored copy changes only when we run a cleanup script.
 - Access: each account's data is kept apart, and API keys can be limited to one agent and to certain projects.
 
 Remembra has not had a SOC 2 audit or an outside penetration test. The [security page](https://remembra.dev/security) says what we do today, what we don't do yet, and how to report a problem. If a breach affects your data, we will tell you without undue delay and as the law requires.
@@ -644,10 +645,10 @@ Remembra has not had a SOC 2 audit or an outside penetration test. The [security
 ### How long we keep it
 
 - Your account and what you store are kept while your account is open. Handoffs and structured checkpoints do not expire: they stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.
-- Deleting your account: Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history and drops older copies every hour, so an erased copy leaves it within about 25 hours, and the database copy taken before each deploy is kept only until 3 newer deploys replace it.
+- Deleting your account: Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet.
 - After an erasure we keep one audit entry that says an account was erased, identified only by a one-way hash of its id, with no email and no content.
-- Request logs and security logs are kept only as long as we need them to run and protect the service.
-- Billing records stay with Paddle, our Merchant of Record, under its own retention rules (for as long as tax law requires); we keep only each Paddle transaction id and its net amount for our accounts.
+- Security log entries are kept while your account is open and deleted when it is erased. Request logs are kept only as long as we need them to run and protect the service.
+- Billing records stay with Paddle, our Merchant of Record, under its own retention rules (for as long as tax law requires). We keep each Paddle transaction id with its month and net amount, and each Paddle subscription id with when it last changed and when and why it ended. The ids of Paddle notices we processed are kept for 30 days. None of these is linked to your account in our database.
 
 ### Your rights
 
@@ -659,7 +660,7 @@ California residents: we do not sell or share personal information as the CCPA d
 
 Our websites set no cookies of their own. Cloudflare, which protects them, may set a cookie its bot checks need. Your browser's local storage keeps your light or dark theme choice, and the pricing page remembers the monthly or yearly toggle for the visit. Nothing in them identifies you, and they never leave your browser.
 
-The dashboard keeps your sign-in token in your browser's local storage so you stay signed in. Signing in with GitHub or Google uses short-lived cookies that tie the sign-in to your browser; they are cleared when sign-in finishes. None of these are used for tracking or advertising.
+The dashboard keeps your sign-in token, your account id, email and name, your chosen project, any pending team invite and, if you sign in with an API key, that key in your browser's local storage so you stay signed in. It also keeps a few display preferences there, and a few short-lived items, such as a checkout in progress, in session storage for one visit. Signing in with GitHub or Google uses short-lived cookies that tie the sign-in to your browser; they are cleared when sign-in finishes, and expire within 10 minutes if it does not. None of these are used for tracking or advertising.
 
 ### Self-hosted Remembra
 
@@ -687,7 +688,7 @@ Legal
 
 ## Refund policy
 
-Last updated: September 26, 2026. If Remembra isn't right for you, ask within 14 days of your first payment and you get it back.
+Last updated: September 27, 2026. If Remembra isn't right for you, ask within 14 days of your first payment and you get it back.
 
 ### 14 days on your first payment
 
@@ -706,7 +707,7 @@ A refund ends the plan at once. We cancel the subscription with Paddle at the sa
 
 Email [support@remembra.dev](mailto:support@remembra.dev) from the address on your Remembra account, and include the order number from your Paddle receipt if you have it. You can also ask Paddle directly at [paddle.net](https://paddle.net).
 
-Paddle sends the money back to the card or account you paid with. It usually shows up within 5 to 10 business days, depending on your bank.
+Paddle sends the money back to the card or account you paid with. How long it takes to show up depends on your bank.
 
 We may turn down requests that are part of a pattern of abuse, such as buying and refunding the same plan again and again.
 

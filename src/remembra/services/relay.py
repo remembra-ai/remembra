@@ -52,6 +52,8 @@ from remembra.relay.identity import (
     ProjectLocator,
     slugify_project,
 )
+from remembra.security.secrets import scrub as scrub_secrets
+from remembra.security.secrets import scrub_value
 from remembra.security.untrusted import repo_url_prefixes
 from remembra.services.agent_session import HANDOFF_ENDED_JD, AgentSessionService, _parse_metadata
 
@@ -1267,8 +1269,10 @@ class RelayService:
         remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
         brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))
         brief["handoff_health"] = stored_health(brief.get("handoff"))
-        brief["crew"] = await self._crew_brief(user_id, project_id, agent_id, client_session_id)
-        brief["rendered"] = render_brief(brief)
+        # The crew block (task titles, notes, decisions, baton facts from crew.db) is scrubbed like the rest.
+        brief["crew"] = scrub_value(await self._crew_brief(user_id, project_id, agent_id, client_session_id))
+        # Every field above is read through the scrubbed row views; the text is scrubbed once more as a whole.
+        brief["rendered"] = scrub_secrets(render_brief(brief))
         police_brief(brief)  # the JSON fields get the same verdicts as the rendered text
         return brief
 

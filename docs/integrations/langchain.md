@@ -1,8 +1,9 @@
 # LangChain
 
 Give any LangChain app persistent, cross-session memory backed by Remembra —
-chat history that survives restarts, with entity resolution, semantic recall,
-and per-session isolation.
+chat history that survives restarts, with semantic recall and per-session
+isolation. Messages are stored as written, so no facts or entities are
+extracted from them.
 
 ## Install
 
@@ -67,24 +68,37 @@ chain_with_memory.invoke(
 
 ### Clearing a session
 
-`history.clear()` deletes **only that session's** messages — other sessions
-and the rest of the user's memory are untouched.
+`history.clear()` deletes the messages this history stored for its
+`session_id`, and nothing else. Other sessions are kept, and so are other
+memories with the same `session_id`: an app note, or anything a Python SDK
+client created with that `session_id` stored.
 
 ```python
-history.clear()   # removes conversation_abc; conversation_xyz is unaffected
+history.clear()   # removes conversation_abc's messages; conversation_xyz is unaffected
 ```
+
+!!! warning "remembra 0.16.1 and earlier"
+    There, `clear()` deletes every memory in the user/project whose metadata
+    `session_id` matches, including other code's, and `messages` shows those
+    memories as messages. With those versions, use a `session_id` that nothing
+    else uses in the project.
 
 ## Notes & limits
 
-- **Isolation** is by `session_id` within a `(user_id, project)` namespace.
+- **Isolation** is by `session_id` within the account's project (with auth on, the account is the API key's).
   Use a distinct `session_id` per conversation.
 - **`messages` returns up to the 50 most recent** messages of a session in one
   read (the recall API caps a single page at 50). `clear()` deletes *all*
   messages regardless of count. For very long histories, window the
   conversation or summarize older turns.
 - **TTL**: pass `ttl="30d"` to auto-expire messages.
-- Every stored message carries `session_id`, `role`, and `sequence` metadata,
-  so history is reconstructed in order.
+- Every stored message carries `session_id`, `role`, `sequence` and
+  `remembra_integration: "langchain"` metadata. `messages` and `clear()` use
+  only memories with that marker, plus messages stored by earlier versions
+  (they carry `langchain_message`).
+- A new history object for an existing session continues its `sequence`, so
+  `messages` comes back in the order the messages were added, also when
+  `RunnableWithMessageHistory` builds a new object for every call.
 
 ## Semantic memory (beyond chat history)
 

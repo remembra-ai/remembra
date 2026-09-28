@@ -4,11 +4,11 @@ Smart Auto-Forgetting via Temporal Phrase Detection.
 This module detects temporal phrases in content and suggests
 appropriate TTLs for automatic memory expiration.
 
-Examples:
-    - "meeting tomorrow at 2pm" → expires in ~36 hours
-    - "remember for next week" → expires in 7 days
-    - "annual review" → expires in 1 year
-    - "call me in 30 minutes" → expires in ~1 hour
+Examples (the TTL string the SDK sends):
+    - "meeting tomorrow at 2pm" → 36h
+    - "remember for next week" → 180h (7.5 days)
+    - "annual review" → 400d
+    - "call me in 30 minutes" → 1h
 
 Usage:
     parser = TemporalParser()
@@ -24,6 +24,7 @@ optional dateparser fallback for complex cases.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -58,7 +59,7 @@ class TemporalDetection:
     """Suggested TTL in seconds."""
 
     ttl_string: str
-    """Human-readable TTL (e.g., '36h', '7d')."""
+    """The TTL the SDK sends: ttl_seconds rounded up to whole hours ('36h', '84h'), or whole days ('10d')."""
 
     granularity: TemporalGranularity
     """Time granularity of the reference."""
@@ -573,31 +574,19 @@ class TemporalParser:
             return TemporalGranularity.YEARS
 
     def _format_ttl(self, seconds: int) -> str:
-        """Format seconds as human-readable TTL string."""
-        if seconds < 3600:
-            return f"{seconds // 60}m"
-        elif seconds < 86400:
-            return f"{seconds // 3600}h"
-        elif seconds < 604800:
-            days = seconds / 86400
-            if days == int(days):
-                return f"{int(days)}d"
-            return f"{days:.1f}d"
-        elif seconds < 2592000:
-            weeks = seconds / 604800
-            if weeks == int(weeks):
-                return f"{int(weeks)}w"
-            return f"{weeks:.1f}w"
-        elif seconds < 31536000:
-            months = seconds / 2592000
-            if months == int(months):
-                return f"{int(months)}mo"
-            return f"{months:.1f}mo"
-        else:
-            years = seconds / 31536000
-            if years == int(years):
-                return f"{int(years)}y"
-            return f"{years:.1f}y"
+        """The TTL sent to the server: whole hours, rounded up ('36h'), or whole days when exact ('10d').
+
+        Rounded up, never down, so a memory never expires before the moment
+        the phrase refers to. Whole hours and days mean the same on every
+        server that reads hours (0.13 and later). Decimals ('1.5d') and
+        minutes are not sent: servers 0.16.1 and earlier ignore a decimal TTL
+        (the memory never expires) and read 'm' as months, later servers refuse
+        a bare 'm', and 0.16.1 does not know 'min'.
+        """
+        hours = max(1, math.ceil(seconds / 3600))
+        if hours % 24 == 0:
+            return f"{hours // 24}d"
+        return f"{hours}h"
 
 
 # Singleton for convenience

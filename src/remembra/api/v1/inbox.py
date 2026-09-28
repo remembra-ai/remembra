@@ -19,7 +19,8 @@ Scoping (every route):
 * **Agent scoping.** An agent-scoped key (or an agent-bound connector grant)
   reads and acks only its own inbox: rows addressed to its agent. Asking for
   another agent's inbox, or acking a row addressed to another agent, is a 404,
-  so ids cannot be probed.
+  so ids cannot be probed. It sends only as its own agent: a ``from_agent`` or
+  ``X-Remembra-Agent-Id`` header naming another agent is a 403.
 * **Reserved senders** (Crew mode, spec §5.8, §6, §11.2). ``mani``, ``human``,
   ``system``, ``remembra`` and the kinds ``override`` / ``pause`` are
   server-set: an API key using them gets 422. A dashboard login sends as
@@ -37,7 +38,13 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    enforce_agent_scope_header,
+    get_current_user,
+    require_memory_recall,
+    require_memory_store,
+)
 from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.crew.access import is_human
@@ -147,7 +154,10 @@ class SendInboxRequest(BaseModel):
     from_agent: str | None = Field(
         default=None,
         max_length=128,
-        description="Optional sender id. If omitted, defaults to 'unknown'.",
+        description=(
+            "Optional sender id. If omitted: an agent-scoped key's agent, else 'unknown'. "
+            "An agent-scoped key may only name its own agent (403 otherwise)."
+        ),
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
     expires_at: datetime | None = Field(
@@ -262,15 +272,20 @@ async def send_to_inbox(
 
     An inbox message is a relay event: free on every plan (never uses smart
     credits), subject only to the plan's relay burst limit.
+
+    An agent-scoped key sends as its own agent: a ``from_agent`` (or an
+    ``X-Remembra-Agent-Id`` header) naming another agent is refused (403), as
+    on ``POST /session/close``.
     """
+    # An agent-scoped key sends only as its own agent: naming another one is a 403 (checked first,
+    # so a spoofed sender is refused rather than relabelled).
+    bound = enforce_agent_scope_header(request, current_user, (payload.from_agent, "request"))
     human = is_human(current_user)
     if human:
         # A dashboard login is the human principal: server-set sender provenance.
         from_agent = payload.from_agent or "human"
         sender_kind = "human"
     else:
-        # An agent-scoped key sends as its own agent, whatever the payload claims.
-        bound = getattr(current_user, "agent_id", None)
         from_agent = bound or payload.from_agent or "unknown"
         sender_kind = "agent"
         if bound and is_reserved_sender(bound):

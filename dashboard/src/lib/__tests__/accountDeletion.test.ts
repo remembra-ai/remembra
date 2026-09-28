@@ -28,11 +28,13 @@ describe('deletionConfirm', () => {
 });
 
 describe('DELETION_COPY', () => {
-  it('says billing stops, when data goes, and how backups age out', () => {
+  it('says billing stops, when data goes, and how long backups keep it', () => {
     expect(DELETION_COPY).toContain('cancels any subscription at once');
     expect(DELETION_COPY).toContain('7 days later everything the account holds is erased');
-    expect(DELETION_COPY).toContain('24 hours of history');
-    expect(DELETION_COPY).toContain('3 newer deploys');
+    expect(DELETION_COPY).toContain('until 3 more deploys have happened');
+    // Production runs no continuous (litestream) backup, so the copy promises none.
+    expect(DELETION_COPY).toContain('There is no continuous backup yet.');
+    expect(DELETION_COPY).not.toContain('24 hours');
   });
 });
 

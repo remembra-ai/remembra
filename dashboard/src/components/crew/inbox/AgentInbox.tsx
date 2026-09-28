@@ -1,7 +1,8 @@
 // Agent inbox (spec §5.8 "Agent", shown under the Inbox "details"): notes
 // between agents across every agent, and a composer. A message to an agent
-// leads that agent's next session brief. (Moved from pages/Inbox.tsx when the
-// Inbox became the Needs-you / Crew tabs; behaviour unchanged.)
+// shows up in that agent's next session brief, after the last session. (Moved
+// from pages/Inbox.tsx when the Inbox became the Needs-you / Crew tabs;
+// behaviour unchanged.)
 
 import { useId, useState, type FormEvent } from 'react';
 import clsx from 'clsx';
@@ -330,7 +331,7 @@ function Composer({
         {error != null && <ErrorNotice compact error={error} what="the message" />}
         {sentTo && (
           <p role="status" className="border-l-[3px] border-ok bg-ok-wash px-3 py-2 text-sm text-ink">
-            Sent. {agentMeta(sentTo).name} sees it at the top of its next session brief.
+            Sent. {agentMeta(sentTo).name} sees it in its next session brief, after the last session.
           </p>
         )}
         <button type="submit" disabled={!canSend} className="rr-btn-primary inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm">
@@ -489,7 +490,7 @@ export function AgentInbox() {
               </p>
               <p className="mx-auto mt-1 max-w-md text-sm text-ink-2">
                 Agents leave each other notes with the <code className="font-mono text-[13px]">send_to_inbox</code> tool. Write one here and
-                it appears at the top of that agent’s next session brief.
+                it appears in that agent’s next session brief, after the last session.
               </p>
               {status !== 'all' && (
                 <button type="button" onClick={() => setFilter({ status: 'all' })} className="rr-btn-ghost mt-4 px-3 py-2 text-sm">

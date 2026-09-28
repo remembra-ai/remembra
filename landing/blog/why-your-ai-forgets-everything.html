@@ -126,8 +126,8 @@
 </ol>
 <h2>Self-Host or Cloud</h2>
 <p>AI memory is sensitive data. Many developers want to keep it on their own infrastructure:</p>
-<pre><code>docker run -d -p 8787:8787 remembra/remembra</code></pre>
-<p>That's a full memory server running locally: your memories are stored on your machine. With the default settings their text is still sent to OpenAI for embeddings; to keep everything on the machine, use the Ollama quickstart (<code>docker-compose.quickstart.yml</code>).</p>
+<pre><code>curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash</code></pre>
+<p>That starts Remembra, Qdrant and Ollama with Docker Compose (<code>docker-compose.quickstart.yml</code>): a memory server running locally, with your memories stored on your machine. It embeds with Ollama and sets no OpenAI key, so extraction falls back to local processing. With the default settings and an OpenAI key instead, the text of your memories is sent to OpenAI for embeddings and for fact and entity extraction.</p>
 <p>For teams that want managed infrastructure, cloud options provide the same features without the ops overhead.</p>
 <h2>The Future Is Contextual AI</h2>
 <p>We're moving from <em>stateless AI</em> to <em>contextual AI</em>—assistants that understand your work, remember your preferences, and build on past interactions.</p>

@@ -32,11 +32,11 @@ Based on their arxiv paper (2504.19413) and production system:
 - Complex deployment requirements
 
 ### Our Differentiators
-1. **Self-host in minutes** - Single `docker run` command
+1. **Self-host with one command** - `quickstart.sh` starts Remembra, Qdrant and Ollama with Docker Compose
 2. **Fair pricing** - Free → Solo $12 → Pro $29 → Team $15/seat (not $19 → $249); relay is free on every plan, AI enrichment is metered in smart credits
 3. **Developer-first docs** - Actually usable
 4. **MIT license** - True open source
-5. **Lightweight** - Runs on a $5/mo VPS
+5. **Lightweight** - one API container with SQLite, plus Qdrant (no minimum server size has been measured)
 
 ---
 
@@ -103,7 +103,7 @@ Based on their arxiv paper (2504.19413) and production system:
 ## Implementation Status
 
 > **CHANGELOG.md is the ground truth for what's shipped** — this table is the
-> high-level map (updated 2026-07-16, v0.16.0).
+> high-level map (updated 2026-09-27, after v0.16.1).
 
 | Area | Where | Status |
 |------|-------|--------|
@@ -113,14 +113,14 @@ Based on their arxiv paper (2504.19413) and production system:
 | Entity resolution + bitemporal graph | `extraction/`, `retrieval/graph.py` | ✅ Shipped |
 | Brain layer (GraphRAG communities, dependency-free Louvain) | `brain/` | ✅ Shipped |
 | Temporal: TTL, Ebbinghaus decay, archive, as-of queries | `temporal/` | ✅ Shipped |
-| Multi-tenant remote MCP (streamable-HTTP, 14 tools) | `mcp/server.py` | ✅ Shipped |
+| MCP server: stdio, SSE and streamable HTTP, 31 tools (the hosted remote endpoint is not live yet) | `mcp/server.py` | ✅ Shipped |
 | Auth: API keys (O(1) lookup), JWT + 2FA, RBAC scopes | `auth/` | ✅ Shipped |
 | Tenancy: users, teams, spaces, projects | `teams/`, `spaces/` | ✅ Shipped |
-| Cloud: Paddle billing, plan limits, metering | `cloud/` | ✅ Shipped (webhook→metering wiring pending) |
+| Cloud: Paddle billing, plan limits, metering | `cloud/` | ✅ Shipped |
 | Dashboard (React SPA, 2D/3D knowledge graph, brain insights) | `dashboard/` | ✅ Shipped |
 | TypeScript SDK / Python client / Chrome extension | `sdk/`, `client/`, `extension/` | ✅ Shipped |
 | Observability: request IDs, structured logs | `main.py`, `core/` | ✅ Shipped (0.16.0) |
-| Backups: litestream (opt-in via env) | `Dockerfile.cloud`, `scripts/cloud-entrypoint.sh` | ✅ Shipped (0.16.0) |
+| Backups: a database copy when a new build starts (the newest 3 are kept); Litestream only when `LITESTREAM_REPLICA_URL` is set (not set on Remembra Cloud) | `storage/backup.py`, `Dockerfile.cloud`, `scripts/cloud-entrypoint.sh` | ✅ Shipped (0.16.0) |
 | Async enrichment (fast writes) | `services/memory.py` | ✅ Behind `REMEMBRA_ASYNC_ENRICHMENT` flag |
 | SQLite → Postgres migration | — | 📋 Planned |
 | Recall-quality regression gate in CI (LoCoMo runner exists) | `benchmarks/` | 📋 Planned |
@@ -245,10 +245,12 @@ Response (200 OK):
 ```
 
 ### Forget (Delete)
+Give exactly one of `memory_id`, `entity` or `all_memories=true`, or only `project_id`:
 ```http
-DELETE /api/v1/memories?user_id=user_123
 DELETE /api/v1/memories?memory_id=01HQXYZ...
-DELETE /api/v1/memories?entity=John  (coming Week 5)
+DELETE /api/v1/memories?entity=John            (since 0.16.1; add project_id to limit it to one project)
+DELETE /api/v1/memories?project_id=my_app      (every memory in that project)
+DELETE /api/v1/memories?all_memories=true      (the whole account)
 
 Response (200 OK):
 {
@@ -260,7 +262,7 @@ Response (200 OK):
 
 ---
 
-## Python SDK (Week 3)
+## Python SDK
 
 ```python
 from remembra import Memory
@@ -272,8 +274,9 @@ memory = Memory(
     project="my_app"
 )
 
-# Initialize (cloud - future)
+# Initialize (Remembra Cloud)
 memory = Memory(
+    base_url="https://api.remembra.dev",
     api_key="rem_xxx",
     user_id="user_123"
 )
@@ -298,20 +301,13 @@ memory.forget(all_memories=True)  # Delete everything in the account (explicit o
 
 ## Self-Hosting
 
-### Minimal (One Command)
+### Quickstart (one command)
 ```bash
-docker run -d -p 8787:8787 \
-  -e REMEMBRA_OPENAI_API_KEY=sk-xxx \
-  remembra/remembra:latest
+curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
 ```
-
-### With Persistent Storage
-```bash
-docker run -d -p 8787:8787 \
-  -v remembra_data:/app/data \
-  -e REMEMBRA_OPENAI_API_KEY=sk-xxx \
-  remembra/remembra:latest
-```
+It starts Remembra, Qdrant and Ollama with Docker Compose, with auth off and local embeddings. The
+`remembra/remembra` image alone is not enough: it needs a Qdrant server (`REMEMBRA_QDRANT_URL`) and keeps its
+SQLite database in `/data`. See `docs/getting-started/docker.md` for the other compose files and settings.
 
 ### Development (with Qdrant)
 ```bash
@@ -329,7 +325,7 @@ docker-compose up -d
 | `REMEMBRA_DEBUG` | `false` | Debug mode |
 | `REMEMBRA_LOG_LEVEL` | `info` | Log level |
 | `REMEMBRA_QDRANT_URL` | `http://qdrant:6333` | Qdrant address |
-| `REMEMBRA_DATABASE_URL` | `sqlite:///remembra.db` | Metadata DB |
+| `REMEMBRA_DATABASE_URL` | `sqlite+aiosqlite:///remembra.db` (the Docker image sets `/data/remembra.db`) | Metadata DB |
 | `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | openai/ollama/cohere |
 | `REMEMBRA_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
 | `REMEMBRA_OPENAI_API_KEY` | - | OpenAI API key |
@@ -358,10 +354,13 @@ docker-compose up -d
 
 ## Security
 
-1. **API Keys**: Planned for cloud tier
+1. **API keys**: admin, editor and viewer roles; a key can be limited to some projects or to one agent
 2. **Data Isolation**: User data strictly scoped by user_id + project_id
-3. **GDPR**: Complete deletion via forget() endpoint
-4. **Self-hosted**: Your data never leaves your infrastructure
+3. **Deletion**: `forget()` deletes the memories, their vectors, keyword entries, entity links and the
+   relationships pulled from them at once. Conflict records that quoted the text stay until the account is
+   erased, and a database copy taken when a new build starts keeps deleted data until 3 newer copies exist.
+4. **Self-hosted**: memories stay on your servers, except the text sent to the embedding and LLM providers you
+   configure (OpenAI by default)
 
 ---
 

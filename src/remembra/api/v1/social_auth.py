@@ -265,13 +265,11 @@ async def oauth_exchange(
             headers={"Retry-After": str(remaining)},
         )
     # The provider account that proved the mailbox (or one the proven owner
-    # connected since) may finish a pending account review; 2FA set up before
-    # that does not stand in its way.
+    # connected since) may finish a pending account review. 2FA applies to it
+    # like to every other sign-in.
     subject = info.get("provider_user_id")
-    review_claims, skip_old_totp = await account_review.login_claims(
-        db, user_row["id"], provider=info["provider"], subject=subject
-    )
-    if not skip_old_totp and await user_manager.is_totp_enabled(user_row["id"]):
+    review_claims = await account_review.login_claims(db, user_row["id"], provider=info["provider"], subject=subject)
+    if await user_manager.is_totp_enabled(user_row["id"]):
         if not body.totp_code:
             return OAuthExchangeResponse(requires_2fa=True, provider=info["provider"], message="2FA code required")
         if not await user_manager.verify_totp(user_row["id"], body.totp_code):
@@ -316,9 +314,10 @@ async def oauth_exchange(
 async def oauth_link_start(request: Request, response: Response, provider: str, current_user: CurrentUser) -> LinkStartResponse:
     """Returns a single-use ``start_path`` (2 minutes). Needs a session from the last 15 minutes.
 
-    This is the only way to add GitHub to an account whose email is already
-    verified: GitHub sign-in links by email only into an account nobody has
-    proven the mailbox of (see :mod:`remembra.auth.social`).
+    This is the only way to add GitHub to an existing account, and to add any
+    provider to an account whose email is not verified: sign-in never links
+    GitHub by email, and links Google by email only into a verified account
+    (see :mod:`remembra.auth.social`).
     Call it with ``credentials: 'include'``: the HttpOnly cookie it sets binds
     the ticket to this browser, and ``/start`` refuses the ticket anywhere else.
     """

@@ -46,8 +46,10 @@ async def account_is_owner_now(db: Any, user_row: dict[str, Any] | None) -> bool
     """:func:`account_is_owner`, except that an owner ADDRESS counts only once its account review is done.
 
     Accounts listed by id in ``REMEMBRA_SUPERADMIN_USER_IDS`` are unaffected.
-    An owner address verified by Sign in with Google (or a reset) on an account
-    someone else may have pre-registered gives no platform rights until the
+    An owner address verified by an emailed reset (or, for an account check
+    opened before sign-ins stopped linking into never-verified accounts, by
+    Sign in with Google or GitHub) on an account someone else may have
+    pre-registered gives no platform rights until the
     mailbox owner has reviewed the credentials set up before
     (:mod:`remembra.auth.account_review`); otherwise a squatter's admin key
     would inherit superadmin the moment the real owner signs in.

@@ -1,8 +1,10 @@
 """
 AES-256-GCM field-level encryption for memory content at rest.
 
-Provides transparent encrypt/decrypt for memory content and metadata
-fields before they are written to storage (SQLite, Qdrant payloads).
+Provides transparent encrypt/decrypt for the text fields of a memory's
+Qdrant payload (see ``storage/qdrant.py``: content, metadata, extracted
+facts and entities) and for TOTP secrets. The SQLite database is not
+field-encrypted.
 
 Usage:
     from remembra.security.encryption import FieldEncryptor
@@ -209,12 +211,58 @@ class FieldEncryptor:
             # Return ciphertext as-is — caller can retry with correct key
             return ciphertext
 
+    def encrypt_value(self, value: Any) -> Any:
+        """
+        Encrypt every string in ``value``, at any depth.
+
+        A string is encrypted; lists and dicts are rebuilt with their strings
+        encrypted (a tuple becomes a list). Numbers, booleans and None pass
+        through so their type survives a round trip, and dict keys stay plain.
+
+        Args:
+            value: A string, or a JSON-like structure of lists and dicts.
+
+        Returns:
+            The same shape with every string encrypted, or ``value`` itself
+            when encryption is disabled.
+        """
+        if not self._enabled:
+            return value
+        if isinstance(value, str):
+            return self.encrypt(value)
+        if isinstance(value, dict):
+            return {key: self.encrypt_value(item) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return [self.encrypt_value(item) for item in value]
+        return value
+
+    def decrypt_value(self, value: Any) -> Any:
+        """
+        Decrypt every encrypted string in ``value``, at any depth.
+
+        Plaintext strings (written before encryption covered them) come back
+        unchanged, so old and new records read the same way.
+
+        Args:
+            value: A string, or a JSON-like structure of lists and dicts.
+
+        Returns:
+            The same shape with every encrypted string decrypted.
+        """
+        if isinstance(value, str):
+            return self.decrypt(value)
+        if isinstance(value, dict):
+            return {key: self.decrypt_value(item) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return [self.decrypt_value(item) for item in value]
+        return value
+
     def encrypt_dict(self, data: dict[str, Any] | None) -> dict[str, Any] | None:
         """
-        Encrypt all string values in a metadata dictionary.
+        Encrypt every string value in a metadata dictionary, at any depth.
 
-        Non-string values (ints, bools, lists) pass through unmodified.
-        Nested dicts are encrypted recursively.
+        Strings inside nested dicts and lists are encrypted too. Numbers,
+        booleans and None pass through unmodified, and keys stay plain.
 
         Args:
             data: Metadata dictionary or None.
@@ -224,20 +272,12 @@ class FieldEncryptor:
         """
         if not self._enabled or data is None:
             return data
-
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            if isinstance(value, str):
-                result[key] = self.encrypt(value)
-            elif isinstance(value, dict):
-                result[key] = self.encrypt_dict(value)
-            else:
-                result[key] = value
+        result: dict[str, Any] = self.encrypt_value(data)
         return result
 
     def decrypt_dict(self, data: dict[str, Any] | None) -> dict[str, Any] | None:
         """
-        Decrypt all encrypted string values in a metadata dictionary.
+        Decrypt all encrypted string values in a metadata dictionary, at any depth.
 
         Handles mixed encrypted/plaintext values transparently.
 
@@ -249,13 +289,5 @@ class FieldEncryptor:
         """
         if data is None:
             return data
-
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            if isinstance(value, str):
-                result[key] = self.decrypt(value)
-            elif isinstance(value, dict):
-                result[key] = self.decrypt_dict(value)
-            else:
-                result[key] = value
+        result: dict[str, Any] = self.decrypt_value(data)
         return result

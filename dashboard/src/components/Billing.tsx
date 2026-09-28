@@ -539,7 +539,7 @@ function PlansSection({
           <li className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
             <div>
               <p className="font-display text-xl font-bold text-ink">Enterprise</p>
-              <p className="mt-1 text-sm text-ink-2">Custom limits, a contract and an SLA. SSO on request.</p>
+              <p className="mt-1 text-sm text-ink-2">Custom limits, a contract and an SLA. There is no SAML or enterprise SSO yet.</p>
             </div>
             <a
               href="mailto:sales@dolphytech.com?subject=Remembra%20Enterprise"

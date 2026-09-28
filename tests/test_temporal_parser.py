@@ -282,13 +282,18 @@ class TestDetectAll:
 class TestTTLFormatting:
     """Tests for TTL string formatting."""
 
+    # The TTL is sent as whole hours (rounded up) or whole days, never minutes
+    # or decimals: servers 0.16.1 and earlier read 'm' as months and ignore
+    # decimals (see tests/test_ttl_units.py for the server side).
+
     def test_format_minutes(self):
-        """Test minutes formatting."""
+        """40 minutes (10 + a 30-minute buffer) is sent as one hour, never as '40m'."""
         parser = TemporalParser()
         result = parser.detect("Remember for 10 minutes")
 
         assert result is not None
-        assert "m" in result.ttl_string
+        assert result.ttl_seconds == 2400
+        assert result.ttl_string == "1h"
 
     def test_format_hours(self):
         """Test hours formatting."""
@@ -296,15 +301,13 @@ class TestTTLFormatting:
         result = parser.detect("Remember for 5 hours")
 
         assert result is not None
-        assert "h" in result.ttl_string
+        assert result.ttl_string == "7h"
 
     def test_format_days(self):
-        """Test days formatting."""
+        """3.5 days is sent as 84 hours, not '3.5d'; whole days as days."""
         parser = TemporalParser()
-        result = parser.detect("Remember for 3 days")
-
-        assert result is not None
-        assert "d" in result.ttl_string
+        assert parser.detect("Remember for 3 days").ttl_string == "84h"  # type: ignore[union-attr]
+        assert parser.detect("Call next week").ttl_string == "10d"  # type: ignore[union-attr]
 
 
 class TestMinConfidence:

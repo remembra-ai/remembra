@@ -1,18 +1,32 @@
-"""Audio capture endpoints — /api/v1/audio/*."""
+"""Audio capture endpoints — /api/v1/audio/*.
+
+Capture records from the server's own microphone, so it only makes sense on a
+server you run yourself. In cloud mode (``REMEMBRA_CLOUD_ENABLED=true``, as
+Remembra Cloud runs) every route here answers 404 before any credential is
+read, as if it did not exist.
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from remembra.audio_adapter import AudioAdapter
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import CurrentUser, require_memory_store
+from remembra.config import get_settings
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/audio", tags=["audio"])
+
+async def _self_hosted_only() -> None:
+    """404 on a server in cloud mode: the hosted service has no microphone of the user's to record."""
+    if get_settings().cloud_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+router = APIRouter(prefix="/audio", tags=["audio"], dependencies=[Depends(_self_hosted_only)])
 
 # Single process-wide adapter. Holds active sessions in-memory.
 _adapter = AudioAdapter()
@@ -23,12 +37,12 @@ _adapter = AudioAdapter()
 _session_owners: dict[str, str] = {}
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[require_memory_store()])
 async def start_audio(
     current_user: CurrentUser,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    """Start audio capture (requires auth). Optional body: { meeting_id }."""
+    """Start audio capture (needs ``memory:store``). Optional body: { meeting_id }."""
     meeting_id = (body or {}).get("meeting_id")
     try:
         session = _adapter.start(meeting_id=meeting_id)
@@ -39,12 +53,12 @@ async def start_audio(
     return {"session": _adapter.session_dict(session)}
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[require_memory_store()])
 async def stop_audio(
     current_user: CurrentUser,
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
-    """Stop capture and transcribe (requires auth). Body: { session_id, transcribe?: bool }."""
+    """Stop capture and transcribe (needs ``memory:store``). Body: { session_id, transcribe?: bool }."""
     session_id = (body or {}).get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="'session_id' is required")

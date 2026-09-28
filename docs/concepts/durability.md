@@ -53,11 +53,14 @@ can leave a memory missing from semantic search, or leave an orphan vector.
 
 ## Backups
 
-- **Before every schema migration** the server copies the database to `/data/backups/`
-  (`REMEMBRA_PRE_MIGRATION_BACKUP`, on by default; the newest 3 are kept). If that copy fails, the new
-  version refuses to start and the old one keeps running.
-- **Continuous replication (optional):** set `LITESTREAM_REPLICA_URL` and the container runs the server
-  under Litestream, replicating SQLite to your bucket.
+- **When a new build starts**, before any schema migration runs, the server copies the database to
+  `/data/backups/` (`REMEMBRA_PRE_MIGRATION_BACKUP`, on by default). It does this once per build, even
+  when the schema does not change, and a restart of the same build does not copy again. Each copy is
+  deleted once 3 newer ones exist. If a copy fails, the new version refuses to start. The copies sit on
+  the same volume as the database, so they do not protect against losing the volume.
+- **Continuous replication (optional):** the `Dockerfile.cloud` image ships Litestream. Set
+  `LITESTREAM_REPLICA_URL` and the container runs the server under Litestream, replicating SQLite to your
+  bucket. The default image has no Litestream.
 - **Manual copies** are safe while the server runs:
 
     ```bash

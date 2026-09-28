@@ -4,7 +4,18 @@ Security model (SEC-1):
 
 * Every connection is authenticated exactly like REST (API key or dashboard
   JWT, including revocation / deactivation checks) and needs ``memory:recall``
-  (memory events) or ``crew:read`` (crew subscriptions).
+  (memory events) or, when Crew mode is on, ``crew:read`` (crew subscriptions).
+* The same checks run again while the socket is open (P-348): before every
+  memory event and every crew frame it is sent, every
+  ``REVALIDATE_INTERVAL_SECONDS`` while it is idle (then crew membership and
+  project access are re-read too), and at once when a key is revoked or
+  deleted, a session is signed out, a password changes or the account is
+  deactivated or deleted (:func:`recheck_user_connections`). A socket that
+  fails them gets no further frames and is closed: 4001 when its key or
+  session no longer authenticates, 4003 when it lost ``memory:recall``, the
+  project it follows, ``crew:read`` or a crew it subscribed to.
+  ``ConnectionManager.revoke`` closes (4003) the sockets of a crew member who
+  was removed.
 * Memory events are routed by the server-derived owner ``user_id`` — never by a
   client-chosen namespace — so a client can only ever receive its own tenant's
   events. Project-restricted keys only receive events for their projects, and
@@ -13,12 +24,10 @@ Security model (SEC-1):
   first ``{"type": "auth", ...}`` message, so browsers never have to put a token
   in the URL. Query-string credentials are still accepted for older memory
   clients, but **refused for crew subscriptions**.
-* The credential is re-validated every 60 s (key revoked, account deactivated,
-  JWT blacklisted or invalidated, crew membership or project access lost); a
-  failure closes the socket with 4003. ``ConnectionManager.revoke`` closes
-  affected sockets immediately (key revocation, membership changes).
 
-Crew streams (Crew mode §4.4, contract ``docs/crew/snapshot.md``):
+Crew streams (Crew mode §4.4, contract ``docs/crew/snapshot.md``). With Crew
+mode off (no crew.db) crew frames are unknown messages, as on a server without
+Crew mode:
 
 * ``{"type":"subscribe","channel":"crew","crew_id":"crw_…","since_seq":N,"topics":["crew"]}``
   requires ``crew:read`` and crew membership (unknown and forbidden crews look
@@ -65,16 +74,24 @@ log = structlog.get_logger(__name__)
 router = APIRouter(tags=["websocket"])
 
 AUTH_MESSAGE_TIMEOUT_SECONDS = 10.0
+# An idle socket re-runs the connect-time checks this often (frames re-check on every send).
+REVALIDATE_INTERVAL_SECONDS = 30.0
+# The server sends "ping" after this long without a message from the client.
+IDLE_PING_SECONDS = 60.0
 
 CLOSE_UNAUTHORIZED = 4001
 CLOSE_FORBIDDEN = 4003
+CLOSE_INTERNAL_ERROR = 1011
+ACCESS_ENDED_REASON = "Access revoked or expired"
+RECHECK_FAILED_REASON = "Could not re-check access"
+CREW_ACCESS_ENDED_REASON = "crew access revoked"
 
 CREW_READ = "crew:read"
 CREW_WRITE = "crew:write"
 
 
 def _has_crew_permission(user: AuthenticatedUser, perm: str) -> bool:
-    """Crew permissions come from the RBAC roles (WP-14, ``crew.access.key_permissions``), not the legacy middleware table."""
+    """Crew permissions of the credential: its RBAC role and scopes (WP-14, ``crew.access.key_permissions``)."""
     return perm in key_permissions(user)
 
 
@@ -87,7 +104,6 @@ async def _load_crew_ref(conn: Any, crew_id: str, user: AuthenticatedUser, perm:
     return CrewRef(access.crew.id, access.crew.project_id, access.crew.owner_user_id)
 
 
-REVALIDATE_INTERVAL_S = 60.0
 CREW_QUEUE_MAX = 1000
 MAX_CREW_SUBS_PER_CONNECTION = 20
 MAX_CREW_CONNECTIONS_PER_USER = 10
@@ -103,38 +119,52 @@ def _now_iso() -> str:
 
 @dataclass(eq=False)
 class _Subscriber:
+    """A socket's memory-event subscription (present when the credential holds ``memory:recall``)."""
+
     websocket: WebSocket
     user_id: str
     allowed_projects: tuple[str, ...] | None  # None = unrestricted key
     project_filter: str | None
-    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # The socket this subscription belongs to: its credential is re-checked before every event.
+    conn: "_Connection" = field(repr=False)
 
     def wants(self, project_id: str | None) -> bool:
         if self.allowed_projects is not None and project_id not in self.allowed_projects:
             return False
         return not (self.project_filter and project_id and project_id != self.project_filter)
 
+    def may_follow(self, project_id: str | None) -> bool:
+        """Whether the key's current project allow-list lets this socket follow ``project_id``."""
+        return not (project_id and self.allowed_projects is not None and project_id not in self.allowed_projects)
+
 
 @dataclass(frozen=True)
 class _Credential:
-    api_key: str | None
-    token: str | None
+    # The credentials the socket connected with, kept only to re-run the same
+    # checks while it is open. repr=False keeps them out of logs and tracebacks.
+    api_key: str | None = field(repr=False)
+    token: str | None = field(repr=False)
     source: str  # header | message | query | none
 
 
 class _Connection:
-    """One /ws socket: its principal, credential (for re-validation) and crew subscriptions."""
+    """One /ws socket: its principal, credential (for re-validation) and subscriptions."""
 
-    def __init__(self, websocket: WebSocket, user: AuthenticatedUser, credential: _Credential, send_lock: asyncio.Lock) -> None:
+    def __init__(self, websocket: WebSocket, user: AuthenticatedUser, credential: _Credential) -> None:
         self.websocket = websocket
         self.user = user
         self.credential = credential
-        self.send_lock = send_lock
+        self.send_lock = asyncio.Lock()
         self.subs: dict[str, _CrewSub] = {}
         self.summary: _SummarySub | None = None
         self.memory_subscriber: _Subscriber | None = None
         self.closed = False
         self.close_code: int | None = None
+        # Set once the socket's access has ended; the close frame is sent by this task.
+        self.closing: asyncio.Task[None] | None = None
+
+    def __repr__(self) -> str:
+        return f"<_Connection user_id={self.user.user_id!r} closed={self.closed}>"
 
     @property
     def crew_sub_count(self) -> int:
@@ -148,7 +178,7 @@ class _Connection:
             return False
         try:
             async with self.send_lock:
-                if self.websocket.client_state != WebSocketState.CONNECTED:
+                if self.closed or self.websocket.client_state != WebSocketState.CONNECTED:
                     return False
                 await self.websocket.send_text(text)
             return True
@@ -156,17 +186,14 @@ class _Connection:
             log.warning("websocket_send_failed", error_type=type(e).__name__)
             return False
 
-    async def close(self, code: int, reason: str) -> None:
-        if self.closed:
-            return
-        self.closed = True
-        self.close_code = code
+    async def close_socket(self, code: int, reason: str) -> None:
+        """Send the close frame (after any frame already being sent). Never raises."""
         try:
             async with self.send_lock:
-                if self.websocket.client_state == WebSocketState.CONNECTED:
+                if self.websocket.application_state == WebSocketState.CONNECTED:
                     await self.websocket.close(code=code, reason=reason)
         except Exception as e:
-            log.warning("websocket_close_failed", error_type=type(e).__name__)
+            log.debug("websocket_close_failed", error_type=type(e).__name__)
 
     async def crew_error(self, crew_id: Any, code: str, message: str, **extra: Any) -> None:
         data: dict[str, Any] = {"channel": "crew", "crew_id": crew_id, "code": code, "message": message, **extra}
@@ -221,6 +248,10 @@ class _CrewSub:
                 item = await self.queue.get()
                 if item is _OVERFLOW:
                     await self.resync("overflow")
+                    return
+                # Re-check before every frame: a revoked key or a signed-out session
+                # never gets another crew frame, even with no hook run.
+                if not await self.manager.recheck_connection(self.conn) or not self.active:
                     return
                 kind, frame = item
                 if kind == "presence":
@@ -287,6 +318,8 @@ class _SummarySub:
         crews = [self.crews[i] for i in sorted(ids) if i in self.crews]
         if not crews or self.conn.closed:
             return
+        if not await self.manager.recheck_connection(self.conn):
+            return
         items = await summary_items(self.db.conn, crews)
         await self.conn.send_json({"type": "crew.summary", "crews": items})
 
@@ -302,6 +335,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._by_user: dict[str, set[_Subscriber]] = {}
         self._lock = asyncio.Lock()
+        self._closing: set[asyncio.Task[None]] = set()
         # Crew mode (§4.4)
         self._connections: set[_Connection] = set()
         self._by_crew: dict[str, set[_CrewSub]] = {}
@@ -323,10 +357,11 @@ class ConnectionManager:
     async def unregister(self, subscriber: _Subscriber) -> None:
         async with self._lock:
             subs = self._by_user.get(subscriber.user_id)
-            if subs is not None:
-                subs.discard(subscriber)
-                if not subs:
-                    del self._by_user[subscriber.user_id]
+            if subs is None or subscriber not in subs:
+                return
+            subs.discard(subscriber)
+            if not subs:
+                del self._by_user[subscriber.user_id]
         log.info("websocket_disconnected", user_id=subscriber.user_id, total_connections=self._count_all())
 
     async def broadcast(
@@ -363,9 +398,14 @@ class ConnectionManager:
         for sub in subscribers:
             if not sub.wants(project_id):
                 continue
+            # Re-check before every send: a revoked key, a signed-out session or a
+            # deactivated account never gets another event, even with no hook run.
+            if not await self.recheck(sub) or not sub.wants(project_id):
+                continue
+            conn = sub.conn
             try:
-                async with sub.send_lock:
-                    if sub.websocket.client_state == WebSocketState.CONNECTED:
+                async with conn.send_lock:
+                    if not conn.closed and sub.websocket.client_state == WebSocketState.CONNECTED:
                         await sub.websocket.send_text(message)
                         sent += 1
             except Exception as e:
@@ -385,7 +425,99 @@ class ConnectionManager:
                 return {"connections": len(self._by_user.get(user_id, ()))}
             return {"total_connections": self._count_all(), "tenants": len(self._by_user)}
 
-    # ---- connections and revocation -----------------------------------
+    # ---- re-validation and revocation ---------------------------------
+
+    async def recheck(self, subscriber: _Subscriber) -> bool:
+        """Re-run the connect-time checks for a memory subscriber's socket. True while it may still get events."""
+        return await self.recheck_connection(subscriber.conn)
+
+    async def recheck_connection(self, conn: _Connection, *, crews: bool = False) -> bool:
+        """Re-run the connect-time checks for an open socket. True while it may still get frames.
+
+        The credential is validated exactly like REST (key active, account
+        active, JWT signature/expiry/logout/session cut-off), then
+        ``memory:recall`` and the followed project (memory subscription) and
+        ``crew:read`` (crew subscriptions) are checked again. With ``crews=True``
+        (the periodic check) every subscribed crew is loaded again through the
+        REST access check and the summary is recomputed. On failure the socket is
+        taken out of every fan-out at once, so no further frame reaches it, and
+        closed: 4001 when the key or session no longer authenticates, 4003 when
+        it lost a permission, its project or a crew, 1011 when the check itself
+        could not run.
+        """
+        if conn.closed:
+            return False
+        try:
+            user = await _authenticate(conn.websocket, conn.credential.api_key, conn.credential.token, record_use=False)
+        except Exception as e:
+            log.warning("websocket_recheck_failed", user_id=conn.user.user_id, error_type=type(e).__name__)
+            await self._end(conn, CLOSE_INTERNAL_ERROR, RECHECK_FAILED_REASON)
+            return False
+        if user is None or user.user_id != conn.user.user_id:
+            await self._end(conn, CLOSE_UNAUTHORIZED, ACCESS_ENDED_REASON)
+            return False
+        conn.user = user
+        sub = conn.memory_subscriber
+        if sub is not None:
+            if not has_permission(user, "memory:recall"):
+                await self._end(conn, CLOSE_FORBIDDEN, "memory:recall permission required")
+                return False
+            if not _project_allowed(user, sub.project_filter):
+                await self._end(conn, CLOSE_FORBIDDEN, "No access to project")
+                return False
+            sub.allowed_projects = tuple(user.project_ids) if user.project_ids else None
+        elif not _has_crew_permission(user, CREW_READ):
+            # A crew-only socket (no memory subscription) that lost crew:read keeps nothing it may read.
+            await self._end(conn, CLOSE_FORBIDDEN, CREW_ACCESS_ENDED_REASON)
+            return False
+        if conn.subs or conn.summary is not None:
+            if not _has_crew_permission(user, CREW_READ):
+                await self._end(conn, CLOSE_FORBIDDEN, CREW_ACCESS_ENDED_REASON)
+                return False
+            if crews:
+                try:
+                    lost = await _crew_access_lost(conn)
+                except Exception as e:  # fail closed
+                    log.warning("websocket_crew_recheck_failed", user_id=conn.user.user_id, error_type=type(e).__name__)
+                    await self._end(conn, CLOSE_INTERNAL_ERROR, RECHECK_FAILED_REASON)
+                    return False
+                if lost:
+                    await self._end(conn, CLOSE_FORBIDDEN, CREW_ACCESS_ENDED_REASON)
+                    return False
+        return True
+
+    async def recheck_user(self, user_id: str) -> int:
+        """Re-check every open socket of ``user_id`` now (memory and crew). Returns how many were closed.
+
+        Only the credential and permission checks run here: crew membership changes close
+        sockets through :meth:`revoke`, and this never sends a frame from the caller's request.
+        """
+        closed = 0
+        for conn in [c for c in list(self._connections) if c.user.user_id == user_id]:
+            if not await self.recheck_connection(conn):
+                closed += 1
+        return closed
+
+    async def _end(self, conn: _Connection, code: int, reason: str) -> None:
+        """Stop sending to ``conn`` now and close its socket without blocking the caller.
+
+        Closing can wait on a slow client, so it runs in its own task; the
+        socket's handler awaits that task before it returns.
+        """
+        if conn.memory_subscriber is not None:
+            await self.unregister(conn.memory_subscriber)
+        for sub in list(conn.subs.values()):
+            self.remove_crew_sub(sub)
+        self.remove_summary_sub(conn)
+        if conn.closed:
+            return
+        conn.closed = True
+        conn.close_code = code
+        task = asyncio.create_task(conn.close_socket(code, reason))
+        conn.closing = task
+        self._closing.add(task)
+        task.add_done_callback(self._closing.discard)
+        log.info("websocket_access_ended", user_id=conn.user.user_id, code=code, reason=reason)
 
     def spawn(self, coro: Any, *, name: str) -> None:
         task = asyncio.create_task(coro, name=name)
@@ -401,13 +533,6 @@ class ConnectionManager:
         self.remove_summary_sub(conn)
         self._connections.discard(conn)
 
-    async def close_connection(self, conn: _Connection, code: int, reason: str) -> None:
-        for sub in list(conn.subs.values()):
-            self.remove_crew_sub(sub)
-        self.remove_summary_sub(conn)
-        await conn.close(code, reason)
-        log.info("websocket_closed_by_server", user_id=conn.user.user_id, code=code, reason=reason)
-
     async def revoke(
         self,
         *,
@@ -418,8 +543,9 @@ class ConnectionManager:
     ) -> int:
         """Close (4003) every socket matching all given filters. Returns how many were closed.
 
-        Call on key revocation (``api_key_id``), crew membership or share changes
-        (``user_id`` + ``crew_id``) and account deactivation (``user_id``).
+        Call on crew membership or share changes (``user_id`` + ``crew_id``). A
+        revoked key, a signed-out session or a deactivated account needs no call:
+        :func:`recheck_user_connections` closes those sockets with 4001.
         """
         if user_id is None and api_key_id is None and crew_id is None:
             return 0
@@ -435,7 +561,7 @@ class ConnectionManager:
                 continue
             targets.append(conn)
         for conn in targets:
-            await self.close_connection(conn, CLOSE_FORBIDDEN, reason)
+            await self._end(conn, CLOSE_FORBIDDEN, reason)
         return len(targets)
 
     # ---- crew subscriptions -------------------------------------------
@@ -554,6 +680,18 @@ def get_connection_manager() -> ConnectionManager:
     return connection_manager
 
 
+async def recheck_user_connections(user_id: str) -> None:
+    """Re-check every open socket of ``user_id`` now; call right after cutting that account's access.
+
+    Sockets whose key or session no longer passes are closed at once. Never
+    raises: cutting access must not fail because of socket bookkeeping.
+    """
+    try:
+        await connection_manager.recheck_user(user_id)
+    except Exception as e:
+        log.warning("websocket_recheck_user_failed", user_id=user_id, error_type=type(e).__name__)
+
+
 def _credentials_from_headers(websocket: WebSocket) -> tuple[str | None, str | None]:
     api_key = websocket.headers.get("x-api-key")
     token = None
@@ -567,7 +705,10 @@ def _credentials_from_headers(websocket: WebSocket) -> tuple[str | None, str | N
     return api_key, token
 
 
-async def _authenticate(websocket: WebSocket, api_key: str | None, token: str | None) -> AuthenticatedUser | None:
+async def _authenticate(
+    websocket: WebSocket, api_key: str | None, token: str | None, *, record_use: bool = True
+) -> AuthenticatedUser | None:
+    """Validate the socket's credentials like REST. ``record_use=False`` leaves the key's last-used time alone."""
     settings = get_settings()
     if not settings.auth_enabled:
         return AuthenticatedUser(user_id="default_user", api_key_id="dev_key", rate_limit_tier="standard")
@@ -578,7 +719,7 @@ async def _authenticate(websocket: WebSocket, api_key: str | None, token: str | 
         if user:
             return user
     if api_key:
-        return await authenticate_api_key(conn, api_key)
+        return await authenticate_api_key(conn, api_key, record_use=record_use)
     return None
 
 
@@ -589,6 +730,19 @@ def _project_allowed(user: AuthenticatedUser, project_id: str | None) -> bool:
 def _crew_db(websocket: WebSocket) -> CrewDatabase | None:
     db: CrewDatabase | None = getattr(websocket.app.state, "crew_db", None)
     return db
+
+
+async def _crew_access_lost(conn: _Connection) -> bool:
+    """Whether a subscribed crew is no longer readable (the REST access check); refreshes the summary otherwise."""
+    db = _crew_db(conn.websocket)
+    if db is None:
+        return True  # Crew mode was switched off under an open crew subscription
+    for crew_id in list(conn.subs):
+        if await _load_crew_ref(db.conn, crew_id, conn.user, CREW_READ) is None:
+            return True
+    if conn.summary is not None:
+        await conn.summary.refresh()
+    return False
 
 
 # ---- crew handlers ----------------------------------------------------------
@@ -721,52 +875,6 @@ async def _handle_presence(conn: _Connection, msg: dict[str, Any]) -> None:
         await conn.crew_error(crew_id, "invalid", "presence lanes rejected", session_ids=rejected[:20])
 
 
-# ---- re-validation ----------------------------------------------------------
-
-
-async def _revalidate(conn: _Connection) -> str | None:
-    """Re-check the credential and every grant it relies on. Returns a failure reason or None."""
-    cred = conn.credential
-    user = await _authenticate(conn.websocket, cred.api_key, cred.token)
-    if user is None or user.user_id != conn.user.user_id:
-        return "credential no longer valid"
-    conn.user = user
-    sub = conn.memory_subscriber
-    if sub is not None:
-        if not has_permission(user, "memory:recall") or not _project_allowed(user, sub.project_filter):
-            return "memory access revoked"
-        sub.allowed_projects = tuple(user.project_ids) if user.project_ids else None
-    if conn.subs or conn.summary is not None:
-        if not _has_crew_permission(user, CREW_READ):
-            return "crew access revoked"
-        db = _crew_db(conn.websocket)
-        if db is None:
-            return "crew mode disabled"
-        for crew_id in list(conn.subs):
-            if await _load_crew_ref(db.conn, crew_id, user, CREW_READ) is None:
-                return "crew access revoked"
-        if conn.summary is not None:
-            await conn.summary.refresh()
-    return None
-
-
-async def _revalidate_loop(conn: _Connection) -> None:
-    while not conn.closed:
-        await asyncio.sleep(REVALIDATE_INTERVAL_S)
-        if conn.closed:
-            return
-        try:
-            reason = await _revalidate(conn)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # fail closed
-            log.error("websocket_revalidate_failed", error_type=type(e).__name__)
-            reason = "credential check failed"
-        if reason is not None:
-            await connection_manager.close_connection(conn, CLOSE_FORBIDDEN, reason)
-            return
-
-
 # ---- endpoint ---------------------------------------------------------------
 
 
@@ -814,15 +922,16 @@ async def websocket_endpoint(
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="Authentication required")
         return
     can_memory = has_permission(user, "memory:recall")
-    if not can_memory and not _has_crew_permission(user, CREW_READ):
+    # crew:read alone opens a socket only when Crew mode is on; otherwise memory:recall is required.
+    can_crew = _crew_db(websocket) is not None and _has_crew_permission(user, CREW_READ)
+    if not can_memory and not can_crew:
         await websocket.close(code=CLOSE_FORBIDDEN, reason="memory:recall permission required")
         return
     if not _project_allowed(user, project_id):
         await websocket.close(code=CLOSE_FORBIDDEN, reason="No access to project")
         return
 
-    send_lock = asyncio.Lock()
-    conn = _Connection(websocket, user, _Credential(api_key, token, source), send_lock)
+    conn = _Connection(websocket, user, _Credential(api_key, token, source))
     connection_manager.add_connection(conn)
     subscriber: _Subscriber | None = None
     if can_memory:
@@ -831,11 +940,10 @@ async def websocket_endpoint(
             user_id=user.user_id,
             allowed_projects=tuple(user.project_ids) if user.project_ids else None,
             project_filter=project_id,
-            send_lock=send_lock,
+            conn=conn,
         )
         conn.memory_subscriber = subscriber
         await connection_manager.register(subscriber)
-    revalidator = asyncio.create_task(_revalidate_loop(conn), name="ws-revalidate")
 
     def _ns() -> str:
         return f"{user.user_id}:{subscriber.project_filter if subscriber and subscriber.project_filter else '*'}"
@@ -853,15 +961,28 @@ async def websocket_endpoint(
             }
         )
 
+        loop = asyncio.get_running_loop()
+        next_recheck = loop.time() + REVALIDATE_INTERVAL_SECONDS
+        next_ping = loop.time() + IDLE_PING_SECONDS
         while not conn.closed:
-            try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
-            except TimeoutError:
+            now = loop.time()
+            if now >= next_recheck:
+                if not await connection_manager.recheck_connection(conn, crews=True):
+                    break
+                next_recheck = now + REVALIDATE_INTERVAL_SECONDS
+            if now >= next_ping:
                 if not await conn.send_text("ping"):
                     break
+                next_ping = now + IDLE_PING_SECONDS
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=max(0.0, min(next_recheck, next_ping) - loop.time())
+                )
+            except TimeoutError:
                 continue
             if conn.closed:
                 break
+            next_ping = loop.time() + IDLE_PING_SECONDS
 
             if data == "ping":
                 await conn.send_text("pong")
@@ -895,7 +1016,7 @@ async def websocket_endpoint(
                 )
                 continue
             new_project = msg.get("project_id", subscriber.project_filter)
-            if not _project_allowed(conn.user, new_project):
+            if not subscriber.may_follow(new_project):
                 await conn.send_json(
                     {
                         "type": "error",
@@ -918,10 +1039,12 @@ async def websocket_endpoint(
     except Exception as e:
         log.warning("websocket_error", error_type=type(e).__name__)
     finally:
-        revalidator.cancel()
         connection_manager.remove_connection(conn)
         if subscriber is not None:
             await connection_manager.unregister(subscriber)
+        if conn.closing is not None:
+            # Send the close frame (and its code) before the handler returns.
+            await conn.closing
 
 
 @router.get("/ws/stats", tags=["websocket"])

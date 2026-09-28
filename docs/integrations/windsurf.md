@@ -2,7 +2,7 @@
 
 Add persistent memory to Windsurf in 2 minutes.
 
-Windsurf is an AI-powered IDE by Codeium with the Cascade AI agent. With Remembra, Cascade remembers your project context, coding patterns, and architecture decisions across sessions.
+Windsurf is an AI-powered IDE by Codeium with the Cascade AI agent. With Remembra, Cascade can store your project context, coding patterns and architecture decisions and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 

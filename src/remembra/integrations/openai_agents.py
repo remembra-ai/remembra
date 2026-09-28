@@ -32,6 +32,10 @@ import json
 from typing import Any
 
 from remembra.client.memory import Memory, MemoryError
+from remembra.integrations._session_records import MARKER_KEY, delete_session_records, session_records
+
+#: The ``remembra_integration`` value on every item this session stores.
+MARKER = "openai_agents"
 
 try:  # openai-agents is optional at import time; required to actually run a crew
     from agents.memory import SessionSettings
@@ -50,7 +54,10 @@ class RemembraSession:
     (one item = one memory, never fact-split or merged) with its full JSON
     preserved for faithful reconstruction and a monotonic sequence for
     ordering. Sessions are isolated by ``session_id`` within a
-    ``(user_id, project)`` namespace.
+    ``(user_id, project)`` namespace. Items carry
+    ``remembra_integration: "openai_agents"``: reading, ``pop_item`` and
+    ``clear_session`` touch only those, never another memory with the same
+    ``session_id`` (an app note, another integration).
 
     Args:
         session_id: Unique conversation/session ID.
@@ -91,9 +98,9 @@ class RemembraSession:
     # -- helpers ---------------------------------------------------------
 
     def _fetch_session_memories(self) -> list[Any]:
-        """Return this session's stored memories (most-recent-first, up to 50)."""
+        """Return the items this session stored (most-recent-first, up to 50), none of other code's."""
         try:
-            return list(self._client.recall(filters={"session_id": self.session_id}, limit=50).memories)
+            return session_records(self._client, self.session_id, MARKER, "agent_item")
         except MemoryError:
             return []
 
@@ -146,6 +153,7 @@ class RemembraSession:
                 "session_id": self.session_id,
                 "sequence": self._seq,
                 "agent_item": json.dumps(item),
+                MARKER_KEY: MARKER,
             }
             try:
                 await asyncio.to_thread(
@@ -170,16 +178,11 @@ class RemembraSession:
         return item
 
     async def clear_session(self) -> None:
-        """Delete only this session's items (never the user's other memory)."""
+        """Delete the items this session stored, and nothing else.
 
-        def _clear() -> None:
-            for _ in range(200):  # safety bound
-                mems = self._fetch_session_memories()
-                if not mems:
-                    break
-                for m in mems:
-                    with contextlib.suppress(MemoryError):
-                        self._client.forget(memory_id=m.id)
-
-        await asyncio.to_thread(_clear)
+        Other memories with the same ``session_id`` in the user/project (an
+        app note, another integration, anything a client created with that
+        ``session_id`` stored) are kept.
+        """
+        await asyncio.to_thread(delete_session_records, self._client, self.session_id, MARKER, "agent_item")
         self._seq = None

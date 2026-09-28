@@ -456,9 +456,10 @@ def render_handoff(
 
 RELAY_ROW_SOURCE = "agent_generated"  # memories.source of rows the relay writes; no client write path sets it
 FREE_FORM_CLIP = 2000
+# ``facts_source`` is what the closing client says about its facts; the server cannot check it.
 _FACTS_SOURCE_LABELS = {
-    "relay-cli:git+transcript": "collected by remembra-relay from git and the session transcript",
-    "relay-cli:git": "collected by remembra-relay from git",
+    "relay-cli:git+transcript": "reported as collected by remembra-relay from git and the session transcript (not checked)",
+    "relay-cli:git": "reported as collected by remembra-relay from git (not checked)",
     "agent-declared": "declared by the agent (not checked)",
     "relay-cli": "collected by remembra-relay",
     "server-inferred": "inferred by the server from crew checkpoints (the agent did not close its session)",
@@ -972,23 +973,27 @@ def health_line(handoff: dict[str, Any] | None, verdict: LineVerdict | None) -> 
     return f"Handoff health: {health['label']}{detail}. {grade_basis(_relay_meta(handoff))}"
 
 
-GRADE_BASIS_VERIFIED = "Graded by the server from the recorded facts."
+GRADE_BASIS_RELAY_DECLARED = (
+    "Graded by the server from facts sent with this agent's key, reported as collected by remembra-relay. "
+    "The server does not verify them."
+)
 GRADE_BASIS_REPORTED = "Graded by the server from facts the agent reported, not verified."
 
 
 def grade_basis(relay: dict[str, Any] | None) -> str:
-    """How far the grade's facts can be trusted (server text for the trusted health line).
+    """What the grade's facts rest on (server text for the trusted health line).
 
-    The server never runs git itself: every fact comes from the closing client.
-    Only a close sent with an agent-scoped key (``agent_verified``) whose facts
-    remembra-relay collected from git counts as recorded; a self-declared agent
-    or facts it typed itself (``agent-declared``) could claim passing tests and
-    a pushed branch, and the line says so.
+    The server never runs git itself: every fact comes from the closing client,
+    and so does ``facts_source``, the client's own statement of who collected
+    them. The server can check one thing, the agent: a close sent with a key
+    scoped to that agent is ``agent_verified``. So the line names a
+    remembra-relay source only for such a close, and says in both cases that
+    the facts are not verified by the server.
     """
     relay = relay or {}
     source = str(relay.get("facts_source") or "")
     if relay.get("agent_verified") is True and source.startswith("relay-cli:"):
-        return GRADE_BASIS_VERIFIED
+        return GRADE_BASIS_RELAY_DECLARED
     return GRADE_BASIS_REPORTED
 
 

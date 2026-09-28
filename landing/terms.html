@@ -57,7 +57,7 @@
   <section class="wrap page-head" aria-labelledby="doc-title">
     <p class="eyebrow">Legal</p>
     <h1 id="doc-title">Terms of service</h1>
-    <p class="lede">Last updated: September 26, 2026</p>
+    <p class="lede">Last updated: September 27, 2026</p>
     <!-- requires counsel review of the Paddle (Merchant of Record) wording before paid plans go live -->
     <!-- requires owner: the registered legal name of DolphyTech, exactly as registered with Paddle, in Terms, Privacy, Refunds and the DPA -->
   </section>
@@ -158,7 +158,7 @@
 <p>Our order process is run by Paddle.com, our online reseller and Merchant of Record. Paddle sells you the subscription, takes the payment and handles billing questions, tax and refunds, under <a href="https://www.paddle.com/legal/checkout-buyer-terms">Paddle's buyer terms</a>.</p>
 <ul>
 <li><strong>Billing:</strong> Subscriptions are billed monthly or annually in advance</li>
-<li><strong>Payment processing:</strong> Handled by Paddle. Your card details go to Paddle, never to us</li>
+<li><strong>Payment processing:</strong> Handled by Paddle. Your full card number and security code go only to Paddle. Paddle's payment notices show us the card type, last four digits, expiry date and cardholder name, which we don't store</li>
 <li><strong>Auto-renewal:</strong> Subscriptions renew automatically unless you cancel</li>
 <li><strong>Cancellation:</strong> You can cancel anytime from your account settings. Access continues until the end of your billing period</li>
 <li><strong>Refunds:</strong> The first payment on any paid plan has a 14-day money-back guarantee. After that, payments, including renewals, are not refunded, and part periods are not refunded. Refunds are paid by Paddle. The <a href="/refunds">refund policy</a> has the details</li>
@@ -172,10 +172,10 @@
 <p>Any memories, entities, relationships, or other content you store using Remembra belongs to you. We don't claim any ownership rights over your data. We won't use your stored content to train AI models, sell to third parties, or anything like that.</p>
 <p>You grant us only the limited rights needed to provide the service (e.g., storing and retrieving your data, creating backups).</p>
 <h3>7.1 Data Export</h3>
-<p>You can export your data at any time in standard formats (JSON, CSV). We support data portability—your data shouldn't be locked in.</p>
+<p>You can export your memories at any time through the API (<code>GET /api/v1/transfer/export</code>) as JSON, JSONL or CSV: one project per request, up to 100,000 memories, with stored credentials redacted. Entities, relationships and inbox messages are not in the export yet; you can read them as JSON through the API. The dashboard has no export button yet.</p>
 <h3>7.2 Data Deletion</h3>
-<p>Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history and drops older copies every hour, so an erased copy leaves it within about 25 hours, and the database copy taken before each deploy is kept only until 3 newer deploys replace it.</p>
-<p>Billing records stay with Paddle, our Merchant of Record, under its own retention rules; we keep only each Paddle transaction id and its net amount for our accounts. The <a href="/privacy#retention">privacy policy</a> explains what we keep and for how long.</p>
+<p>Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet.</p>
+<p>Billing records stay with Paddle, our Merchant of Record, under its own retention rules. We keep each Paddle transaction id with its month and net amount, and each Paddle subscription id with when it last changed and when and why it ended; none of these is linked to your account in our database. The <a href="/privacy#retention">privacy policy</a> explains what we keep and for how long.</p>
 <h2 id="8-intellectual-property">8. Intellectual Property</h2>
 <ul>
 <li>The Remembra name, logo, and branding are trademarks of DolphyTech</li>

@@ -103,9 +103,10 @@ def _mkdocs_excluded() -> list[str]:
 
 
 def _public_files() -> list[Path]:
-    """What reaches readers: the README, changelog and release notes, package and registry metadata, the
-    published docs, everything remembra.dev serves as text, the page sources kept in scripts/, and the
-    dashboard's screens (its sign-in page is public)."""
+    """What reaches readers: the README, changelog and release notes, ARCHITECTURE.md, the TypeScript SDK's
+    README (it ships in the npm package), package and registry metadata, the published docs, everything
+    remembra.dev serves as text, the page sources kept in scripts/, and the dashboard's screens (its sign-in
+    page is public)."""
     excluded = _mkdocs_excluded()
 
     def published(path: Path) -> bool:
@@ -115,6 +116,8 @@ def _public_files() -> list[Path]:
     files = [
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
+        ROOT / "ARCHITECTURE.md",
+        ROOT / "sdk" / "typescript" / "README.md",
         ROOT / "pyproject.toml",
         ROOT / "server.json",
         ROOT / "src" / "remembra" / "api" / "well_known" / "server-card.json",
@@ -153,6 +156,8 @@ def test_the_public_file_list_covers_the_site_and_the_registry_metadata() -> Non
         "server.json",
         "pyproject.toml",
         "packages/remembra-mcp/README.md",
+        "ARCHITECTURE.md",
+        "sdk/typescript/README.md",
         "dashboard/src/brand/AuthFrame.tsx",
     ):
         assert must in files, must
@@ -418,6 +423,13 @@ def test_erasure_is_described_as_automatic_and_not_reaching_backups_on_every_leg
     assert f"A deleted account is erased automatically {days} days later" in security
     assert "on request rather than automatically" not in dpa
     assert "erasure does not reach backups" in dpa
+    # P-124: how long a backup keeps erased data has a bound (pre-migration copies, pruned to the newest few),
+    # and the transfer clauses of an agreement that is not drafted yet are not described as in force.
+    keep = Settings.model_fields["pre_migration_backup_keep"].default
+    assert f"deleted only after {keep} more deploys" in dpa and "age out" not in dpa
+    assert f"deleted after {keep} more deploys" in security and "age out instead" not in security
+    assert "the agreement includes the European Commission's standard contractual clauses" not in dpa
+    assert "They are not attached to the agreement yet, so they are not in place today." in dpa
 
 
 def test_the_plans_page_holds_a_new_yearly_bank_like_the_metering_code() -> None:
@@ -497,7 +509,7 @@ async def test_docs_state_the_mcp_tool_count_the_server_registers() -> None:
     tools, resources = await server.mcp.list_tools(), await server.mcp.list_resources()
     count = re.compile(
         r"\ball (\d+) tools and (\d+) resources\b|\bhas (\d+) tools\b|\bserver with (\d+) tools\b"
-        r"|tools \((\d+)\)|the (\d+) tools\b"
+        r"|tools \((\d+)\)|the (\d+) tools\b|, (\d+) tools\b"
     )
     stated = []
     for path in _public_files():
@@ -525,4 +537,8 @@ def test_the_changelog_states_the_0_16_1_project_rule() -> None:
     pools on purpose. The 0.16.0 entry may describe the old rule only as the old rule."""
     page = _text((LANDING / "changelog.html").read_text())
     assert "A repository the server has not seen joins the project you configured" not in page
-    assert "From 0.16.1 every git repository gets its own project" in page
+    assert "From 0.16.1 every git repository the server has not seen before gets its own project" in page
+    # P-138, P-142, P-143, P-144: the dated entries name real routes and say what shipped, and no more
+    assert "/store/batch" not in page and "POST /api/v1/memories/batch/recall" in page
+    assert "90% smaller" not in page and "auto-supersede" not in page and "Complete audit trail" not in page
+    assert "a fact that does not match its source is dropped" in page

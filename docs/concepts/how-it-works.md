@@ -48,14 +48,15 @@ The extraction model (GPT-4o-mini by default) handles:
 
 ### 2. Consolidation
 
-Before storing, we check for duplicates:
+Before storing, each new fact is compared with up to 5 similar memories:
 
 | Action | When | Result |
 |--------|------|--------|
 | `ADD` | New fact | Store as new memory |
-| `UPDATE` | Exists but changed | Merge: "VP (promoted from Director)" |
 | `NOOP` | Already exists | Skip, don't duplicate |
-| `DELETE` | Contradicts existing | Remove old, store new |
+| `SUPERSEDE` | Replaces an outdated memory | Store the new fact; mark the old one superseded (it is kept, not deleted) |
+
+Before v0.16.0 the actions were ADD, UPDATE, DELETE and NOOP.
 
 ### 3. Entity Extraction
 
@@ -100,8 +101,9 @@ embedding = embed("John was promoted to VP")
 
 ### 7. Storage
 
-- **Qdrant**: Vector + memory ID
-- **SQLite**: Metadata, entities, relationships
+- **Qdrant**: the vector, plus the memory text and metadata (text fields encrypted when
+  `REMEMBRA_ENCRYPTION_KEY` is set)
+- **SQLite**: the memory text and metadata, entities, relationships and the keyword index (not field-encrypted)
 
 ---
 
@@ -167,7 +169,8 @@ score = semantic_weight × semantic_score
 
 ### 7. CrossEncoder Reranking (Optional)
 
-If enabled, rerank top candidates:
+With the optional `rerank` extra installed (`pip install "remembra[rerank]"`; the default Docker image does not
+include it, Remembra Cloud does), the top candidates are reranked:
 
 ```python
 # Before: Ranked by embedding similarity
@@ -202,7 +205,7 @@ return context  # Ready for LLM injection
 
 ### SQLite (Everything Else)
 
-- Memory metadata (id, created_at, user_id, project)
+- Memory text and metadata (id, created_at, user_id, project)
 - Entity graph (nodes, edges, aliases)
 - Relationships (typed connections)
 - Full-text search index (FTS5)
@@ -235,32 +238,35 @@ REMEMBRA_EXTRACTION_MODEL=gpt-4o       # Best quality
 
 ```bash
 # Hybrid search improves recall
-REMEMBRA_HYBRID_SEARCH_ENABLED=true
+REMEMBRA_ENABLE_HYBRID_SEARCH=true
 
-# Reranking improves precision
-REMEMBRA_RERANK_ENABLED=true
+# Reranking improves precision (needs the rerank extra)
+REMEMBRA_ENABLE_RERANKING=true
 ```
 
 ### Performance
 
 ```bash
 # Lower token limit = faster but less context
-REMEMBRA_DEFAULT_MAX_TOKENS=2000
+REMEMBRA_CONTEXT_MAX_TOKENS=2000
 
 # Shallower graph = faster but less expansion
-REMEMBRA_GRAPH_TRAVERSAL_DEPTH=1
+REMEMBRA_GRAPH_MAX_DEPTH=1
 ```
 
 ---
 
 ## Comparison to Alternatives
 
-| Feature | Remembra | Mem0 | Zep | DIY |
-|---------|----------|------|-----|-----|
-| Self-host | One command | Complex | Very complex | Build it |
-| Entity resolution | Built-in | Limited | Yes | DIY |
-| Graph storage | SQLite → Neo4j | No | Yes | DIY |
-| Temporal | TTL, decay, as_of | TTL only | No | DIY |
-| Hybrid search | Yes | No | Yes | DIY |
-| Reranking | Yes | No | No | DIY |
-| Pricing | $0 (OSS) | $19-$249 | Free? | Time |
+Mem0 and Zep figures are from their own docs and pricing pages as read in September 2026. Check them before
+you rely on them.
+
+| Feature | Remembra | Mem0 | Zep |
+|---------|----------|------|-----|
+| Graph storage | SQLite (a Neo4j backend is planned, not supported) | Graph memory (entity linking) on the $249 Pro plan | Yes |
+| Hybrid search | Semantic + keyword (BM25) | Semantic + BM25 + entity | Yes |
+| Reranking | CrossEncoder, with the optional `rerank` extra | Pluggable rerankers | Cross-encoder and graph-distance reranking (Graphiti) |
+| Pricing | Self-host free (MIT); Cloud Free, $12 and $29 a month | Free, $19 and $249 a month | Free tier, then $125 or $375 a month; Enterprise custom |
+
+Remembra also has TTLs, decay scores and `as_of` queries, and `quickstart.sh` starts a self-hosted server with one
+command.

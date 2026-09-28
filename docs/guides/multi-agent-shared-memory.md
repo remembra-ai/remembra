@@ -4,10 +4,12 @@ Connect your AI agents to the same Remembra memory pool. What one agent stores, 
 
 !!! success "New in v0.10.0: One-Command Setup"
     ```bash
-    pip install "remembra[mcp]"
+    pipx install --force 'remembra[mcp]>=0.16'
     remembra-install --all --project my-project   # asks for your API key
+    remembra-relay connect --apply                # handoffs at session start and end
     ```
-    This auto-detects and configures ALL your installed agents. See [Agent Setup Guide](../getting-started/agent-setup.md) for details.
+    `remembra-install` detects and configures Claude Code, Codex, Cursor and Gemini CLI, and Claude Desktop on
+    macOS. Others you add by hand. See [Agent Setup Guide](../getting-started/agent-setup.md) for details.
 
 ---
 
@@ -29,7 +31,7 @@ All agents share the same memory — no more siloed conversations.
 
 1. **Remembra server running** — Self-hosted or cloud at `https://api.remembra.dev`
 2. **API key** — Get from Remembra dashboard
-3. **User ID and Project ID** — For memory isolation
+3. **Project ID** — The project the agents share
 
 ### Install MCP Server
 
@@ -51,16 +53,16 @@ which remembra-mcp
 
 ### Required Environment Variables
 
-All agents need these same values to share memory:
+To share memory, all agents use the same server, keys from the same account and the same project:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `REMEMBRA_URL` | Your Remembra server URL | `https://api.remembra.dev` |
 | `REMEMBRA_API_KEY` | API key for authentication | `rem_abc123...` |
 | `REMEMBRA_PROJECT` | Project namespace | `my-project` |
-| `REMEMBRA_USER_ID` | User ID for memory isolation | `user_xyz789` |
+| `REMEMBRA_USER_ID` | Optional. The server takes the user from the API key, so this does not decide what is shared | `user_xyz789` |
 
-⚠️ **Critical:** All agents MUST use the same `REMEMBRA_PROJECT` and `REMEMBRA_USER_ID` to share memory!
+⚠️ **Critical:** All agents must use the same `REMEMBRA_PROJECT`, with API keys from the same account, to share memory.
 
 ---
 
@@ -259,8 +261,8 @@ curl https://api.remembra.dev/health
 
 ### Different agents seeing different memories
 
-- Verify ALL agents use the **same** `REMEMBRA_PROJECT` and `REMEMBRA_USER_ID`
-- Different values = different memory spaces
+- Verify all agents use the **same** `REMEMBRA_PROJECT` and API keys from the same account
+- A different project or account = a different memory space
 
 ### Tools not appearing
 
@@ -323,14 +325,14 @@ Then use `/bin/bash` with args in config:
 
 ## Summary
 
-| Setting | Must Match Across All Agents |
-|---------|------------------------------|
+| Setting | Across all agents |
+|---------|-------------------|
 | `REMEMBRA_URL` | ✅ Same server |
-| `REMEMBRA_API_KEY` | ✅ Same key |
+| `REMEMBRA_API_KEY` | ✅ A key from the same account. Better: one agent-scoped key per agent, so handoffs are key-verified |
 | `REMEMBRA_PROJECT` | ✅ Same project |
-| `REMEMBRA_USER_ID` | ✅ Same user |
+| `REMEMBRA_USER_ID` | Does not need to match. The server takes the user from the API key, and with auth disabled every request is the same default user |
 
-**Result:** One brain, many agents. What one stores, all can recall.
+**Result:** what one agent stores, the others can recall.
 
 ---
 

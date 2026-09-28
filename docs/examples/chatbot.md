@@ -32,6 +32,9 @@ Bot: "Your name is Alex! Last time you mentioned you love hiking." 🎉
 
 ## Implementation
 
+The examples pass a `user_id` for readability. With auth on, the server takes the user from the API key, so give
+each end user their own key (see [Multi-User Application](multi-user.md)).
+
 ### Basic Chatbot
 
 ```python
@@ -49,7 +52,7 @@ class MemoryBot:
     
     def chat(self, user_message: str) -> str:
         # 1. Recall relevant memories
-        context = self.memory.recall(user_message, limit=5)
+        context = self.memory.recall(user_message, limit=5).context
         
         # 2. Build prompt with memory context
         system_prompt = f"""You are a helpful assistant with memory.
@@ -95,7 +98,7 @@ class MemoryBotWithHistory:
     
     def chat(self, user_message: str) -> str:
         # Recall long-term context
-        context = self.memory.recall(user_message, limit=5, max_tokens=1000)
+        context = self.memory.recall(user_message, limit=5, max_tokens=1000).context
         
         # Add to conversation history
         self.conversation.append({"role": "user", "content": user_message})
@@ -140,7 +143,7 @@ Be natural. Don't repeat what they just told you."""
             self.memory.store(message)
 ```
 
-### Production-Ready Version
+### With Error Handling
 
 ```python
 from remembra import Memory
@@ -186,8 +189,7 @@ class ProductionChatbot:
                 query,
                 limit=5,
                 max_tokens=1500,
-                enable_hybrid=True
-            )
+            ).context
         except Exception as e:
             self.logger.warning(f"Recall failed: {e}")
             return ""
@@ -227,8 +229,8 @@ Guidelines:
         return response.choices[0].message.content
     
     def forget_user(self):
-        """GDPR: Delete all user data."""
-        self.memory.forget(all=True)
+        """Delete every memory in this user's account."""
+        self.memory.forget(all_memories=True)
 ```
 
 ## Best Practices
@@ -257,7 +259,7 @@ memory.store("Currently helping with Python code", ttl="24h")
 ### 3. Handle Missing Context
 
 ```python
-context = memory.recall(query)
+context = memory.recall(query).context
 if not context:
     prompt = "You're meeting this user for the first time."
 else:

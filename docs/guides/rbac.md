@@ -1,181 +1,190 @@
-# Role-Based Access Control (RBAC)
+# Roles and Permissions
 
-Remembra includes a flexible RBAC system for controlling access to memories and administrative functions.
-
-## Overview
-
-RBAC enables:
-
-- **Multi-user deployments** with different permission levels
-- **API key scoping** to limit what each key can do
-- **Audit compliance** with role-based access logs
-- **Enterprise security** requirements
+Every API key has one role: `admin`, `editor` or `viewer`. The role decides which
+permissions the key holds. A route answers 403 when the key does not hold the
+permission it needs.
 
 ## Roles
 
-Remembra provides three built-in roles:
+| Role | What it is for | How a key gets it |
+|------|----------------|-------------------|
+| `admin` | Every permission except the two human-only crew permissions, plus the admin routes below | Created with the server's master key; an admin key can then give another of the account's keys the admin role |
+| `editor` | Everything except the `admin:*` and the human-only crew permissions | Dashboard, or `POST /api/v1/keys` (the default role) |
+| `viewer` | Read only | Dashboard, or `POST /api/v1/keys` |
 
-| Role | Description | Use Case |
-|------|-------------|----------|
-| `admin` | Full access to all features | System administrators |
-| `editor` | Create, read, update memories | Application backends |
-| `viewer` | Read-only access | Analytics, dashboards |
+A viewer key is read-only. Every route that changes data refuses it, except
+that any key can revoke itself (see [Changing and revoking keys](#changing-and-revoking-keys)).
+A test sends a viewer key to every write route the API serves and fails if one
+lets it through.
+
+A dashboard sign-in has the editor permissions. In Crew mode, a sign-in whose crew role is owner or admin also
+holds `crew:override` and `crew:admin` for that crew; no API key holds them, admin keys included.
 
 ## Permissions
 
-### Memory Permissions
+This table is generated from `src/remembra/auth/rbac.py` (`permission_table()`).
+A test fails when it no longer matches the code.
 
-| Permission | Admin | Editor | Viewer |
-|------------|:-----:|:------:|:------:|
-| `memory:create` | ✅ | ✅ | ❌ |
-| `memory:read` | ✅ | ✅ | ✅ |
-| `memory:update` | ✅ | ✅ | ❌ |
-| `memory:delete` | ✅ | ✅ | ❌ |
+<!-- permission-table:start -->
+| Permission | admin | editor | viewer | What it allows |
+|---|:---:|:---:|:---:|---|
+| `memory:store` | yes | yes | no | Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, relay handoffs and session status; change spaces, teams and project links; recompute the brain layer; start audio capture (self-hosted servers only) |
+| `memory:recall` | yes | yes | yes | Recall, list, read and export memories; read spaces, inbox messages, relay briefs and trails, conflicts, timelines and brain insights |
+| `memory:delete` | yes | yes | no | Delete memories and clean up expired or decayed ones |
+| `key:create` | yes | yes | no | Create API keys (never above the caller's own role, never admin) and rename them |
+| `key:list` | yes | yes | yes | List the account's API keys |
+| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself); any key may revoke itself without it |
+| `webhook:manage` | yes | yes | no | Create, read, change and delete webhooks and read their deliveries |
+| `conflict:manage` | yes | yes | no | Resolve or dismiss memory conflicts |
+| `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
+| `admin:audit` | yes | no | no | Read the account's audit log |
+| `admin:export` | yes | no | no | Export the account's audit log as JSON or CSV |
+| `account:manage` | yes | yes | no | Redeem a promo code; email the verification link of an account created by API signup |
+| `crew:read` | yes | yes | yes | Crew mode: read a crew, its members, sessions, zones, claims, tasks, messages, decisions, inbox and notifications; move the caller's own read markers |
+| `crew:write` | yes | yes | no | Crew mode: register hosts, join a crew, send heartbeats and events; create and change zones, tasks, reports, checkpoints, messages and decisions; acknowledge collisions; work inbox items |
+| `crew:claim` | yes | yes | no | Crew mode: claim, release, hand over and adopt files and tasks; run the guard check |
+| `crew:override` | no | no | no | Crew mode, human only (no API key holds it): pause or resume sessions, freeze zones, override claims, issue bypass codes, assign, review or waive tasks and settle decisions |
+| `crew:admin` | no | no | no | Crew mode, human only (no API key holds it): change crew settings and members, approve zone changes, redact or pin messages and add notification targets |
+<!-- permission-table:end -->
 
-### Entity Permissions
+The `crew:*` permissions are checked only by the crew routes, which a server serves when Crew mode is on
+(`REMEMBRA_CREW_MODE`). With `crew:read`, a viewer key can also move its own crew read markers
+(`POST /api/v1/crews/{crew_id}/read`, `PATCH /api/v1/notifications`).
 
-| Permission | Admin | Editor | Viewer |
-|------------|:-----:|:------:|:------:|
-| `entity:read` | ✅ | ✅ | ✅ |
-| `entity:update` | ✅ | ✅ | ❌ |
-| `entity:merge` | ✅ | ❌ | ❌ |
+Admin keys also pass the routes that require the admin role:
+`GET`/`POST /api/v1/admin/roles`, `DELETE /api/v1/admin/roles/{api_key_id}`,
+`GET /api/v1/admin/permissions` and `POST /api/v1/admin/sleep-time/run`.
 
-### Admin Permissions
+Webhook routes also refuse a key that is limited to projects or bound to one
+agent, because webhooks receive events from the whole account.
 
-| Permission | Admin | Editor | Viewer |
-|------------|:-----:|:------:|:------:|
-| `webhook:manage` | ✅ | ❌ | ❌ |
-| `audit:read` | ✅ | ❌ | ❌ |
-| `user:manage` | ✅ | ❌ | ❌ |
-| `settings:manage` | ✅ | ❌ | ❌ |
+## Creating keys
 
-## Creating Scoped API Keys
+### In the dashboard
 
-### Via API
+Open **API Keys**, click **Generate New Key**, pick **Editor** or **Viewer**, and
+choose all projects or some. The key is shown once. The dashboard does not
+offer **Admin**: the server refuses to create admin keys from a dashboard
+sign-in.
+
+### With the API
+
+A dashboard sign-in, or an API key that holds `key:create`, can create keys:
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/admin/keys \
-  -H "X-API-Key: your_admin_key" \
+curl -X POST https://api.remembra.dev/api/v1/keys \
+  -H "X-API-Key: $REMEMBRA_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Backend Service",
-    "role": "editor",
-    "expires_at": "2027-01-01T00:00:00Z"
-  }'
+  -d '{"name": "CI reader", "role": "viewer", "project_ids": ["my-app"]}'
 ```
 
-**Response:**
-```json
-{
-  "id": "key_abc123",
-  "key": "rem_...",
-  "name": "Backend Service",
-  "role": "editor",
-  "permissions": ["memory:create", "memory:read", "memory:update", "memory:delete", "entity:read", "entity:update"],
-  "expires_at": "2027-01-01T00:00:00Z",
-  "created_at": "2026-03-02T12:00:00Z"
-}
+The response holds the new key in `key`. It is shown only once.
+
+An API key can only create keys up to its own role, never `admin`. A key that
+is limited to projects can only create keys limited to some of those projects.
+If it leaves `project_ids` out, the new key gets the same projects.
+
+### Admin keys
+
+Admin keys are created with the server's master key (`REMEMBRA_AUTH_MASTER_KEY`),
+for a given `user_id`:
+
+```bash
+curl -X POST http://localhost:8787/api/v1/keys \
+  -H "X-API-Key: $REMEMBRA_AUTH_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "user_123", "name": "Ops", "role": "admin"}'
 ```
 
-### Via Dashboard
+## Changing and revoking keys
 
-1. Navigate to **Settings** → **API Keys**
-2. Click **Create Key**
-3. Select the role
-4. Set an optional expiration date
-5. Copy the key (shown only once)
+- `PATCH /api/v1/keys/{key_id}` with `name` renames a key (needs `key:create`).
+  A change of `role` or `project_ids` needs a dashboard sign-in, and never
+  grants `admin`.
+- `DELETE /api/v1/keys/{key_id}` revokes a key (needs `key:revoke`). Add
+  `?hard=true` to delete it. An API key can only revoke keys that hold no
+  more access than itself.
+- Any key can revoke itself, whatever its role: `DELETE /api/v1/keys/{its own id}`
+  needs no permission. Deleting itself with `?hard=true` still needs `key:revoke`.
+- A change of role or projects applies from the key's next request.
+- A viewer key cannot rename or delete any key, or revoke any key but itself.
 
-## Using Scoped Keys
+## Real-time connections
 
-Pass the API key in requests:
+The real-time endpoint (`/api/v1/ws`, used by the dashboard) needs `memory:recall` (or, when Crew mode is on,
+`crew:read` for crew streams) and follows the same rules as every API request:
+
+- Revoking or permanently deleting a key closes every real-time connection opened with it at once, with close
+  code `4001` and the reason "Access revoked or expired".
+- Signing out closes the connection opened with that sign-in. Changing or resetting your password closes the
+  connections of your earlier dashboard sign-ins; connections opened with API keys stay open. Deactivating or
+  deleting an account closes all of its connections.
+- Before each event is sent, the server checks the connection's key or sign-in again. An idle connection is
+  checked every 30 seconds. If access has ended (a revoked key, an ended or expired sign-in, a deactivated
+  account), the event is not sent and the connection closes with `4001`. A dashboard sign-in expires 24 hours
+  after it began. If the key lost `memory:recall` or the project the connection follows, it closes with `4003`.
+  If the check itself fails (a database error, say), the event is not sent and the connection closes with
+  `1011`; clients may reconnect.
+- Crew streams (Crew mode) are checked the same way before every crew frame. Every 30 seconds the crews a
+  connection follows are also loaded again with the same access check as the REST routes; a connection that
+  lost `crew:read` or a crew it follows closes with `4003`, and so does one whose owner removes that person
+  from the crew.
+- No event created after access is cut is sent. An event already being sent at that moment may still arrive.
+- The connection is closed at once only by the server process that handled the revocation. With several
+  processes, connections on the others get no further events and close within 30 seconds.
+
+## Narrowing a key with scopes
+
+An admin key can set scopes on one of the account's keys. Scopes narrow the
+key's role. They never add a permission the role does not hold: a viewer key
+with the `memory:store` scope still cannot store.
+
+```bash
+curl -X POST https://api.remembra.dev/api/v1/admin/roles \
+  -H "X-API-Key: $REMEMBRA_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"api_key_id": "key_abc123", "role": "editor", "scopes": ["memory:recall", "memory:store"]}'
+```
+
+The response lists the key's `permissions` after the change. A key cannot be
+given a role, scopes or projects beyond those of the admin key that sets them.
+A key created by a scoped key gets the same scopes.
+
+## Using keys
 
 ```python
 import os
-from remembra import Memory
+from remembra import Memory, MemoryError
 
-# Editor key - can store and recall
-memory = Memory(
-    base_url="http://localhost:8787",
-    api_key=os.environ["REMEMBRA_EDITOR_API_KEY"],
-    user_id="user_123"
-)
-
-memory.store("User feedback: Great product!")  # ✅ Works
-memory.recall("feedback")  # ✅ Works
-```
-
-```python
-import os
-
-# Viewer key - read only
-memory = Memory(
-    base_url="http://localhost:8787",
+reader = Memory(
+    base_url="https://api.remembra.dev",
     api_key=os.environ["REMEMBRA_VIEWER_API_KEY"],
-    user_id="user_123"
+    user_id="user_123",
 )
 
-memory.recall("feedback")  # ✅ Works
-memory.store("New data")  # ❌ 403 Forbidden
+reader.recall("feedback")  # works
+
+try:
+    reader.store("New data")
+except MemoryError as e:
+    print(e.status_code)  # 403
 ```
 
-## Permission Errors
+## Permission errors
 
-When a key lacks permission, you'll receive:
+A key without the permission gets a 403. The `detail` names what is missing:
 
 ```json
-{
-  "error": "forbidden",
-  "message": "Permission denied: memory:create required",
-  "required_permission": "memory:create",
-  "role": "viewer"
-}
+{"detail": "Permission denied: memory:store required"}
 ```
 
-## Custom Permissions
+The admin audit routes answer `"Insufficient permissions. Required: admin:export"`
+(or `admin:audit`), and the admin role routes answer
+`"Role 'admin' or higher required."`
 
-For advanced use cases, you can create keys with custom permission sets:
+## Audit log
 
-```bash
-curl -X POST http://localhost:8787/api/v1/admin/keys \
-  -H "X-API-Key: your_admin_key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Analytics Service",
-    "permissions": ["memory:read", "entity:read", "audit:read"]
-  }'
-```
-
-## Audit Logging
-
-All RBAC-protected operations are logged:
-
-```bash
-curl http://localhost:8787/api/v1/admin/audit \
-  -H "X-API-Key: your_admin_key"
-```
-
-**Response:**
-```json
-{
-  "events": [
-    {
-      "id": "audit_xyz",
-      "timestamp": "2026-03-02T12:00:00Z",
-      "action": "memory:create",
-      "key_id": "key_abc123",
-      "role": "editor",
-      "user_id": "user_123",
-      "resource_id": "mem_456",
-      "success": true
-    }
-  ]
-}
-```
-
-## Best Practices
-
-1. **Principle of Least Privilege** - Give each key only the permissions it needs
-2. **Rotate keys regularly** - Set expiration dates and rotate before expiry
-3. **Use separate keys per service** - Makes revocation easier
-4. **Monitor audit logs** - Watch for unusual access patterns
-5. **Never share admin keys** - Use scoped keys for integrations
+An admin key reads the account's audit log with `GET /api/v1/admin/audit`
+(`admin:audit`) and exports it with `GET /api/v1/admin/audit/export/json` or
+`/export/csv` (`admin:export`). [SECURITY.md](https://github.com/remembra-ai/remembra/blob/main/SECURITY.md#audit-logging)
+lists the events it records.

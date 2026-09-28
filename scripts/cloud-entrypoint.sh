@@ -23,10 +23,9 @@
 # existing crew replica is never overwritten by an empty file.
 #
 # Retention (R-23): every replica keeps LITESTREAM_RETENTION of history (24h by
-# default), so data erased from a live database leaves the backup within about
-# twice this window. The privacy page states 24 hours; keep them in step. The
-# CLI form cannot set retention, so the replicas are described in a generated
-# config file ($LITESTREAM_CONFIG, else a temporary file).
+# default), checked hourly, so data erased from a live database leaves the backup
+# within about 25 hours (docs/OPERATIONS.md). The replicas are described in a
+# generated config file ($LITESTREAM_CONFIG, else a temporary file).
 set -e
 
 truthy() {
@@ -132,6 +131,13 @@ if [ -n "$LITESTREAM_REPLICA_URL" ]; then
     for value in "$DB_PATH" "$LITESTREAM_REPLICA_URL" "$CREW_DB_PATH" "$CREW_REPLICA_URL"; do
         check_config_value "$value"
     done
+
+    # Retention (R-23): every replica keeps this much history and litestream checks
+    # it every hour, so data erased from a live database leaves the backup within
+    # this window plus an hour (about 25 hours at the default). docs/OPERATIONS.md
+    # states that figure. The public retention pages describe no continuous backup;
+    # if Remembra Cloud turns this on, add the figure there too. The CLI form cannot
+    # set retention, so the replicas are described in a generated config file.
     RETENTION="${LITESTREAM_RETENTION:-24h}"
     case "$RETENTION" in
         *[!0-9hms]*|"") echo "litestream: LITESTREAM_RETENTION must look like 24h, 90m or 3600s" >&2; exit 1 ;;

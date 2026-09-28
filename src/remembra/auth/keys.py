@@ -48,6 +48,13 @@ def evict_user_from_cache(user_id: str) -> None:
     _key_cache = {k: v for k, v in _key_cache.items() if v.get("user_id") != user_id}
 
 
+async def _close_dead_sockets(user_id: str) -> None:
+    """Close the account's open WebSockets whose key stopped working (P-348). Never raises."""
+    from remembra.api.v1.websocket import recheck_user_connections
+
+    await recheck_user_connections(user_id)
+
+
 @dataclass
 class APIKey:
     """Represents a generated API key."""
@@ -189,9 +196,12 @@ class APIKeyManager:
             _key_cache.pop(next(iter(_key_cache)))
         _key_cache[cache_key] = key_data
 
-    async def validate_key(self, raw_key: str) -> dict[str, Any] | None:
+    async def validate_key(self, raw_key: str, *, record_use: bool = True) -> dict[str, Any] | None:
         """
         Validate an API key and return its record if valid, else None.
+
+        ``record_use=False`` validates without updating ``last_used_at`` (for
+        re-checking a key that is already in use, such as an open WebSocket).
 
         Lookup strategy (each step is O(1) except the bounded legacy fallback):
         1. In-memory cache keyed by sha256(raw_key).
@@ -215,13 +225,26 @@ class APIKeyManager:
             await self._deactivate_published_key(raw_key, cache_key)
             return None
 
-        # 1) In-memory cache (revalidate active flag against the DB)
+        # 1) In-memory cache. The active flag, role, scopes and projects are read
+        #    again from the DB, so a revocation or an access change made by any
+        #    process applies to the key's next request.
         if cache_key in _key_cache:
             cached = _key_cache[cache_key]
-            cursor = await self.db.conn.execute("SELECT active FROM api_keys WHERE id = ?", (cached["id"],))
-            active_row = await cursor.fetchone()
-            if active_row and active_row[0]:
-                await self.db.update_api_key_last_used(cached["id"])
+            cursor = await self.db.conn.execute(
+                """
+                SELECT k.active, COALESCE(r.role, 'editor'), r.scopes, r.project_ids
+                FROM api_keys k
+                LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+                WHERE k.id = ?
+                """,
+                (cached["id"],),
+            )
+            current = await cursor.fetchone()
+            if current and current[0]:
+                cached = self._normalize_key_data({**cached, "role": current[1], "scopes": current[2], "project_ids": current[3]})
+                _key_cache[cache_key] = cached
+                if record_use:
+                    await self.db.update_api_key_last_used(cached["id"])
                 log.debug("api_key_validated_cached", key_id=cached["id"])
                 return cached
             del _key_cache[cache_key]
@@ -231,7 +254,8 @@ class APIKeyManager:
         if lookup_row:
             if self.verify_key(raw_key, lookup_row["key_hash"]):
                 key_data = self._normalize_key_data(lookup_row)
-                await self.db.update_api_key_last_used(key_data["id"])
+                if record_use:
+                    await self.db.update_api_key_last_used(key_data["id"])
                 self._cache_put(cache_key, key_data)
                 log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
                 return key_data
@@ -245,7 +269,8 @@ class APIKeyManager:
             if self.verify_key(raw_key, legacy_row["key_hash"]):
                 await self.db.set_api_key_lookup(legacy_row["id"], cache_key)  # backfill → O(1) next time
                 key_data = self._normalize_key_data(legacy_row)
-                await self.db.update_api_key_last_used(key_data["id"])
+                if record_use:
+                    await self.db.update_api_key_last_used(key_data["id"])
                 self._cache_put(cache_key, key_data)
                 log.info("api_key_lookup_backfilled", key_id=key_data["id"])
                 return key_data
@@ -269,6 +294,8 @@ class APIKeyManager:
         await self.db.conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (row["id"],))
         await self.db.conn.commit()
         log.warning("api_key_published_deactivated", key_id=row["id"], user_id=row.get("user_id"))
+        if row.get("user_id"):
+            await _close_dead_sockets(row["user_id"])
 
     async def list_keys(self, user_id: str) -> list[APIKeyInfo]:
         """List all API keys for a user (without actual keys)."""
@@ -300,6 +327,7 @@ class APIKeyManager:
             # Invalidate cache entries for this key
             _key_cache = {k: v for k, v in _key_cache.items() if v.get("id") != key_id}
             log.info("api_key_revoked", key_id=key_id, user_id=user_id)
+            await _close_dead_sockets(user_id)
         else:
             log.warning("api_key_revoke_failed", key_id=key_id, user_id=user_id)
 
@@ -322,6 +350,7 @@ class APIKeyManager:
             # Invalidate cache entries for this key
             _key_cache = {k: v for k, v in _key_cache.items() if v.get("id") != key_id}
             log.info("api_key_deleted_permanently", key_id=key_id, user_id=user_id)
+            await _close_dead_sockets(user_id)
         else:
             log.warning("api_key_delete_failed", key_id=key_id, user_id=user_id)
 

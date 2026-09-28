@@ -35,8 +35,13 @@ class TestParseTTL:
         assert parse_ttl("1s") == timedelta(seconds=1)
 
     def test_parse_minutes(self):
-        assert parse_ttl("5m") == timedelta(minutes=5)
-        assert parse_ttl("60m") == timedelta(hours=1)
+        assert parse_ttl("5min") == timedelta(minutes=5)
+        assert parse_ttl("60min") == timedelta(hours=1)
+
+    def test_a_bare_m_is_refused(self):
+        # Owner decision 9: '5m' meant 5 months to servers up to 0.16.1; neither reading is applied.
+        with pytest.raises(ValueError, match="use 'min' for minutes or 'mo' for months"):
+            parse_ttl("5m")
 
     def test_parse_hours(self):
         assert parse_ttl("24h") == timedelta(hours=24)
@@ -64,13 +69,13 @@ class TestParseTTL:
         assert parse_ttl("  30d  ") == timedelta(days=30)
 
     def test_invalid_format_raises(self):
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL '30'"):
             parse_ttl("30")  # Missing unit
 
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL 'd30'"):
             parse_ttl("d30")  # Wrong order
 
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL 'abc'"):
             parse_ttl("abc")  # Not a number
 
     def test_empty_string_raises(self):
@@ -78,7 +83,7 @@ class TestParseTTL:
             parse_ttl("")
 
     def test_zero_value_raises(self):
-        with pytest.raises(ValueError, match="must be positive"):
+        with pytest.raises(ValueError, match="at least 1 second"):
             parse_ttl("0d")
 
 
