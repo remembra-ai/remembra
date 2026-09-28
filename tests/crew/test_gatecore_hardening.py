@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from remembra.crew import gatecore as G
+from remembra.relay.crew.gate import PRETOOL_DEADLINE_S
 from tests.crew.gatecore_support import HOME, MemFs, run, snapshot
 
 MARK = "# remembra-crew"
@@ -364,14 +365,36 @@ def _ms(cmd: str) -> float:
     return (time.perf_counter() - t) * 1000
 
 
+# §10.3: a PreToolUse gate past its deadline allows the call, so no command may take it there, on any machine.
+DEADLINE_MS = PRETOOL_DEADLINE_S * 1000
+# The regression budget is relative to this run's own speed (CPU, interpreter, coverage tracing), not
+# wall-clock: a ~100 kB command may cost at most this many ordinary gate calls measured in the same run.
+# Measured 60-130 on an M-series Mac and in python:3.11/3.12 Linux containers, with and without
+# coverage; the lexer made quadratic (n^2/16 extra character scans) measured ~500. A fixed 250 ms
+# (5x under the deadline on a laptop) failed on the CI runners at ~295 ms (Python 3.11 under
+# coverage on a slower CPU) and let that quadratic lexer through (183 ms in a Linux container).
+LONG_COMMAND_BUDGET = 300
+ORDINARY = (
+    "sed -i '' 's/a/b/' src/app/reports/x.ts && git add -A",
+    "npm test -- --watch=false src/app/reports",
+    "echo " + "[a" * 200 + " && rm -rf src/app/pos",
+)
+
+
+def _ordinary_ms() -> float:
+    """This run's cost of one ordinary gate call (median of 21): the unit the budget is counted in."""
+    return statistics.median(_ms(cmd) for _ in range(7) for cmd in ORDINARY)
+
+
 def test_long_commands_stay_inside_the_deadline() -> None:
     evil = "echo " + "[a" * 8000 + " >/dev/null && rm -rf src/app/pos"
     v = run("Bash", {"command": evil})
     assert (v.rule, v.decision) == (9, "deny")  # the write after the long word is still judged
+    unit = _ordinary_ms()
     for cmd in ("echo " + "[a" * 50_000, "echo " + "x" * 100_000, 'echo "' + "y" * 100_000 + '"', "echo " + "a.b," * 25_000):
         samples = sorted(_ms(cmd) for _ in range(5))
-        p95 = samples[-1]
-        assert p95 < 250.0, (cmd[:20], samples)  # §10.3 deadline is 1.2 s; the read-only budget 45 ms at normal sizes
+        assert samples[-1] < DEADLINE_MS, (cmd[:20], samples)  # every call, not a typical one
+        assert statistics.median(samples) < LONG_COMMAND_BUDGET * unit, (cmd[:20], samples, unit)
 
 
 def test_lexing_time_grows_linearly() -> None:
