@@ -1282,10 +1282,12 @@ def _whoami(layout: Layout) -> dict[str, Any] | None:
 
 def process_ancestry(pid: int) -> list[int]:
     """``pid`` and its ancestors, nearest first (stdlib: ``/proc`` on Linux, ``ps`` elsewhere)."""
+    # One declaration for both branches: mypy checks only the branch for its --platform, so a
+    # second annotation below would pass on macOS and be a redefinition on Linux.
+    chain: list[int] = []
     table: dict[int, int] = {}
     if sys.platform.startswith("linux") and os.path.isdir("/proc"):
         cur = pid
-        chain: list[int] = []
         while cur > 1 and cur not in chain and len(chain) < 64:
             chain.append(cur)
             try:
@@ -1303,7 +1305,6 @@ def process_ancestry(pid: int) -> list[int]:
         parts = line.split()
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
             table[int(parts[0])] = int(parts[1])
-    chain = []  # type: list[int]
     cur = pid
     while cur > 1 and cur not in chain and len(chain) < 64:
         chain.append(cur)
