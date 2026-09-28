@@ -13,8 +13,13 @@ Results the suite pins:
 
 * **Denied before the write** (``test_every_edit_path_…``): environment switches, hook
   skipping, hook/settings/zones.yml edits, crewd kill commands, foreign-worktree writes, MCP
-  filesystem writes, hard-link and case-changed paths, every shell writer and tree writer.
-  Nothing on disk changes, the deny text follows §11, and unrelated work is not blocked.
+  filesystem writes, hard-link paths, every shell writer and tree writer, and on a
+  case-insensitive volume (APFS, HFS+) case-changed paths. Nothing on disk changes, the deny
+  text follows §11, and unrelated work is not blocked.
+* **Case-changed paths** (``test_a_case_changed_path_…``): judged by the file they reach. On a
+  case-insensitive volume the held file (denied); on a case-sensitive one (ext4, the CI runners)
+  a different, new file outside the zone (allowed), unless a link makes it reach the held file
+  (denied). The held file is never written on either.
 * **Detected and alerted** (``test_unparseable_writers_…``): commands the gate cannot parse
   (``python -c``, ``bash -c "$X"``, heredoc scripts) and a write through a hard link made by
   such a command are allowed, and each becomes an ``exclusive_breach`` collision with a signed
@@ -33,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -194,12 +200,6 @@ ATTEMPTS: list[Attempt] = [
     # path tricks
     ("hard link out of POS", "Bash", lambda m: {"command": "ln src/app/pos/split.ts notes.ts"}),
     ("symlink out of POS", "Bash", lambda m: {"command": "ln -s src/app/pos/split.ts alias.ts"}),
-    ("case change", "Write", lambda m: {"file_path": str(m.wb / "src/App/POS/split.ts"), "content": "x"}),
-    (
-        "case change (Edit)",
-        "Edit",
-        lambda m: {"file_path": str(m.wb / "SRC/app/Pos/Tender.ts"), "old_string": "1", "new_string": "2"},
-    ),
     ("dot segments", "Write", lambda m: {"file_path": str(m.wb / "src/app/reports/../pos/split.ts"), "content": "x"}),
     # every shell writer
     ("redirect >", "Bash", lambda m: {"command": "echo x > src/app/pos/split.ts"}),
@@ -224,6 +224,29 @@ ATTEMPTS: list[Attempt] = [
     ("MultiEdit", "MultiEdit", lambda m: {"file_path": str(m.wb / "src/app/pos/split.ts"), "edits": []}),
 ]
 
+# A case-changed path names the held file only where the volume folds case (APFS and HFS+ by
+# default, NTFS). There the gate folds too and denies it (§8.2); on a case-sensitive volume (ext4,
+# the CI runners) it is a different, new file outside the zone, which the gate leaves alone.
+CASE_VARIANTS: list[Attempt] = [
+    ("case change", "Write", lambda m: {"file_path": str(m.wb / "src/App/POS/split.ts"), "content": "x"}),
+    (
+        "case change (Edit)",
+        "Edit",
+        lambda m: {"file_path": str(m.wb / "SRC/app/Pos/Tender.ts"), "old_string": "1", "new_string": "2"},
+    ),
+]
+
+
+def case_insensitive_volume(directory: Path) -> bool:
+    """Whether ``directory``'s volume folds case: a mixed-case probe answers to its lower-case name."""
+    probe = directory / ".Remembra-Case-Probe"
+    probe.write_text("x")
+    try:
+        return (directory / ".remembra-case-probe").exists()
+    finally:
+        probe.unlink()
+
+
 ALLOWED_CONTROLS: list[Attempt] = [
     ("own work outside POS", "Write", lambda m: {"file_path": str(m.wb / "src/app/reports/export.ts"), "content": "x"}),
     ("read POS", "Bash", lambda m: {"command": "cat src/app/pos/split.ts && git diff"}),
@@ -245,10 +268,12 @@ def test_every_edit_path_into_a_held_zone_is_denied_before_the_write(machine: Ma
         m.host.home / ".claude",
         m.host.layout.bin,
     ]
+    folds = case_insensitive_volume(m.host.tmp)
+    assert m.b.session()["case_insensitive"] is folds  # the gate judges with the volume's real case rule
     before = fingerprint(guarded) | fingerprint([_hooks_dir(m)])
     crewd = m.host.crewd_pid()
     missed = []
-    for label, tool, build in ATTEMPTS:
+    for label, tool, build in ATTEMPTS + (CASE_VARIANTS if folds else []):
         res = m.b.pretool(tool, build(m))
         assert res.rc == 0, (label, res.stderr)  # a deny is exit 0 + JSON, never exit 2 (§8.2)
         if not res.denied:
@@ -257,11 +282,51 @@ def test_every_edit_path_into_a_held_zone_is_denied_before_the_write(machine: Ma
         assert not S.check_agent_text(res.reason, "deny"), (label, S.check_agent_text(res.reason, "deny"))
         assert res.reason.startswith("BLOCKED by Remembra Crew:"), (label, res.reason)
     assert not missed, f"allowed before the write: {missed}"
-    for label, tool, build in ALLOWED_CONTROLS:
+    for label, tool, build in ALLOWED_CONTROLS + ([] if folds else CASE_VARIANTS):
         res = m.b.pretool(tool, build(m))
         assert not res.denied, (label, res.reason)
     assert fingerprint(guarded) | fingerprint([_hooks_dir(m)]) == before  # nothing on disk moved
     assert m.host.crewd_pid() == crewd and crewd is not None and pid_alive(crewd)
+
+
+def _edit(agent: Agent, path: Path, old: str, new: str) -> bool:
+    """One Edit tool call: PreToolUse, then (when allowed and the file exists, as Claude Code
+    requires) the replacement and PostToolUse. True when the gate denied it."""
+    tool_input = {"file_path": str(path), "old_string": old, "new_string": new}
+    pre = agent.pretool("Edit", tool_input)
+    if not pre.denied and path.is_file():
+        path.write_text(path.read_text().replace(old, new, 1))
+        agent.posttool("Edit", tool_input)
+    return pre.denied
+
+
+def test_a_case_changed_path_never_writes_the_held_file(machine: Machine) -> None:
+    """Complete Write/Edit calls (the write happens when the gate allows it) through case-changed
+    paths: judged by the file the path reaches on this volume, and the held file never changes."""
+    m = machine
+    folds = case_insensitive_volume(m.host.tmp)
+    pos = m.wb / "src/app/pos"
+    split, tender = pos / "split.ts", pos / "tender.ts"
+    held_before, holder_before = fingerprint([pos]), fingerprint([m.wa / "src"])
+
+    variant = m.wb / "src/App/POS/split.ts"
+    assert variant.exists() is folds  # the same file on a folding volume, no file at all otherwise
+    assert m.b.write(variant, "hacked\n").denied is folds
+    assert _edit(m.b, m.wb / "SRC/app/Pos/Tender.ts", "1", "2") is folds
+    assert fingerprint([pos]) == held_before  # the held files are never written
+    if not folds:
+        # the Write created a new file of its own, beside the held one, not in the zone
+        assert variant.read_text() == "hacked\n" and not os.path.samefile(variant, split)
+        assert not (m.wb / "SRC").exists()  # the Edit had no file to change
+        # A case-changed name that does reach the held file (a directory link a human left) is denied.
+        (m.wb / "src" / "APP").symlink_to("app", target_is_directory=True)
+    linked = m.wb / "src/APP/pos"
+    assert os.path.samefile(linked / "split.ts", split) and os.path.samefile(linked / "tender.ts", tender)
+    assert m.b.write(linked / "split.ts", "hacked\n").denied
+    assert _edit(m.b, linked / "tender.ts", "1", "2")
+    pre, ran = m.b.bash("echo hacked > src/APP/pos/split.ts")
+    assert pre.denied and ran is None
+    assert fingerprint([pos]) == held_before and fingerprint([m.wa / "src"]) == holder_before
 
 
 # ---------------------------------------------------------------------------
