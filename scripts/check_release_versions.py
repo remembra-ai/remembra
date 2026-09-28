@@ -9,7 +9,8 @@ runs ``uvx remembra-mcp==<server.json version>``, so a mismatch ships an entry
 that installs the wrong server or none.
 
     python scripts/check_release_versions.py            # all files agree
-    python scripts/check_release_versions.py v0.16.0    # ... and match the tag
+    python scripts/check_release_versions.py v0.16.0    # ... and match the tag, and
+                                                        # CHANGELOG.md dates [0.16.0]
 
 Exit 0 when everything agrees, 1 with one line per problem otherwise.
 Stdlib only (tomllib), so it runs before any install.
@@ -63,11 +64,24 @@ def problems(found: dict[str, str | None], tag: str | None = None) -> list[str]:
     return out
 
 
+def changelog_problems(tag: str, root: Path = ROOT) -> list[str]:
+    """The tag's version needs a dated CHANGELOG.md heading: ``## [X.Y.Z] - YYYY-MM-DD``, not "Unreleased"."""
+    version = tag[1:] if tag.startswith("v") else tag
+    heading = re.search(rf"^## \[{re.escape(version)}\](.*)$", (root / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
+    if heading is None:
+        return [f"CHANGELOG.md: no [{version}] heading"]
+    if not re.match(r" - \d{4}-\d{2}-\d{2}(?:\s|$)", heading.group(1)):
+        return [f"CHANGELOG.md: the [{version}] heading has no release date (want '## [{version}] - YYYY-MM-DD')"]
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     tag = args[0] if args else None
     found = collect()
     issues = problems(found, tag)
+    if tag is not None:
+        issues += changelog_problems(tag)
     for issue in issues:
         print(f"release version check: {issue}", file=sys.stderr)
     if not issues:

@@ -151,6 +151,20 @@ def test_version_check_catches_each_kind_of_drift(tmp_path):
     assert "server.json packages[remembra-mcp].version: no version found" in issues
 
 
+def test_a_tag_needs_a_dated_changelog_heading_for_its_version(tmp_path):
+    """The tag publishes the version CHANGELOG.md describes: "## [X.Y.Z] - YYYY-MM-DD", never "Unreleased"."""
+    version = check_release_versions.collect()["pyproject.toml"]
+    assert check_release_versions.changelog_problems(f"v{version}") == []
+    head = f"# Changelog\n\n## [{version}] - Unreleased\n\n- a change\n\n## [0.0.1] - 2026-01-01\n"
+    (tmp_path / "CHANGELOG.md").write_text(head)
+    assert check_release_versions.changelog_problems(f"v{version}", tmp_path) == [
+        f"CHANGELOG.md: the [{version}] heading has no release date (want '## [{version}] - YYYY-MM-DD')"
+    ]
+    (tmp_path / "CHANGELOG.md").write_text(head.replace("Unreleased", "2026-09-28"))
+    assert check_release_versions.changelog_problems(f"v{version}", tmp_path) == []
+    assert check_release_versions.changelog_problems("v9.9.9", tmp_path) == ["CHANGELOG.md: no [9.9.9] heading"]
+
+
 def _launcher_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("REMEMBRA_")}
     env.update(
