@@ -115,6 +115,44 @@ def test_security_md_states_the_fixed_session_length():
     assert "7 days" not in jwt and "(configurable)" not in jwt
 
 
+def _operator_files() -> list[Path]:
+    """Files that tell an operator what to set: docs (not the changelog), SECURITY.md, README, env and compose files."""
+    files = [p for p in (ROOT / "docs").rglob("*.md") if p.name != "changelog.md"]
+    files += [ROOT / name for name in ("SECURITY.md", "README.md", "ARCHITECTURE.md")]
+    files += sorted(ROOT.glob(".env*.example")) + sorted(ROOT.glob("docker-compose*.yml")) + sorted(ROOT.glob("Dockerfile*"))
+    files += sorted((ROOT / "landing").glob("*.html")) + sorted((ROOT / "landing").glob("*.txt"))
+    return [p for p in files if p.name != "changelog.html"]
+
+
+def test_session_length_is_fixed_and_has_no_setting(monkeypatch):
+    """Owner decision 5 (2026-09-27): the session-length setting was never read, so it is gone.
+
+    ``jwt_expiration_hours`` / ``REMEMBRA_JWT_EXPIRATION_HOURS`` did nothing:
+    dashboard sessions last a fixed ``JWT_EXPIRATION_HOURS`` (24). A server
+    whose environment still sets the variable starts as before and ignores it.
+    """
+    import jwt as pyjwt
+
+    from remembra.auth.users import JWT_ALGORITHM, UserManager
+    from remembra.config import Settings
+
+    assert "jwt_expiration_hours" not in Settings.model_fields
+    monkeypatch.setenv("REMEMBRA_JWT_EXPIRATION_HOURS", "720")
+    settings = Settings(openai_api_key="test")
+    assert not hasattr(settings, "jwt_expiration_hours")
+
+    secret = "s" * 40
+    claims = pyjwt.decode(
+        UserManager(db=None, jwt_secret=secret).create_jwt_token("user_1", "a@example.com"),  # type: ignore[arg-type]
+        secret,
+        algorithms=[JWT_ALGORITHM],
+    )
+    assert claims["exp"] - claims["iat"] == JWT_EXPIRATION_HOURS * 3600 == 24 * 3600
+
+    offenders = [str(p.relative_to(ROOT)) for p in _operator_files() if "JWT_EXPIRATION_HOURS" in p.read_text()]
+    assert not offenders, f"these still name the removed setting: {offenders}"
+
+
 def _written_audit_actions() -> set[str]:
     """Audit actions some code path outside security/audit.py actually writes."""
     written: set[str] = set()

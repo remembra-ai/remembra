@@ -573,10 +573,6 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(
         "remembra-jwt-secret-change-in-production", description="Secret key for JWT token signing (MUST change in production)"
     )
-    jwt_expiration_hours: int = Field(
-        24,  # 24 hours (OWASP recommendation: 1 day max for web sessions)
-        description="Not read yet: dashboard sessions last a fixed 24 hours (auth/users.py JWT_EXPIRATION_HOURS)",
-    )
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(True, description="Enable rate limiting")

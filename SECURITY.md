@@ -229,7 +229,7 @@ Optional TOTP-based 2FA for dashboard access:
 Dashboard sign-ins use JWTs:
 
 - Algorithm: HS256
-- Expiration: 24 hours. This is fixed: the `REMEMBRA_JWT_EXPIRATION_HOURS` setting is not read.
+- Expiration: 24 hours. This is fixed; no setting changes it.
 - Minimum secret length: 32 characters (enforced in production)
 - Token blacklist for secure logout
 

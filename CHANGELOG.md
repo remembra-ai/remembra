@@ -92,6 +92,11 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   sender with the key's agent without saying so. Leaving `from_agent` out still sends as the key's agent. The
   local MCP server's `send_to_inbox` returns an error in that case; it used to report success.
 
+### Removed
+
+- **`REMEMBRA_JWT_EXPIRATION_HOURS`.** The setting was never read: dashboard sign-ins last a fixed 24 hours.
+  It is gone from the settings. A server whose environment still sets it starts as before and ignores it.
+
 ### Fixed
 
 - **TTLs from temporal phrases were ignored.** With `auto_expire_temporal=True`, the Python SDK sent values such
@@ -211,8 +216,8 @@ whose scopes list permissions its role does not hold loses them, and a key with 
 
 ### Documentation
 
-- Dashboard sign-ins (JWT) still expire a fixed 24 hours after sign-in. `REMEMBRA_JWT_EXPIRATION_HOURS` is not
-  read, and the docs no longer say "7 days (configurable)".
+- Dashboard sign-ins (JWT) still expire a fixed 24 hours after sign-in, and the docs no longer say "7 days
+  (configurable)".
 - The master key for `POST /api/v1/keys` goes in the `X-API-Key` header. The docs no longer show
   `Authorization: Bearer`, which the server refuses with 401.
 - SECURITY.md lists what the audit log records: memory store, recall, update and delete through the REST memory

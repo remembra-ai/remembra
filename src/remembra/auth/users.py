@@ -24,7 +24,7 @@ PENDING_ERASURE_PREFIX = "pending_erasure:"
 
 # JWT settings
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24  # 24 hours (tightened from 7 days - March 22, 2026)
+JWT_EXPIRATION_HOURS = 24  # fixed; no setting changes it (tightened from 7 days - March 22, 2026)
 PASSWORD_RESET_EXPIRATION_HOURS = 24
 
 _TOTP_KEY_CONTEXT = "remembra-totp-secret-v1"
