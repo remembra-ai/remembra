@@ -1907,7 +1907,10 @@ def redaction_corpus() -> dict[str, Any]:
     jwt = "eyJhbGciOiJIUzI1NiJ9." + _fake("eyJ", 24, "jwtbody") + "." + _fake("", 30, "jwtsig")
     rem = _fake("rem_", 32, "remembra")
     pgpass = _fake("", 18, "pgpass")
-    stripe = _fake("sk_live_", 24, "stripe")
+    # Low-entropy and marked fake on purpose: 20 alphanumerics are enough for the product's
+    # stripe_key rule (16+) and short of the 24+ that GitHub push protection's Stripe pattern
+    # needs, so the generated corpus can be pushed. test_redact.py and test_contract_redaction.py pin both.
+    stripe = "sk_live_0000TESTONLY0000FAKE"
     entropy = _fake("", 44, "entropy")
     root, home = "/Users/mani/code/yaadbooks", "/Users/mani"
     # hex and UUID values the high-entropy fallback skips: only a (vendor-prefixed) label catches them
