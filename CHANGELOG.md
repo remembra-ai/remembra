@@ -33,7 +33,8 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   and source records are never deleted or rewritten by the pass. `GET /api/v1/admin/sleep-time/status` now
   includes `decay_cleanup_enabled`.
 - **Viewer keys are read-only.** Every API route that changes data refuses a viewer key. A viewer key can no
-  longer create, rename, revoke or delete API keys (its own included); create, change, delete, join or leave
+  longer create or rename API keys, revoke or delete another key, or permanently delete itself (any key can
+  still revoke itself, whatever its role); create, change, delete, join or leave
   teams, send team invites or link spaces to teams; send helpful/unhelpful feedback on a memory (feedback
   changes how recall ranks it); start or stop audio capture; redeem a promo code or ask for the account's
   verification email. It can still recall, read entities and list the account's keys. Editor keys can still
@@ -50,7 +51,7 @@ whose scopes list permissions its role does not hold loses them, and a key with 
 - The dashboard's **Generate Access Token** form offers Editor and Viewer only and says "Admin keys can only be
   created with the server's master key." It says what each role can do: Editor "Store, recall, change and delete
   memories. Manage webhooks. Create and revoke editor or viewer keys."; Viewer "Read only. Recall memories, read
-  entities and list keys. Cannot store, change or delete anything."
+  entities and list keys. Cannot store, change or delete anything, except revoke itself."
 - **The grade and facts label say the server does not check the facts.** For a close sent with a key scoped
   to that agent whose client declared `facts_source` `relay-cli:git` or `relay-cli:git+transcript`, the brief's
   health line ended "Graded by the server from the recorded facts." It now ends "Graded by the server from facts

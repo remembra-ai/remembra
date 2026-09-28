@@ -188,6 +188,35 @@ def require_key_permission(permission: Permission) -> Any:
     return Depends(check)
 
 
+def require_revoke_permission() -> Any:
+    """Dependency for ``DELETE /keys/{key_id}``: ``key:revoke``, except that a key may revoke itself.
+
+    Any API key may revoke (soft-revoke) itself, whatever its role or scopes, so
+    a read-only agent can cut off its own key. Revoking any other key, and
+    permanently deleting any key (``?hard=true``, itself included), still needs
+    ``key:revoke``; the route then applies the "no more access than itself" rule.
+    """
+
+    async def check(key_id: str, current_user: JWTOrAPIKeyUser, hard: bool = False) -> None:
+        if current_user is None or has_permission(current_user, Permission.KEY_REVOKE.value):
+            return
+        if not hard and not _is_session(current_user) and key_id == current_user.api_key_id:
+            return  # a key revoking itself
+        log.warning(
+            "permission_denied",
+            user_id=current_user.user_id,
+            role=current_user.role,
+            required_permission=Permission.KEY_REVOKE.value,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: {Permission.KEY_REVOKE.value} required",
+        )
+
+    setattr(check, PERMISSION_ATTR, Permission.KEY_REVOKE)
+    return Depends(check)
+
+
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
@@ -648,7 +677,7 @@ async def update_api_key(
     "/{key_id}",
     response_model=RevokeKeyResponse,
     summary="Revoke or permanently delete an API key",
-    dependencies=[require_key_permission(Permission.KEY_REVOKE)],
+    dependencies=[require_revoke_permission()],
 )
 @limiter.limit("5/minute")  # Prevent abuse
 async def revoke_api_key(
@@ -663,8 +692,10 @@ async def revoke_api_key(
     """
     Revoke or permanently delete an API key.
 
-    Users can only manage their own keys. An API key needs `key:revoke` and
-    can only revoke keys that hold no more access than itself.
+    Users can only manage their own keys. Any API key may revoke itself. To
+    revoke another key, or to permanently delete any key, an API key needs
+    `key:revoke`, and it can only act on keys that hold no more access than
+    itself.
 
     **Query Parameters:**
     - `hard` (bool): If true, permanently delete the key from the database.

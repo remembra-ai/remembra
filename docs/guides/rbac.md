@@ -12,9 +12,10 @@ permission it needs.
 | `editor` | Everything except the `admin:*` permissions | Dashboard, or `POST /api/v1/keys` (the default role) |
 | `viewer` | Read only | Dashboard, or `POST /api/v1/keys` |
 
-A viewer key is read-only. Every route that changes data refuses it. A test
-sends a viewer key to every write route the API serves and fails if one lets it
-through.
+A viewer key is read-only. Every route that changes data refuses it, except
+that any key can revoke itself (see [Changing and revoking keys](#changing-and-revoking-keys)).
+A test sends a viewer key to every write route the API serves and fails if one
+lets it through.
 
 A dashboard sign-in has the editor permissions.
 
@@ -31,7 +32,7 @@ A test fails when it no longer matches the code.
 | `memory:delete` | yes | yes | no | Delete memories and clean up expired or decayed ones |
 | `key:create` | yes | yes | no | Create API keys (never above the caller's own role, never admin) and rename them |
 | `key:list` | yes | yes | yes | List the account's API keys |
-| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself) |
+| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself); any key may revoke itself without it |
 | `webhook:manage` | yes | yes | no | Create, read, change and delete webhooks and read their deliveries |
 | `conflict:manage` | yes | yes | no | Resolve or dismiss memory conflicts |
 | `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
@@ -96,8 +97,10 @@ curl -X POST http://localhost:8787/api/v1/keys \
 - `DELETE /api/v1/keys/{key_id}` revokes a key (needs `key:revoke`). Add
   `?hard=true` to delete it. An API key can only revoke keys that hold no
   more access than itself.
+- Any key can revoke itself, whatever its role: `DELETE /api/v1/keys/{its own id}`
+  needs no permission. Deleting itself with `?hard=true` still needs `key:revoke`.
 - A change of role or projects applies from the key's next request.
-- A viewer key cannot rename, revoke or delete any key, not even its own.
+- A viewer key cannot rename or delete any key, or revoke any key but itself.
 
 ## Real-time connections
 

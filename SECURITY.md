@@ -196,7 +196,7 @@ fails when it no longer matches the code:
 | `memory:delete` | yes | yes | no | Delete memories and clean up expired or decayed ones |
 | `key:create` | yes | yes | no | Create API keys (never above the caller's own role, never admin) and rename them |
 | `key:list` | yes | yes | yes | List the account's API keys |
-| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself) |
+| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself); any key may revoke itself without it |
 | `webhook:manage` | yes | yes | no | Create, read, change and delete webhooks and read their deliveries |
 | `conflict:manage` | yes | yes | no | Resolve or dismiss memory conflicts |
 | `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
@@ -206,7 +206,7 @@ fails when it no longer matches the code:
 | `account:manage` | yes | yes | no | Redeem a promo code; email the verification link of an account created by API signup |
 <!-- permission-table:end -->
 
-- **Viewer keys are read-only.** Every route that changes data refuses them. A test sends a viewer key to every write route the API serves.
+- **Viewer keys are read-only.** Every route that changes data refuses them. A test sends a viewer key to every write route the API serves. The one exception applies to every key: a key can revoke itself (`DELETE /api/v1/keys/{its own id}`); deleting itself permanently (`?hard=true`) still needs `key:revoke`.
 - **Admin keys** are created only with the server's master key. An admin key can then give another of the account's keys the admin role. The dashboard creates editor and viewer keys. An API key can create keys only up to its own role, never admin.
 - **Scopes** narrow a key's role and never widen it. Only an admin key can set them (`POST /api/v1/admin/roles`).
 - **Project restrictions** limit a key to the projects it lists.

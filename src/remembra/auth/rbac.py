@@ -9,6 +9,9 @@ Roles:
   editor  – every permission except the ``admin:*`` ones.
   viewer  – read-only: recall memories, read entities, list keys.
 
+Any API key, whatever its role, may revoke itself (not permanently delete
+itself): see ``require_revoke_permission`` in ``remembra.api.v1.keys``.
+
 ``ROLE_PERMISSIONS`` below is the only role table: ``has_permission`` in
 ``remembra.auth.middleware``, the ``remembra.auth.scopes`` dependencies and
 ``GET /admin/permissions`` all read it, and ``permission_table()`` renders it
@@ -113,7 +116,9 @@ PERMISSION_SUMMARIES: dict[Permission, str] = {
     Permission.MEMORY_DELETE: "Delete memories and clean up expired or decayed ones",
     Permission.KEY_CREATE: "Create API keys (never above the caller's own role, never admin) and rename them",
     Permission.KEY_LIST: "List the account's API keys",
-    Permission.KEY_REVOKE: "Revoke or delete API keys (an API key only ones with no more access than itself)",
+    Permission.KEY_REVOKE: (
+        "Revoke or delete API keys (an API key only ones with no more access than itself); any key may revoke itself without it"
+    ),
     Permission.WEBHOOK_MANAGE: "Create, read, change and delete webhooks and read their deliveries",
     Permission.CONFLICT_MANAGE: "Resolve or dismiss memory conflicts",
     Permission.ENTITY_READ: "Read entities, their relationships and the memories that mention them",

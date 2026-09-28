@@ -166,7 +166,6 @@ async def test_viewer_cannot_create_rename_or_revoke_keys_but_editor_can(tmp_pat
         assert (await h.client.post("/api/v1/keys", json={"role": "viewer"}, headers=v)).status_code == 403
         assert (await h.client.patch(f"/api/v1/keys/{viewer_id}", json={"name": "x"}, headers=v)).status_code == 403
         assert (await h.client.delete(f"/api/v1/keys/{other_viewer_id}", headers=v)).status_code == 403
-        assert (await h.client.delete(f"/api/v1/keys/{viewer_id}", headers=v)).status_code == 403
         assert (await h.keys.get_key_info(other_viewer_id)).active
         assert len(await h.keys.list_keys(uid)) == 3
 
@@ -175,6 +174,44 @@ async def test_viewer_cannot_create_rename_or_revoke_keys_but_editor_can(tmp_pat
         minted = r.json()["id"]
         assert (await h.client.patch(f"/api/v1/keys/{minted}", json={"name": "ci-2"}, headers=e)).status_code == 200
         assert (await h.client.delete(f"/api/v1/keys/{minted}", headers=e)).status_code == 200
+
+
+async def test_any_key_can_revoke_itself_and_only_itself(tmp_path):
+    """Owner decision 2 (2026-09-27): any key may revoke itself, whatever its role.
+
+    Revoking any other key still needs ``key:revoke`` and the "no more access
+    than itself" rule. Permanently deleting a key (``?hard=true``) is not
+    revoking it: that still needs ``key:revoke``, for the key itself too.
+    """
+    async with secure_app(tmp_path, [keys.router]) as h:
+        uid = await h.create_user("self-revoke@example.com")
+        viewer, viewer_id = await h.api_key(uid, "viewer")
+        _, other_viewer_id = await h.api_key(uid, "viewer")
+        # An editor key narrowed to recall holds no key:revoke either.
+        narrowed, narrowed_id = await h.api_key(uid, "editor", scopes=["memory:recall"])
+        v, n = {"X-API-Key": viewer}, {"X-API-Key": narrowed}
+
+        # Another key, or a permanent delete of itself: still key:revoke.
+        assert (await h.client.delete(f"/api/v1/keys/{other_viewer_id}", headers=v)).status_code == 403
+        r = await h.client.delete(f"/api/v1/keys/{viewer_id}", params={"hard": "true"}, headers=v)
+        assert r.status_code == 403, r.text
+        assert "key:revoke" in r.text
+        assert (await h.keys.get_key_info(other_viewer_id)).active
+        assert (await h.keys.get_key_info(viewer_id)).active
+
+        # Itself: revoked, recorded, and the key stops working.
+        r = await h.client.delete(f"/api/v1/keys/{viewer_id}", headers=v)
+        assert r.status_code == 200, r.text
+        assert not (await h.keys.get_key_info(viewer_id)).active
+        assert (await h.keys.get_key_info(other_viewer_id)).active
+        assert (await h.client.get("/api/v1/keys", headers=v)).status_code == 401
+        events = await h.app.state.audit_logger.get_recent_events(user_id=uid)
+        assert any(e["action"] == "key_revoked" and e["resource_id"] == viewer_id for e in events), events
+
+        r = await h.client.delete(f"/api/v1/keys/{narrowed_id}", headers=n)
+        assert r.status_code == 200, r.text
+        assert not (await h.keys.get_key_info(narrowed_id)).active
+        assert len(await h.keys.list_keys(uid)) == 3  # revoked, not deleted
 
 
 async def test_viewer_cannot_create_a_team_but_editor_can(tmp_path):
