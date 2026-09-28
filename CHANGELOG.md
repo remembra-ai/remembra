@@ -90,7 +90,9 @@ A required check on the git host is not part of this release.
   session); a hook another agent runs (Cursor running Claude Code's, say) joins no crew under the wrong
   agent. A session that is not a crew session gets the plain `remembra-relay close` at its end and on a
   usage-limit stop, which Crew mode had dropped, with its duplicate and empty-close checks and its queue.
-  A crew session that did nothing sends no empty handoff.
+  A crew session that did nothing sends no empty handoff. A crew join files the checkout under the project
+  the Relay hooks would, so a new git repository gets its own project, and its own crew, even with
+  `REMEMBRA_PROJECT` set; only `REMEMBRA_RELAY_PROJECT` keeps every repository in one crew.
 - **Hook entries go where the agent reads them.** `remembra-crew connect` writes each agent's crew hooks to
   the same file `remembra-relay connect` uses, including when `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `GEMINI_CLI_HOME`, `QWEN_HOME` or `KIMI_CODE_HOME` moves it (Kimi Code's is `~/.kimi-code/config.toml`).
