@@ -82,6 +82,7 @@ from remembra.relay.crew.gate import (
     write_json,
 )
 from remembra.relay.handoff import police_item
+from remembra.relay.hints import HINT_KEYS, RELAY_PROJECT_ENV, hint_fields
 
 CREWD_VERSION: Final = "1.0.0"
 HEARTBEAT_S: Final = 60.0
@@ -95,6 +96,7 @@ CREW_EXISTS_REPO_S: Final = 1.5
 CREW_EXISTS_REQUEST_S: Final = 3.0
 CREW_EXISTS_NEGATIVE_TTL_S: Final = 300.0
 CREW_EXISTS_UNREACHABLE_TTL_S: Final = 60.0
+RESOLVE_GIT_S: Final = 3.0  # git's budget for reading the checkout a join resolves to a project
 ZONES_S: Final = 30.0
 TREE_EVERY_S: Final = 86400.0
 BATON_SWEEP_S: Final = 3600.0
@@ -535,6 +537,27 @@ def default_config_loader(home: Path) -> ConfigLoader:
     return load
 
 
+def relay_project_of(args: Mapping[str, Any]) -> str | None:
+    """``REMEMBRA_RELAY_PROJECT`` as the calling hook's environment has it (``relay_project``, sent by
+    ``remembra-crew start`` even when unset), so a join follows the same rule as that session's relay hooks;
+    crewd's own environment only for a caller that does not send it (an earlier ``remembra-crew`` build)."""
+    if "relay_project" in args:
+        value = args.get("relay_project")
+        return value if isinstance(value, str) else None
+    return os.environ.get(RELAY_PROJECT_ENV)
+
+
+def refused_fields(resp: Resp, names: Iterable[str]) -> bool:
+    """A 422 that refuses one of ``names`` as an extra field (a server whose request model predates it)."""
+    detail = resp.body.get("detail") if resp.status == 422 and isinstance(resp.body, dict) else None
+    if not isinstance(detail, list):
+        return False
+    wanted = set(names)
+    return any(
+        isinstance(e, dict) and e.get("type") == "extra_forbidden" and list(e.get("loc") or [None])[-1] in wanted for e in detail
+    )
+
+
 class CrewdError(Exception):
     def __init__(self, code: str, message: str = "", **extra: Any) -> None:
         super().__init__(message or code)
@@ -840,7 +863,7 @@ class Crewd:
             raise CrewdError("no_api_key", "no Remembra API key configured")
         api = self.api_for_cfg(cfg, agent_id)
         host = await self.ensure_host(cfg, api)
-        project_id = args.get("project_id") or await self.resolve_project(api, cfg, cwd)
+        project_id = args.get("project_id") or await self.resolve_project(api, cfg, cwd, relay_project_of(args))
         zones_sha = None
         plan = ZC.plan_upload(facts.toplevel, facts.default_branch, None)
         if plan.result is not None and plan.result.ok:
@@ -953,13 +976,18 @@ class Crewd:
             "githook_state": sess["githook_state"],
         }
 
-    async def resolve_project(self, api: Api, cfg: RelayConfig, cwd: str) -> str:
+    async def resolve_project(self, api: Api, cfg: RelayConfig, cwd: str, relay_project: str | None = None) -> str:
+        """This checkout's project (so its crew), resolved and recorded by the server under the relay's rule.
+
+        The same fields ``remembra-relay`` sends (:func:`remembra.relay.hints.hint_fields`): a git repository
+        gets its own project whatever ``REMEMBRA_PROJECT`` says, the configured project names only a folder,
+        and ``relay_project`` (``REMEMBRA_RELAY_PROJECT``) keeps one project for everything.
+        """
         from remembra.relay import facts as factlib
 
-        info = factlib.repo_info(Path(cwd), factlib.Deadline(3.0))
+        info = await asyncio.to_thread(factlib.repo_info, Path(cwd), factlib.Deadline(RESOLVE_GIT_S))
         locator = info.locator(Path(cwd), self.hostname)
-        if cfg.project and cfg.project != "default":
-            locator["hint_project"] = cfg.project
+        locator.update(hint_fields(cfg, info.git_repo, relay_project))
         resp = await self.request(api, "POST", "/projects/resolve", json_body=locator)
         if not resp.ok or not isinstance(resp.body, dict) or not resp.body.get("project_id"):
             raise CrewdError("project_unresolved", f"project resolution failed: HTTP {resp.status} {resp.error()}")
@@ -976,11 +1004,12 @@ class Crewd:
         cfg = self.config_loader(str(args.get("agent_id") or adapter), ADAPTER_CONFIG_SOURCE.get(adapter))
         if not cfg.api_key:
             return {"ok": True, "exists": False, "error": "no_api_key"}
+        relay_project = relay_project_of(args)
         # SessionStart asks this in every git repo on the machine (global install): answer from a short
         # cache when the server said "no crew" or could not be reached, so an unrelated repo never waits
         # on the network twice (§10.4 SessionStart 10 s hard).
         now = self.clock()
-        cache_key = f"{cfg.url}\0{os.path.realpath(cwd)}"
+        cache_key = f"{cfg.url}\0{cfg.project or ''}\0{relay_project or ''}\0{os.path.realpath(cwd)}"
         unreachable_key = f"{cfg.url}\0<unreachable>"
         for k in (cache_key, unreachable_key):
             hit = self.crew_exists_cache.get(k)
@@ -991,14 +1020,13 @@ class Crewd:
             return {"ok": True, "exists": False}
         locator = info.locator(Path(cwd), self.hostname)
         locator.pop("host", None)
+        api = self.api_for_cfg(cfg, str(args.get("agent_id") or adapter))
+        # asked the way the join resolves (resolve_project), so "a crew exists" names the crew it joins
+        hinted = {**locator, **hint_fields(cfg, info.git_repo, relay_project)}
         try:
-            resp = await self.request(
-                self.api_for_cfg(cfg, str(args.get("agent_id") or adapter)),
-                "POST",
-                "/crews/resolve",
-                json_body=locator,
-                timeout=CREW_EXISTS_REQUEST_S,
-            )
+            resp = await self.request(api, "POST", "/crews/resolve", json_body=hinted, timeout=CREW_EXISTS_REQUEST_S)
+            if refused_fields(resp, HINT_KEYS):  # a server from before /crews/resolve took them: ask as before
+                resp = await self.request(api, "POST", "/crews/resolve", json_body=locator, timeout=CREW_EXISTS_REQUEST_S)
         except Unreachable:
             result = {"ok": False, "exists": False, "error": "unreachable"}
             self.crew_exists_cache[unreachable_key] = (now + CREW_EXISTS_UNREACHABLE_TTL_S, result)

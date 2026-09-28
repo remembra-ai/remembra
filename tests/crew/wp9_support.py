@@ -168,8 +168,8 @@ def new_crewd(layout: Layout, server: Server, *, alive: set[int] | None = None, 
 
     d = Crewd(
         layout,
-        config_loader=server.config_loader(),
-        transport=server.transport(),
+        config_loader=kw.pop("config_loader", None) or server.config_loader(),
+        transport=kw.pop("transport", None) or server.transport(),
         is_alive=is_alive,
         hostname="test-host",
         restore_gate=kw.pop("restore_gate", False),

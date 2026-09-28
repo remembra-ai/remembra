@@ -57,6 +57,7 @@ from remembra.relay.crew.gate import (
     rpc_send,
     session_key,
 )
+from remembra.relay.hints import RELAY_PROJECT_ENV
 
 CREWD_START_WAIT_S: Final = 3.0
 START_BUDGET_S: Final = 9.0
@@ -378,12 +379,15 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
         if top is None:
             relay_brief_passthrough(adapter, args.agent or adapter, plain, timeout=left())
             return 0
+        # crewd resolves this checkout's project under the relay's rule with THIS session's environment (a
+        # supervised crewd does not have it): REMEMBRA_RELAY_PROJECT, sent even when unset.
+        relay_project = os.environ.get(RELAY_PROJECT_ENV)
         enabled = bool(args.crew) or crew_enabled_locally(layout, top)
         if not enabled:
             # a crew may already exist for this project (created elsewhere): join it; otherwise the plain brief.
             # The brief keeps at least half the budget; crew_exists is asked again only when crewd was not
             # running (never after a timeout: a black-holed server would just time out twice).
-            ask = {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}
+            ask = {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter, "relay_project": relay_project}
             budget = min(CREW_EXISTS_TIMEOUT_S, left() / 2)
             exists, sent = rpc_ex(layout, "crew_exists", ask, timeout=budget) if budget >= MIN_STEP_S else (None, True)
             if exists is None and not sent and ensure_crewd(layout, wait=min(CREWD_START_WAIT_S, left() / 4)):
@@ -412,6 +416,7 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
                 "model": payload.get("model") if isinstance(payload.get("model"), str) else None,
                 "transcript_path": payload.get("transcript_path"),
                 "project_id": args.project,
+                "relay_project": relay_project,
             },
             timeout=max(MIN_STEP_S, left(reserve=0.5)),
         )
