@@ -89,7 +89,7 @@ export function callsignOf(state: CrewState, sessionId: string | null | undefine
   return state.sessions[sessionId]?.callsign ?? sessionId;
 }
 
-/** A sub-agent session (joined with `parent_session_id`): it works for, and sits on the seat of, its parent. */
+/** A sub-agent session (joined with `parent_session_id`): it works for its parent (the first 2 sit on its seat). */
 export function isSubAgent(session: Pick<SessionState, 'parent_session_id'>): boolean {
   return Boolean(session.parent_session_id);
 }

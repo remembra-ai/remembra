@@ -22,9 +22,9 @@ Relay events (handoff / checkpoint / status / inbox), pickup briefs, trail
 reads and recalls never consume credits. When credits run out, stores degrade
 to atomic (no extraction, no entity resolution) instead of being rejected.
 
-Crew mode limits (live sessions, zones, soft event cap, promotions, retention,
-teammates) are per crew and never seat-scaled; they add no price. How they are
-applied lives in ``remembra.crew.limits``.
+Crew mode limits (live sessions, sub-agents per session on its seat, zones, soft
+event cap, promotions, retention, teammates) are per crew and never seat-scaled;
+they add no price. How they are applied lives in ``remembra.crew.limits``.
 """
 
 from __future__ import annotations
@@ -140,6 +140,9 @@ class PlanLimits:
     # values so a tier that forgets them gets the most conservative caps.
     # Live sessions per crew; joins beyond it are observe-only (never refused).
     max_crew_sessions_live: int = 3
+    # Live sub-agent sessions a top-level session runs on its own seat (sub-agents a sub-agent
+    # starts included). Every further live sub-agent counts toward max_crew_sessions_live.
+    crew_free_sub_agents_per_parent: int = 2
     # Zones per crew (the built-in crew-policy zone is not counted).
     max_zones: int = 10
     # Crew events per crew per UTC day. Soft: over it activity bursts coalesce,
@@ -257,6 +260,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         price_annual_cents=0,
         # Crew mode (spec §12)
         max_crew_sessions_live=3,
+        crew_free_sub_agents_per_parent=2,
         max_zones=10,
         crew_events_per_day_soft=5_000,
         crew_event_retention_days=14,
@@ -285,6 +289,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_webhooks=True,
         # Crew mode: Solo sits between Free and Pro (spec §12 predates Solo; owner sign-off)
         max_crew_sessions_live=5,
+        crew_free_sub_agents_per_parent=2,
         max_zones=25,
         crew_events_per_day_soft=20_000,
         crew_event_retention_days=90,
@@ -315,6 +320,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_priority_support=True,
         # Crew mode (spec §12)
         max_crew_sessions_live=8,
+        crew_free_sub_agents_per_parent=2,
         max_zones=50,
         crew_events_per_day_soft=50_000,
         crew_event_retention_days=180,
@@ -348,6 +354,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_priority_support=True,
         # Crew mode (spec §12)
         max_crew_sessions_live=20,
+        crew_free_sub_agents_per_parent=2,
         max_zones=200,
         crew_events_per_day_soft=250_000,
         crew_event_retention_days=365,
@@ -379,6 +386,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_priority_support=True,
         # Crew mode: contract defaults (spec §12 "custom"); contracts override per account
         max_crew_sessions_live=50,
+        crew_free_sub_agents_per_parent=2,
         max_zones=1_000,
         crew_events_per_day_soft=1_000_000,
         crew_event_retention_days=730,
@@ -408,6 +416,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_observability=True,
         # Crew mode: same as Pro
         max_crew_sessions_live=8,
+        crew_free_sub_agents_per_parent=2,
         max_zones=50,
         crew_events_per_day_soft=50_000,
         crew_event_retention_days=180,
@@ -438,6 +447,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_priority_support=True,
         # Crew mode: same as Team
         max_crew_sessions_live=20,
+        crew_free_sub_agents_per_parent=2,
         max_zones=200,
         crew_events_per_day_soft=250_000,
         crew_event_retention_days=365,

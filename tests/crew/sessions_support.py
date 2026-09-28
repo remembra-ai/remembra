@@ -87,6 +87,7 @@ def limits_with(max_live: int) -> CrewLimits:
     return CrewLimits(
         tier="test",
         max_sessions_live=max_live,
+        free_sub_agents_per_parent=SELF_HOSTED_CREW_LIMITS.free_sub_agents_per_parent,
         max_zones=SELF_HOSTED_CREW_LIMITS.max_zones,
         events_per_day_soft=SELF_HOSTED_CREW_LIMITS.events_per_day_soft,
         memory_promotions_per_day=SELF_HOSTED_CREW_LIMITS.memory_promotions_per_day,

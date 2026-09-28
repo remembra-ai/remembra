@@ -398,11 +398,14 @@ def _session_live(session: Mapping[str, Any]) -> None:
 
 
 async def has_claim_seat(conn: aiosqlite.Connection, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> bool:
-    """True when the session holds one of the plan's live-session seats (its parent's, for a sub-agent).
+    """True when the session holds one of the plan's live-session seats (a sub-agent within its
+    top-level session's allowance holds that session's seat).
 
     ``limits`` is the crew owner's plan (``CrewOps.limits``, set by the routes); without it nothing is refused.
     """
-    return limits is None or await has_seat(conn, crew_id, str(session["id"]), limits.max_sessions_live)
+    return limits is None or await has_seat(
+        conn, crew_id, str(session["id"]), limits.max_sessions_live, free_sub_agents=limits.free_sub_agents_per_parent
+    )
 
 
 async def require_seat(conn: aiosqlite.Connection, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> None:

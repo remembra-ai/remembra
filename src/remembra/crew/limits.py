@@ -22,7 +22,9 @@ Plan limits
 
 Soft caps (§12) never reduce protection:
 
-    * over the live-session cap, ``join`` still succeeds, **observe-only**;
+    * over the live-session cap, ``join`` still succeeds, **observe-only**; a
+      top-level session's first ``free_sub_agents_per_parent`` live sub-agents
+      sit on its seat, every further one counts toward the cap (owner decision 13);
     * over the daily event soft cap, only ``activity.burst`` coalesces (5-min
       windows instead of 60 s); nothing else is ever dropped; ``budget.warning`` at
       80 % and ``budget.cap_reached`` at 100 % are emitted once each per day;
@@ -266,6 +268,7 @@ class CrewLimits:
 
     tier: str
     max_sessions_live: int
+    free_sub_agents_per_parent: int  # live sub-agents a top-level session runs on its own seat
     max_zones: int
     events_per_day_soft: int
     memory_promotions_per_day: int
@@ -278,6 +281,7 @@ def crew_limits(plan: PlanLimits, *, tier: str | None = None) -> CrewLimits:
     return CrewLimits(
         tier=tier or plan.tier.value,
         max_sessions_live=plan.max_crew_sessions_live,
+        free_sub_agents_per_parent=plan.crew_free_sub_agents_per_parent,
         max_zones=plan.max_zones,
         events_per_day_soft=plan.crew_events_per_day_soft,
         memory_promotions_per_day=plan.crew_memory_promotions_per_day,

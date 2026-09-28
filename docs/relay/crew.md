@@ -88,8 +88,10 @@ your machine; every bypass is recorded.
   limit an agent joins in observe-only mode: it still sees DO NOT TOUCH and is still refused by others'
   claims, it just cannot claim. Protection is never lowered by a plan limit. Seats go to live sessions
   in join order; an agent stopped on its credits gives its seat up while its work waits for pickup (as
-  a lost one does), so the agent that replaces it gets a seat and the baton. Sub-agents use their
-  parent's seat and are never offered a baton themselves.
+  a lost one does), so the agent that replaces it gets a seat and the baton. A session runs its first 2
+  live sub-agents on its own seat (the sub-agents they start count toward the same 2); every further
+  sub-agent counts toward the limit like a session of its own, and is observe-only when no seat is free.
+  Sub-agents are never offered a baton themselves.
 
 ## Setup
 

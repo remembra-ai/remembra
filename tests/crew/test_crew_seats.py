@@ -44,13 +44,13 @@ async def _full_crew_with_a_stall(tmp_path: Path, max_live: int):  # noqa: ANN20
 async def test_a_credits_out_session_gives_its_seat_to_the_agent_that_replaces_it(tmp_path: Path, max_live: int) -> None:
     env, h, tok, crew, a, task = await _full_crew_with_a_stall(tmp_path, max_live)
     try:
-        assert await seated_session_count(env.conn, crew) == max_live - 1
+        assert await seated_session_count(env.conn, crew, free_sub_agents=2) == max_live - 1
         d = await env.svc.join(
             user_id=OWNER, req=join_req("s-d", agent="cursor", checkout="fp-d", host_id=h["id"]), host_token=tok
         )
         assert d.observe_only is False and d.upgrade_hint is None
         assert len(d.batons_offered) == 1, d.batons_offered
-        assert await has_seat(env.conn, crew, d.session["id"], max_live)
+        assert await has_seat(env.conn, crew, d.session["id"], max_live, free_sub_agents=2)
 
         # and it can take the baton
         tasks = TaskService(env.log)
@@ -75,7 +75,7 @@ async def test_sub_agents_sit_on_their_parents_seat_and_are_not_offered_batons(t
         sub = await env.svc.join(user_id=OWNER, req=req, host_token=tok, session_token=None)
         assert sub.observe_only is False  # the parent's seat
         assert sub.batons_offered == []  # a sub-agent works for its parent: no baton offer
-        assert await seated_session_count(env.conn, crew) == 2  # it takes no seat of its own
+        assert await seated_session_count(env.conn, crew, free_sub_agents=2) == 2  # it takes no seat of its own
 
         # the free seat is still there for a real replacement
         d = await env.svc.join(user_id=OWNER, req=join_req("s-d", checkout="fp-d", host_id=h["id"]), host_token=tok)

@@ -54,9 +54,12 @@ A required check on the git host is not part of this release.
   `crew.db`, and checked every night. Credentials in channel messages, tasks and decisions are redacted
   before they are stored. A message a person redacts also leaves the event feed (its events keep their place
   in the chain).
-- **Seats and teammates.** A plan's live-session limit counts running top-level sessions. An agent stopped on
-  its credits gives its seat to the agent that picks up its baton, and sub-agents use their parent's seat. On
-  a plan with crew teammates (Team), the crew owner adds people who have joined their team.
+- **Seats and teammates.** A plan's live-session limit counts a crew's running sessions in the order they
+  joined; one that joins over it is observe-only (it sees DO NOT TOUCH but cannot claim) until an earlier one
+  ends. An agent stopped on its credits gives its seat to the agent that picks up its baton. A session runs its
+  first 2 live sub-agents on its own seat (the sub-agents they start count toward the same 2); every further
+  sub-agent counts toward the limit like a session of its own. On a plan with crew teammates (Team), the crew
+  owner adds people who have joined their team.
 - **Scheduled snapshots of both databases.** `python -m remembra.storage.snapshot create --keep N` copies the
   main database and `crew.db` together (with checksums, while the server runs) and then deletes all but the
   newest N snapshots; each snapshot is readable by the server's user only. [Operations: Scheduled

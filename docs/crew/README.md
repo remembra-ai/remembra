@@ -109,6 +109,15 @@ the parent's own verified agent key (else 403 `parent_session_unproven`). It get
 callsign, claims and checkpoints; the session view carries `parent_session_id`,
 `sub_agent_id` and `provider`.
 
+Seats (§12, owner decision 13): a top-level session runs its first
+`crew_free_sub_agents_per_parent` live sub-agents (2 on every plan; the
+sub-agents they start count toward the same 2) on its own seat. Every further
+live sub-agent counts toward `max_crew_sessions_live` in join order, as a
+top-level session does: over the limit it joins observe-only, and every claim
+path answers it 403 `observe_only` with the upgrade hint. A sub-agent never has
+a seat while its top-level session is observe-only, and one over the limit gets
+a seat as soon as an earlier session or sub-agent ends.
+
 The crew.db v1 schema also carries the continuity riders as nullable columns,
 added before crew.db first deployed: `crew_sessions` (provider,
 parent_session_id, sub_agent_id, run_id, capabilities, context_window,

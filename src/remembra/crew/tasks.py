@@ -1407,7 +1407,9 @@ class TaskService:
     @staticmethod
     async def _require_seat(conn: Any, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> None:
         """403 ``observe_only`` for a session that joined over the plan's live-session cap (§12)."""
-        if limits is not None and not await has_seat(conn, crew_id, str(session["id"]), limits.max_sessions_live):
+        if limits is not None and not await has_seat(
+            conn, crew_id, str(session["id"]), limits.max_sessions_live, free_sub_agents=limits.free_sub_agents_per_parent
+        ):
             raise _err(403, "observe_only", OBSERVE_ONLY_MESSAGE, upgrade_hint=seat_upgrade_hint(limits))
 
     def _require_session(self, caller: Caller) -> Mapping[str, Any]:

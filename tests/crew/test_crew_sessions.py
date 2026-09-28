@@ -166,9 +166,9 @@ async def test_join_over_the_seat_cap_is_observe_only_and_gets_a_seat_later(mk):
     a = await _join(env, "s-a")
     b = await _join(env, "s-b", agent="codex")
     assert not a.observe_only and b.observe_only
-    assert not await has_seat(env.conn, CREW, b.session["id"], 1)
+    assert not await has_seat(env.conn, CREW, b.session["id"], 1, free_sub_agents=2)
     await env.svc.leave(a.session, reason="logout", facts={}, summary=None, baton=False, baton_ref=None)
-    assert await has_seat(env.conn, CREW, b.session["id"], 1)
+    assert await has_seat(env.conn, CREW, b.session["id"], 1, free_sub_agents=2)
 
 
 async def test_resume_of_validation(mk):

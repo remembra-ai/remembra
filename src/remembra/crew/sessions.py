@@ -63,7 +63,7 @@ from remembra.crew.hosts import (
     mark_seen,
     tokens_match,
 )
-from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, CrewLimits, seat_for_join
+from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, CrewLimits, seat_upgrade_hint
 from remembra.crew.redact import Scrubber, outbound
 from remembra.crew.settings import load_settings
 from remembra.crew.store import CrewStore, crew_id_for, new_id
@@ -515,50 +515,100 @@ async def live_session_count(conn: aiosqlite.Connection, crew_id: str) -> int:
 
 # Live states that take one of the plan's seats. A session stopped on its credits (quota_blocked)
 # waits with its work reserved for pickup, so it gives its seat up (like a lost one) and the agent
-# that replaces it gets a seat to take the baton. Sub-agent sessions never count: they sit on their
-# parent's seat.
+# that replaces it gets a seat to take the baton. A top-level session runs its first
+# ``free_sub_agents`` live sub-agents on its own seat (owner decision 13, SEC-3); every further
+# sub-agent counts like a session of its own.
 SEAT_STATES: Final = tuple(s for s in LIVE_STATES if s != "quota_blocked")
 _MAX_PARENT_DEPTH: Final = 8
 
 
-async def seated_session_count(conn: aiosqlite.Connection, crew_id: str) -> int:
-    """Sessions of the crew that count toward its live-session seats (see :data:`SEAT_STATES`)."""
-    marks = ", ".join("?" for _ in SEAT_STATES)
-    row = await _one(
+@dataclass(frozen=True)
+class SeatQueue:
+    """The crew's live sessions in join order and which of them count toward the plan's seats (§12).
+
+    ``counted`` holds every top-level session in :data:`SEAT_STATES` and every sub-agent in
+    :data:`SEAT_STATES` past its top-level session's allowance (sub-agents of a sub-agent count
+    toward the same allowance, so nesting opens no extra room). ``seated`` holds the sessions that
+    may claim: a counted session whose place in join order is within ``max_live``, and a
+    sub-agent within the allowance whose top-level session is seated. A sub-agent is never seated
+    while its top-level session is not. A session whose chain of parents is broken (a parent
+    ended, lost or in another crew) is neither.
+    """
+
+    counted: tuple[str, ...]
+    seated: frozenset[str]
+
+
+def _top_level_of(row: Mapping[str, Any], live: Mapping[str, Mapping[str, Any]]) -> str | None:
+    """The live top-level session ``row`` works for (itself when it has no parent); None when its chain is broken."""
+    for _ in range(_MAX_PARENT_DEPTH):
+        parent = row.get("parent_session_id")
+        if not parent:
+            return str(row["id"])
+        found = live.get(str(parent))
+        if found is None:
+            return None
+        row = found
+    return None
+
+
+def seat_queue(rows: Sequence[Mapping[str, Any]], max_live: int, free_sub_agents: int) -> SeatQueue:
+    """Seats for ``rows``, the crew's live sessions (any order): see :class:`SeatQueue`."""
+    ordered = sorted(rows, key=lambda r: (str(r["joined_at"]), str(r["id"])))
+    live = {str(r["id"]): r for r in ordered}
+    top = {sid: _top_level_of(r, live) for sid, r in live.items()}
+    counted: list[str] = []
+    place: dict[str, int] = {}  # counted sessions ahead of this one, in join order
+    within_allowance: set[str] = set()
+    used: dict[str, int] = {}
+    for sid, r in live.items():
+        root = top[sid]
+        if root is None:
+            continue
+        place[sid] = len(counted)
+        if root != sid and used.get(root, 0) < free_sub_agents:
+            within_allowance.add(sid)
+            if r["state"] in SEAT_STATES:
+                used[root] = used.get(root, 0) + 1
+        elif r["state"] in SEAT_STATES:
+            counted.append(sid)
+    seated = {sid for sid, root in top.items() if root == sid and place[sid] < max_live}
+    for sid, root in top.items():
+        if root is None or root == sid or root not in seated:
+            continue
+        if sid in within_allowance or place[sid] < max_live:
+            seated.add(sid)
+    return SeatQueue(counted=tuple(counted), seated=frozenset(seated))
+
+
+async def load_seat_queue(conn: aiosqlite.Connection, crew_id: str, max_live: int, *, free_sub_agents: int) -> SeatQueue:
+    marks = ", ".join("?" for _ in LIVE_STATES)
+    rows = await _all(
         conn,
-        f"SELECT COUNT(*) AS n FROM crew_sessions WHERE crew_id = ? AND state IN ({marks}) AND parent_session_id IS NULL",
-        (crew_id, *SEAT_STATES),
+        f"SELECT id, parent_session_id, state, joined_at FROM crew_sessions WHERE crew_id = ? AND state IN ({marks})",
+        (crew_id, *LIVE_STATES),
     )
-    return int(row["n"]) if row else 0
+    return seat_queue(rows, max_live, free_sub_agents)
 
 
-async def has_seat(conn: aiosqlite.Connection, crew_id: str, session_id: str, max_live: int) -> bool:
+async def seated_session_count(conn: aiosqlite.Connection, crew_id: str, *, free_sub_agents: int) -> int:
+    """Sessions of the crew that count toward its live-session seats (:attr:`SeatQueue.counted`)."""
+    return len((await load_seat_queue(conn, crew_id, 0, free_sub_agents=free_sub_agents)).counted)
+
+
+async def has_seat(conn: aiosqlite.Connection, crew_id: str, session_id: str, max_live: int, *, free_sub_agents: int) -> bool:
     """True when the session holds one of the crew's ``max_live`` full seats (§12).
 
-    Seats go to the sessions in :data:`SEAT_STATES` in join order, so a session that
+    Seats go to the counted sessions (:class:`SeatQueue`) in join order, so a session that
     joined over the cap is observe-only (it cannot claim, adopt or be offered a baton)
     and gets a seat automatically once an earlier session ends, is lost or stops on its
-    credits. A sub-agent has its parent's seat. Claim services (WP-5) call this before granting.
+    credits. A top-level session's first ``free_sub_agents`` live sub-agents have its seat;
+    a further sub-agent needs a seat of its own. Claim services (WP-5) call this before granting.
     """
-    row = await get_session(conn, session_id)
-    for _ in range(_MAX_PARENT_DEPTH):
-        if row is None or row["crew_id"] != crew_id or row["state"] not in LIVE_STATES:
-            return False
-        if not row.get("parent_session_id"):
-            break
-        row = await get_session(conn, str(row["parent_session_id"]))
-    else:
+    if not schemas.is_id("session", session_id):
         return False
-    assert row is not None
-    marks = ", ".join("?" for _ in SEAT_STATES)
-    ahead = await _one(
-        conn,
-        f"""SELECT COUNT(*) AS n FROM crew_sessions
-             WHERE crew_id = ? AND state IN ({marks}) AND parent_session_id IS NULL
-               AND (joined_at < ? OR (joined_at = ? AND id < ?))""",
-        (crew_id, *SEAT_STATES, row["joined_at"], row["joined_at"], row["id"]),
-    )
-    return (int(ahead["n"]) if ahead else 0) < max_live
+    queue = await load_seat_queue(conn, crew_id, max_live, free_sub_agents=free_sub_agents)
+    return session_id in queue.seated
 
 
 # ---------------------------------------------------------------------------
@@ -778,7 +828,9 @@ class CrewSessions:
                 row = await self._insert_session(tx, crew_id, user_id, req, host, token, now_s)
                 if host is not None:
                     await self._announce_host(tx, crew_id, host, row, now)
-                seated = await has_seat(tx.conn, crew_id, row["id"], limits.max_sessions_live)
+                seated = await has_seat(
+                    tx.conn, crew_id, row["id"], limits.max_sessions_live, free_sub_agents=limits.free_sub_agents_per_parent
+                )
                 await tx.emit(
                     crew_id=crew_id,
                     type="session.joined",
@@ -790,14 +842,13 @@ class CrewSessions:
                 )
             else:
                 token, rotated = await self._rejoin_credentials(tx, row, host, session_token, now)
-                row = await self._refresh_session(tx, row, req, host, now, max_live=limits.max_sessions_live)
+                row = await self._refresh_session(tx, row, req, host, now, limits=limits)
                 resume_row = None
-            observe_only = not await has_seat(tx.conn, crew_id, row["id"], limits.max_sessions_live)
-            upgrade_hint = None
-            if observe_only:
-                counted = row["state"] in SEAT_STATES and not row.get("parent_session_id")
-                seat = seat_for_join(await seated_session_count(tx.conn, crew_id) - (1 if counted else 0), limits)
-                upgrade_hint = seat.upgrade_hint
+            observe_only = not await has_seat(
+                tx.conn, crew_id, row["id"], limits.max_sessions_live, free_sub_agents=limits.free_sub_agents_per_parent
+            )
+            # over the plan's limit every seat is taken: the hint names the plan with more (none at the top)
+            upgrade_hint = seat_upgrade_hint(limits) if observe_only else None
             actor = session_actor(row)
             adopted: list[dict[str, Any]] = []
             offered: list[dict[str, Any]] = []
@@ -1003,7 +1054,14 @@ class CrewSessions:
         )
 
     async def _refresh_session(
-        self, tx: EventTx, row: dict[str, Any], req: JoinRequest, host: Mapping[str, Any] | None, now: datetime, *, max_live: int
+        self,
+        tx: EventTx,
+        row: dict[str, Any],
+        req: JoinRequest,
+        host: Mapping[str, Any] | None,
+        now: datetime,
+        *,
+        limits: CrewLimits,
     ) -> dict[str, Any]:
         """A re-join (SessionStart resume/compact/clear) is activity: update checkout facts, revive the lane."""
         now_s = format_ts(now)
@@ -1055,7 +1113,13 @@ class CrewSessions:
                 payload={
                     "session": session_view(fresh),
                     "resume_of": None,
-                    "observe_only": not await has_seat(tx.conn, fresh["crew_id"], fresh["id"], max_live),
+                    "observe_only": not await has_seat(
+                        tx.conn,
+                        fresh["crew_id"],
+                        fresh["id"],
+                        limits.max_sessions_live,
+                        free_sub_agents=limits.free_sub_agents_per_parent,
+                    ),
                 },
                 summary=f"{fresh['callsign']} re-joined ({_word(req.adapter)}, {_word(req.source)})",
                 refs={"session_id": fresh["id"], "host_id": fresh.get("host_id")},
@@ -3261,12 +3325,13 @@ class CrewSessions:
         params.append(max(1, min(limit, 500)))
         rows = await _all(self.conn, sql, params)
         limits = await self.limits_for((await self._crew(crew_id))["owner_user_id"])
+        seats = await load_seat_queue(
+            self.conn, crew_id, limits.max_sessions_live, free_sub_agents=limits.free_sub_agents_per_parent
+        )
         out = []
         for r in rows:
             view = session_view(r)
-            view["observe_only"] = r["state"] in LIVE_STATES and not await has_seat(
-                self.conn, crew_id, r["id"], limits.max_sessions_live
-            )
+            view["observe_only"] = r["state"] in LIVE_STATES and r["id"] not in seats.seated
             view["last_heartbeat_at"] = r.get("last_heartbeat_at")
             view["last_seen_at"] = r.get("last_seen_at")
             view["calls_since_checkpoint"] = int(r.get("calls_since_checkpoint") or 0)
