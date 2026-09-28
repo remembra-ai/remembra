@@ -372,7 +372,7 @@ def _check_text(value: Any, name: str, max_len: int, *, required: bool = False) 
 def _check_priority(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4:
         raise _err(422, "invalid_task", "priority must be an integer from 0 to 4")
-    return value
+    return int(value)
 
 
 def _check_labels(value: Any) -> list[str]:

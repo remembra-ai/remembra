@@ -538,7 +538,11 @@ class AccountEraser:
 
         The SQLite rows are rewritten by the ``memories`` rule in the main transaction; the payload
         carries the same metadata, so it is rewritten first (a failure leaves every row for the retry).
+        Without a vector store there is no payload to rewrite.
         """
+        qdrant = self._qdrant
+        if qdrant is None:
+            return
         where = " OR ".join(f"({_crew_actor_where(k)})" for k in CREW_PROMOTED_ACTOR_KEYS)
         cursor = await self._db.conn.execute(
             f"SELECT id, metadata FROM memories WHERE user_id != :uid AND ({where})",  # noqa: S608
@@ -547,7 +551,7 @@ class AccountEraser:
         rows = [(str(r[0]), str(r[1])) for r in await cursor.fetchall()]
         if not rows:
             return
-        present = await self._qdrant.existing_ids([mid for mid, _ in rows])
+        present = await qdrant.existing_ids([mid for mid, _ in rows])
         for memory_id, raw in rows:
             if memory_id not in present:
                 continue
@@ -555,7 +559,7 @@ class AccountEraser:
             for key in CREW_PROMOTED_ACTOR_KEYS:
                 if metadata.get(key) == user_id:
                     metadata.pop(key)
-            await self._qdrant.set_metadata(memory_id, metadata)
+            await qdrant.set_metadata(memory_id, metadata)
         log.info("account_erasure_promoted_actor_cleared", digest=erasure_digest(user_id)[:16], memories=len(rows))
 
     async def _reindex_collections(self) -> set[str]:
