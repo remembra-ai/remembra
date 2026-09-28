@@ -41,6 +41,35 @@ cap and limits. Notes themselves are shared only through shared spaces.
 | Handoff burst | 30 / minute | 60 / minute |
 | Stores without enrichment (atomic, relay, out of credits) | 300 / day | No daily limit |
 
+### Crew mode limits
+
+[Crew mode](../relay/crew.md) runs only on a server that turns it on. Where it
+runs, each crew gets the limits of its owner's plan. They are per crew and
+never multiplied by Team seats, and they add nothing to the price.
+
+| | Free | Solo | Pro | Team | Enterprise |
+|---|------|------|-----|------|------------|
+| Live sessions per crew | 3 | 5 | 8 | 20 | 50 |
+| Teammates in a crew | No | No | No | Yes | Yes |
+
+- **Over the limit, a session watches.** Seats go to live sessions in the
+  order they joined. A session that joins over the limit is observe-only: it
+  still sees what the others hold and is still refused by their claims, but
+  it cannot claim until an earlier session ends. The limit never refuses a
+  join.
+- **Sub-agents.** Each session runs its first 2 live sub-agents on its own
+  seat (the sub-agents they start count toward the same 2). Every further
+  sub-agent counts toward the limit like a session of its own.
+- **Credits out.** An agent stopped on its credits gives its seat to the
+  agent that picks up its baton.
+- **Teammates.** The crew owner can add teammates through the API; the
+  dashboard flow and teammates' own agents come in the next release. The call
+  is `POST /api/v1/crews/{crew_id}/members`, made signed in to the dashboard
+  (an API key cannot add anyone), and the person must have joined the owner's
+  team first. A crew admin can add teammates too.
+
+A self-hosted server gives every crew the Enterprise numbers.
+
 ## What is free on every plan
 
 Agent relay never uses smart credits:

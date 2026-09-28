@@ -35,6 +35,7 @@ launch label come back in one step. The regions it owns:
     <!-- @crew-meta --><!-- /@crew-meta -->              crew.html: description and og:description (link previews)
     <!-- @crew-plan-title --><!-- /@crew-plan-title -->  crew.html: "What ships at launch" / "What ships first"
     <!-- @crew-plan-first --><!-- /@crew-plan-first -->  crew.html: "At launch" / "First release"
+    <!-- @crew-limits-status --><!-- /@crew-limits-status -->  pricing.html: the crew limits table's lead
 
     python scripts/site_partials.py          # rewrite in place
     python scripts/site_partials.py --check  # exit 1 if any page is out of date
@@ -276,7 +277,13 @@ def crew_regions(html: str) -> str:
     html = fill_inline(html, "crew-meta", CREW_META_LIVE if CREW_LIVE else CREW_META_OFF)
     title = "What ships at launch, and what follows." if CREW_LIVE else "What ships first, and what follows."
     html = fill_inline(html, "crew-plan-title", title)
-    return fill_inline(html, "crew-plan-first", "At launch" if CREW_LIVE else "First release")
+    html = fill_inline(html, "crew-plan-first", "At launch" if CREW_LIVE else "First release")
+    status = (
+        "Each crew gets the limits of its owner's plan."
+        if CREW_LIVE
+        else "Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan."
+    )
+    return fill_inline(html, "crew-limits-status", status)
 
 
 def number_sections(html: str) -> str:

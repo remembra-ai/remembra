@@ -102,6 +102,13 @@
 .plain { margin-top: 28px; display: grid; gap: 14px; max-width: 44em; color: var(--ink-2); }
 .plain b { color: var(--ink); }
 .reasons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px dashed var(--trail); }
+.crew-lead { color: var(--ink-2); max-width: 44em; }
+.crew-limits { margin-top: 22px; width: 100%; border-collapse: collapse; font-size: var(--t-14); display: block; overflow-x: auto; }
+.crew-limits th, .crew-limits td { text-align: left; padding: 10px 16px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.crew-limits tr > :last-child { padding-right: 0; }
+.crew-limits thead th { color: var(--ink-3); font-family: var(--f-mono); font-size: var(--t-12); font-weight: 500; }
+.crew-limits tbody th { color: var(--ink); font-weight: 600; }
+.crew-limits td { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .reasons li { padding: 22px 24px 0 0; }
 .reasons .n { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); }
 .reasons h3 { font-family: var(--f-display); font-weight: 700; font-size: var(--t-22); letter-spacing: -.01em; line-height: 1.1; margin-top: 6px; }
@@ -330,6 +337,30 @@
           <p>The first 100 customers can take Solo at $108 a year, $9/mo, and that price never goes up while the subscription stays active. If it ends, the price and the seat are kept for 14 days; after that the seat goes to the next customer.</p>
         </li>
       </ol>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="crew-limits-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">Crew mode</p>
+        <h2 id="crew-limits-title">Live agents per crew, by plan.</h2>
+      </div>
+      <div>
+        <p class="crew-lead"><!-- @crew-limits-status -->Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan.<!-- /@crew-limits-status --> They are per crew, never multiplied by Team seats, and add nothing to the price.</p>
+        <table class="crew-limits">
+          <thead><tr><th scope="col">Per crew</th><th scope="col">Free</th><th scope="col">Solo</th><th scope="col">Pro</th><th scope="col">Team</th><th scope="col">Enterprise</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Live sessions per crew</th><td>3</td><td>5</td><td>8</td><td>20</td><td>50</td></tr>
+            <tr><th scope="row">Teammates in a crew</th><td>No</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+          </tbody>
+        </table>
+        <div class="plain">
+          <p><b>Over the limit, a session watches.</b> Seats go to live sessions in the order they joined. A session that joins over the limit still sees what the others hold and is still refused by their claims, but it cannot claim until an earlier session ends. The limit never refuses a join.</p>
+          <p><b>Sub-agents.</b> Each session runs its first 2 live sub-agents on its own seat (the sub-agents they start count toward the same 2). Every further sub-agent counts toward the limit like a session of its own.</p>
+          <p><b>Teammates.</b> The crew owner can add teammates through the API; the dashboard flow and teammates' own agents come in the next release.</p>
+        </div>
+      </div>
     </div>
   </section>
 

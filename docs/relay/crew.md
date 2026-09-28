@@ -84,7 +84,7 @@ your machine; every bypass is recorded.
   `remembra-relay brief` should print a brief. See [Relay setup](../guides/relay.md#setup) for the key.
 - macOS or Linux (Windows is not supported yet), git, and one **worktree per agent** (two agents in
   one checkout are allowed but warned: a shared checkout cannot tell whose edit is whose for certain).
-- Your plan's crew limits: see [Cloud plans](../reference/plans-and-credits.md). Over the live-session
+- Your plan's crew limits: see [Cloud plans: Crew mode limits](../reference/plans-and-credits.md#crew-mode-limits). Over the live-session
   limit an agent joins in observe-only mode: it still sees DO NOT TOUCH and is still refused by others'
   claims, it just cannot claim. Protection is never lowered by a plan limit. Seats go to live sessions
   in join order; an agent stopped on its credits gives its seat up while its work waits for pickup (as

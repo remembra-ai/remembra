@@ -340,6 +340,23 @@ Twelve months of credits (26,400 on Solo) go into one bank you can spend in any 
 
 The first 100 customers can take Solo at $108 a year, $9/mo, and that price never goes up while the subscription stays active. If it ends, the price and the seat are kept for 14 days; after that the seat goes to the next customer.
 
+Crew mode
+
+### Live agents per crew, by plan.
+
+Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan. They are per crew, never multiplied by Team seats, and add nothing to the price.
+
+| Per crew | Free | Solo | Pro | Team | Enterprise |
+| --- | --- | --- | --- | --- | --- |
+| Live sessions per crew | 3 | 5 | 8 | 20 | 50 |
+| Teammates in a crew | No | No | No | Yes | Yes |
+
+Over the limit, a session watches. Seats go to live sessions in the order they joined. A session that joins over the limit still sees what the others hold and is still refused by their claims, but it cannot claim until an earlier session ends. The limit never refuses a join.
+
+Sub-agents. Each session runs its first 2 live sub-agents on its own seat (the sub-agents they start count toward the same 2). Every further sub-agent counts toward the limit like a session of its own.
+
+Teammates. The crew owner can add teammates through the API; the dashboard flow and teammates' own agents come in the next release.
+
 Questions
 
 ### Short answers.
