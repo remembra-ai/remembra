@@ -144,6 +144,26 @@ def test_apply_at_a_tty_declined_writes_nothing(crew_env, tmp_path):
     assert tree_snapshot(tmp_path) == before
 
 
+def _assert_crewd_supervisor_written(home: Path, out: str) -> None:
+    """The crewd supervisor a real run writes on this platform, not loaded (``--no-service-load``):
+    a launchd LaunchAgent on macOS, a systemd ``--user`` unit on Linux (``install._plan_service``)."""
+    plist = home / "Library" / "LaunchAgents" / "dev.remembra.crewd.plist"
+    unit = home / ".config" / "systemd" / "user" / "remembra-crewd.service"
+    if sys.platform == "darwin":
+        body = plistlib.loads(plist.read_bytes())
+        assert body["ProgramArguments"] == ["/opt/remembra/bin/remembra-crewd"] and body["KeepAlive"] is True
+        assert plist.stat().st_mode & 0o777 == 0o644 and not unit.exists()
+        assert f"load it with: launchctl bootstrap gui/{os.getuid()} {plist}" in out
+    elif sys.platform.startswith("linux"):
+        text = unit.read_text()
+        assert "\nExecStart=/opt/remembra/bin/remembra-crewd\n" in text and "\nRestart=always\n" in text
+        assert "\nWantedBy=default.target\n" in text
+        assert unit.stat().st_mode & 0o777 == 0o644 and not plist.exists()
+        assert "start it with: systemctl --user enable --now remembra-crewd.service" in out
+    else:  # no supervisor elsewhere: connect says so and writes neither
+        assert "crewd supervision is not supported" in out and not plist.exists() and not unit.exists()
+
+
 def test_real_process_consent_at_a_pty_writes_everything(crew_env, tmp_path):
     """The real CLI in its own process: dry-run diff, typed 'yes' at a pseudo-terminal, then writes."""
     home = crew_env["home"]
@@ -178,8 +198,7 @@ def test_real_process_consent_at_a_pty_writes_everything(crew_env, tmp_path):
     assert "remembra-relay" not in settings.read_text()
     assert f"{sys.executable} -I {gate} pretool --hook claude-code # remembra-crew" in settings.read_text()
     assert list(settings.parent.glob("settings.json.bak-crew-*"))  # backup kept
-    plist = plistlib.loads((home / "Library" / "LaunchAgents" / "dev.remembra.crewd.plist").read_bytes())
-    assert plist["ProgramArguments"] == ["/opt/remembra/bin/remembra-crewd"] and plist["KeepAlive"] is True
+    _assert_crewd_supervisor_written(home, out)
     assert githooks.status(repo) == dict.fromkeys(githooks.HOOKS, "ok")
     assert "## Crew mode (Remembra)" in (repo / "AGENTS.md").read_text()
     adapters = verify.read_adapters(home)["adapters"]
@@ -194,10 +213,11 @@ def test_real_process_consent_at_a_pty_writes_everything(crew_env, tmp_path):
     git(repo, "add", "held/x.ts")
     assert git(repo, "commit", "-m", "held", check=False).returncode != 0
 
-    # Idempotent: a second run has nothing to write.
+    # Idempotent: a second run (on the platform the real process ran on) has nothing to write.
     code, out = _run(
         crew_env,
         _base_args(crew_env, "--git-hooks", "--repo", str(repo), "--agents-md", str(repo / "AGENTS.md"), "--no-service-load"),
+        platform=sys.platform,
     )
     assert code == 0 and "Already up to date" in out
 
