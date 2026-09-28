@@ -22,7 +22,7 @@ from pathlib import Path
 from fastapi.routing import iter_route_contexts
 
 from remembra.api.router import api_router
-from remembra.api.v1 import admin, keys, memories, teams
+from remembra.api.v1 import admin, keys, meetings, memories, teams
 from remembra.auth.middleware import AuthenticatedUser, has_permission
 from remembra.auth.rbac import Permission, Role
 from remembra.cloud.metering import UsageMeter
@@ -212,6 +212,35 @@ async def test_any_key_can_revoke_itself_and_only_itself(tmp_path):
         assert r.status_code == 200, r.text
         assert not (await h.keys.get_key_info(narrowed_id)).active
         assert len(await h.keys.list_keys(uid)) == 3  # revoked, not deleted
+
+
+async def test_viewer_may_build_meeting_briefs_and_summaries_that_store_nothing(tmp_path):
+    """Owner decision 4 (2026-09-27): POST /meetings/brief and /meetings/summarize stay open to viewer keys.
+
+    Both build their answer from the request body alone and store nothing, so
+    they are reads (``READS`` above, which the every-write-route walk skips).
+    This pins that a viewer key gets its answer and that nothing is written.
+    """
+    async with secure_app(tmp_path, [meetings.router]) as h:
+        uid = await h.create_user("meetings@example.com")
+        viewer, _ = await h.api_key(uid, "viewer")
+        v = {"X-API-Key": viewer}
+        event = {
+            "id": "evt-1",
+            "summary": "Weekly sync",
+            "start": "2026-09-28T10:00:00Z",
+            "end": "2026-09-28T10:30:00Z",
+            "attendees": [{"email": "ana@example.com", "name": "Ana", "company": "Acme"}],
+        }
+        r = await h.client.post("/api/v1/meetings/brief", json={"event": event}, headers=v)
+        assert r.status_code == 200, r.text
+        assert "Weekly sync" in r.json()["text"]
+        body = {"meeting": {"id": "m-1"}, "segments": [{"speaker": "ana", "text": "We decided to ship on Friday."}]}
+        r = await h.client.post("/api/v1/meetings/summarize", json=body, headers=v)
+        assert r.status_code == 200, r.text
+        for table in ("memories", "audit_log"):
+            cursor = await h.db.conn.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608 - fixed table names
+            assert (await cursor.fetchone())[0] == 0, table
 
 
 async def test_viewer_cannot_create_a_team_but_editor_can(tmp_path):
