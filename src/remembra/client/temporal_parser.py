@@ -580,7 +580,8 @@ class TemporalParser:
         the phrase refers to. Whole hours and days mean the same on every
         server that reads hours (0.13 and later). Decimals ('1.5d') and
         minutes are not sent: servers 0.16.1 and earlier ignore a decimal TTL
-        (the memory never expires) and read 'm' as months.
+        (the memory never expires) and read 'm' as months, later servers refuse
+        a bare 'm', and 0.16.1 does not know 'min'.
         """
         hours = max(1, math.ceil(seconds / 3600))
         if hours % 24 == 0:

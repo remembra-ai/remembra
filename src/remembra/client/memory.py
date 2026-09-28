@@ -301,7 +301,7 @@ class Memory:
             content: The text content to memorize
             metadata: Optional key-value metadata to attach
             ttl: Optional time-to-live: a number and a unit, e.g. "30d", "36h", "90min"
-                (units in :mod:`remembra.client.ttl`; ``m`` is minutes, ``mo`` months)
+                (units in :mod:`remembra.client.ttl`; ``min`` is minutes, ``mo`` months, a bare ``m`` is refused)
             auto_expire: Override auto_expire_temporal for this call (v0.12+)
             skip_extraction: Store as one atomic memory (no fact split/merge)
             memory_type: Optional type. Agent hygiene types: "checkpoint"

@@ -14,7 +14,7 @@ def parse_ttl(ttl_string: str) -> timedelta:
     (:mod:`remembra.client.ttl`): a number, decimals allowed, and a unit.
 
     - "30s" → 30 seconds
-    - "5m" or "5min" → 5 minutes
+    - "5min" → 5 minutes (a bare "5m" is refused: write min or mo)
     - "24h" → 24 hours
     - "1.5d" → 36 hours
     - "2w" → 2 weeks

@@ -270,8 +270,8 @@ def parse_ttl_string(ttl: str) -> float | None:
     Parse a TTL string into seconds, exactly as the server reads it.
 
     The format is in :mod:`remembra.client.ttl`: a number (decimals allowed)
-    and a unit, e.g. "30d", "1.5d", "36h", "90min". ``m`` is minutes and
-    ``mo`` months (30 days); ``y`` is 365 days.
+    and a unit, e.g. "30d", "1.5d", "36h", "90min". ``min`` is minutes and
+    ``mo`` months (30 days); ``y`` is 365 days. A bare ``m`` is refused.
 
     Args:
         ttl: TTL string like "30d", "24h", "1y"
@@ -282,8 +282,10 @@ def parse_ttl_string(ttl: str) -> float | None:
     Example:
         >>> parse_ttl_string("30d")
         2592000.0
-        >>> parse_ttl_string("40m")
+        >>> parse_ttl_string("40min")
         2400.0
+        >>> parse_ttl_string("40m") is None
+        True
     """
     try:
         return parse_ttl_seconds(ttl)

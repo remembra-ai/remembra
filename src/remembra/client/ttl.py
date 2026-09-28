@@ -9,7 +9,7 @@ and the unit are allowed (``"2 weeks"``).
 Unit                   Means
 =====================  ==================
 s, sec, second(s)      seconds
-m, min, minute(s)      minutes
+min, minute(s)         minutes
 h, hr, hour(s)         hours
 d, day(s)              days
 w, week(s)             weeks (7 days)
@@ -20,9 +20,12 @@ y, yr, year(s)         years (365 days)
 A TTL runs from 1 second to 100 years. Anything else raises ``ValueError``
 with a message that says what to write instead.
 
-``m`` means minutes. Servers 0.16.1 and earlier read ``m`` as months, read
-only whole numbers, and do not know ``min`` or ``mo``: for a TTL they must
-read, use whole ``h``, ``d``, ``w`` or ``y`` values.
+A bare ``m`` is refused, with "use 'min' for minutes or 'mo' for months".
+Servers 0.16.1 and earlier read ``m`` as months, and this module's first
+version read it as minutes; refusing it means the same string never quietly
+changes meaning. Those servers also read only whole numbers and do not know
+``min`` or ``mo``: for a TTL they must read, use whole ``h``, ``d``, ``w`` or
+``y`` values.
 
 Stdlib only: the SDK imports this without the server's dependencies.
 """
@@ -41,7 +44,6 @@ _UNIT_SECONDS: dict[str, int] = {
     "sec": 1,
     "second": 1,
     "seconds": 1,
-    "m": 60,
     "min": 60,
     "minute": 60,
     "minutes": 60,
@@ -64,7 +66,8 @@ _UNIT_SECONDS: dict[str, int] = {
     "years": 31536000,
 }
 
-_HOW = "Use a number and a unit, e.g. '30d', '1.5d', '36h' or '90min'. Units: s, min (or m), h, d, w, mo (months), y."
+_HOW = "Use a number and a unit, e.g. '30d', '1.5d', '36h' or '90min'. Units: s, min, h, d, w, mo (months), y."
+_BARE_M = "'m' could mean minutes or months: use 'min' for minutes or 'mo' for months."
 
 
 def parse_ttl_seconds(ttl: str) -> float:
@@ -72,7 +75,7 @@ def parse_ttl_seconds(ttl: str) -> float:
 
     >>> parse_ttl_seconds("1.5d")
     129600.0
-    >>> parse_ttl_seconds("40m")
+    >>> parse_ttl_seconds("40min")
     2400.0
     """
     text = str(ttl).strip()
@@ -82,6 +85,8 @@ def parse_ttl_seconds(ttl: str) -> float:
     if not match:
         raise ValueError(f"Invalid TTL {text!r}. {_HOW}")
     number, unit = match.groups()
+    if unit == "m":
+        raise ValueError(f"Invalid TTL {text!r}: {_BARE_M}")
     multiplier = _UNIT_SECONDS["mo"] if unit == "M" else _UNIT_SECONDS.get(unit.lower())
     if multiplier is None:
         raise ValueError(f"Invalid TTL {text!r}: unknown unit {unit!r}. {_HOW}")

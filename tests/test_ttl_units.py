@@ -11,6 +11,11 @@ Regressions (truth audit P-141, P-202):
   minutes.
 - A TTL the server could not read was accepted (201) and silently ignored.
 
+Owner decision 9 (2026-09-27): a bare 'm' is refused (422) with a message
+that says to write 'min' for minutes or 'mo' for months. Old servers read '3m'
+as three months; reading it as three minutes would silently change what the
+same string means, so neither reading is applied.
+
 Server paths run over the real routes, ``MemoryService`` and SQLite
 (``agent_api_harness``; only the vector store and embedder are fakes).
 """
@@ -50,8 +55,7 @@ VALID = {
     "1.5mo": 45 * DAY,
     "3.5d": 84 * HOUR,
     "0.5h": 30 * MINUTE,
-    # m is minutes, mo is months
-    "40m": 40 * MINUTE,
+    # min is minutes, mo is months (a bare m is refused: BARE_M below)
     "40min": 40 * MINUTE,
     "90 minutes": 90 * MINUTE,
     "3mo": 90 * DAY,
@@ -95,9 +99,27 @@ INVALID = [
 ]
 
 
+# A bare 'm' is refused: servers up to 0.16.1 read it as months, the SDK's shadow cache as minutes.
+BARE_M = ["3m", "40m", "1.5m", "3 m", " 90m "]
+BARE_M_ADVICE = "use 'min' for minutes or 'mo' for months"
+
+
 @pytest.mark.parametrize(("ttl", "seconds"), sorted(VALID.items()))
 def test_server_reads_every_unit_and_fractions(ttl: str, seconds: float) -> None:
     assert parse_ttl(ttl) == timedelta(seconds=seconds)
+
+
+@pytest.mark.parametrize("ttl", BARE_M)
+def test_a_bare_m_is_refused_and_says_min_or_mo(ttl: str) -> None:
+    with pytest.raises(ValueError, match="Invalid TTL") as caught:
+        parse_ttl(ttl)
+    message = str(caught.value)
+    assert BARE_M_ADVICE in message
+    assert sanitize_error_message(f"Value error, {message}") == f"Value error, {message}"
+    # The words and the other spellings still work.
+    number = ttl.strip().rstrip("m").strip()
+    assert parse_ttl(f"{number}min") == timedelta(minutes=float(number))
+    assert parse_ttl(f"{number}mo") == timedelta(days=30 * float(number))
 
 
 @pytest.mark.parametrize("ttl", INVALID)
@@ -124,7 +146,7 @@ def test_errors_say_what_to_write_and_survive_the_422_sanitizer() -> None:
         parse_ttl("101y")
 
 
-@pytest.mark.parametrize("ttl", [*VALID, *INVALID])
+@pytest.mark.parametrize("ttl", [*VALID, *INVALID, *BARE_M])
 def test_sdk_shadow_cache_and_temporal_module_read_ttls_like_the_server(ttl: str) -> None:
     """One grammar: the shadow cache never disagrees with the server about expiry."""
     try:
@@ -154,13 +176,18 @@ def test_store_request_refuses_an_unreadable_ttl() -> None:
 def test_status_upsert_refuses_an_unreadable_ttl_before_anything_is_charged() -> None:
     with pytest.raises(ValidationError, match="Invalid TTL"):
         StatusUpsertRequest(key="deploy", value="green", ttl="1 fortnight")
-    assert StatusUpsertRequest(key="deploy", value="green", ttl="40m").ttl == "40m"
+    assert StatusUpsertRequest(key="deploy", value="green", ttl="40min").ttl == "40min"
+    with pytest.raises(ValidationError, match=BARE_M_ADVICE):
+        StatusUpsertRequest(key="deploy", value="green", ttl="40m")
 
 
 def test_server_refuses_to_start_with_an_unreadable_checkpoint_ttl() -> None:
     with pytest.raises(ValidationError, match="Invalid TTL"):
         Settings(openai_api_key="test", checkpoint_default_ttl="a week")
     assert Settings(openai_api_key="test", checkpoint_default_ttl="7d").checkpoint_default_ttl == "7d"
+    # REMEMBRA_CHECKPOINT_DEFAULT_TTL=3m meant 3 months to 0.16.1: the server now refuses to start, and says why.
+    with pytest.raises(ValidationError, match=BARE_M_ADVICE):
+        Settings(openai_api_key="test", checkpoint_default_ttl="3m")
     # Blank keeps its old meaning: checkpoints get no default TTL.
     assert Settings(openai_api_key="test", checkpoint_default_ttl="").checkpoint_default_ttl == ""
 
@@ -184,7 +211,7 @@ def _expires_in(expires_at: Any) -> float:
 
 @pytest.mark.parametrize(
     ("ttl", "seconds"),
-    [("1.5d", 36 * HOUR), ("1.4w", 1.4 * 7 * DAY), ("40m", 40 * MINUTE), ("3mo", 90 * DAY), ("36h", 36 * HOUR)],
+    [("1.5d", 36 * HOUR), ("1.4w", 1.4 * 7 * DAY), ("40min", 40 * MINUTE), ("3mo", 90 * DAY), ("36h", 36 * HOUR)],
 )
 def test_store_sets_the_expiry_the_ttl_says(api, ttl: str, seconds: float) -> None:
     res = api["http"].post("/api/v1/memories", json={"content": f"note with ttl {ttl}", "ttl": ttl})
@@ -196,6 +223,13 @@ def test_store_with_an_unreadable_ttl_is_refused_and_nothing_is_stored(api) -> N
     res = api["http"].post("/api/v1/memories", json={"content": "keep for a while", "ttl": "a while"})
     assert res.status_code == 422, res.text
     assert "Invalid TTL 'a while'" in res.text
+    assert api["http"].get("/api/v1/memories").json() == []
+
+
+def test_store_with_a_bare_m_is_refused_and_nothing_is_stored(api) -> None:
+    res = api["http"].post("/api/v1/memories", json={"content": "keep for a while", "ttl": "3m"})
+    assert res.status_code == 422, res.text
+    assert BARE_M_ADVICE in res.text
     assert api["http"].get("/api/v1/memories").json() == []
 
 

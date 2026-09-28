@@ -30,7 +30,7 @@ A TTL is a number and a unit. Decimals work: `1.5d` is 36 hours. Case does not m
 | Unit | Example | Means |
 |------|---------|-------|
 | `s` | `90s` | seconds |
-| `min` or `m` | `90min` | minutes |
+| `min` | `90min` | minutes |
 | `h` | `24h` | hours |
 | `d` | `30d` | days |
 | `w` | `2w` | weeks |
@@ -39,10 +39,11 @@ A TTL is a number and a unit. Decimals work: `1.5d` is 36 hours. Case does not m
 
 A TTL runs from 1 second to 100 years. The server refuses any other value with 422 and stores nothing.
 
-!!! warning "`m` is minutes"
+!!! warning "A bare `m` is refused"
+    `3m` gets 422 with "use 'min' for minutes or 'mo' for months", and nothing is stored: write `3min` or `3mo`.
     Servers 0.16.1 and earlier read `m` as months, read only whole numbers (`1.5d` was ignored and the memory
-    never expired), and did not know `min` or `mo`. For months, write `mo`. For a TTL that an older server must
-    read, use whole `h`, `d`, `w` or `y` values.
+    never expired), and did not know `min` or `mo`. For a TTL that an older server must read, use whole `h`, `d`,
+    `w` or `y` values.
 
 ### Common TTL values
 

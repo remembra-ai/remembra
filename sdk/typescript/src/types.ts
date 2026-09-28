@@ -48,9 +48,9 @@ export interface StoreOptions {
   /** Optional key-value metadata */
   metadata?: Record<string, unknown>;
   /**
-   * Time-to-live: a number and a unit, e.g. "30d", "36h", "1y". Units: s, min (or m), h, d, w,
-   * mo (30 days), y (365 days). Servers after 0.16.1 refuse (422) a TTL they cannot read; 0.16.1 and
-   * earlier ignore it and read `m` as months.
+   * Time-to-live: a number and a unit, e.g. "30d", "36h", "1y". Units: s, min, h, d, w,
+   * mo (30 days), y (365 days). Servers after 0.16.1 refuse (422) a TTL they cannot read, and a bare `m`
+   * (write `min` or `mo`); 0.16.1 and earlier ignore an unreadable TTL and read `m` as months.
    */
   ttl?: string;
 }

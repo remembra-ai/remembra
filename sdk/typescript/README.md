@@ -107,9 +107,9 @@ const result = await memory.store('John is the CEO of Acme Corp', {
 });
 ```
 
-A TTL is a number and a unit: `s`, `min` (or `m`), `h`, `d`, `w`, `mo` (30 days) or `y` (365 days).
-Servers 0.16.1 and earlier read `m` as months and only whole numbers, so use whole `h`, `d`, `w` or `y` values
-with them.
+A TTL is a number and a unit: `s`, `min`, `h`, `d`, `w`, `mo` (30 days) or `y` (365 days). Servers after
+0.16.1 refuse a bare `m` with 422: write `min` for minutes or `mo` for months. Servers 0.16.1 and earlier read `m`
+as months and only whole numbers, so use whole `h`, `d`, `w` or `y` values with them.
 
 #### `recall(query, options?)`
 

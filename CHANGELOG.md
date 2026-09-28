@@ -18,9 +18,11 @@ whose scopes list permissions its role does not hold loses them, and a key with 
 
 ### Changed
 
-- **`m` in a TTL now means minutes.** Until now the server read `m` as months, and the temporal guide said so.
-  If you send `ttl="3m"` to mean three months, send `3mo`: `3m` now expires after three minutes.
-  `REMEMBRA_CHECKPOINT_DEFAULT_TTL` is read the same way.
+- **A bare `m` in a TTL is refused.** Until now the server read `m` as months, and the temporal guide said so,
+  while the Python SDK's shadow cache read it as minutes. A store, batch store or status write with a TTL such as
+  `3m` now gets 422 with "use 'min' for minutes or 'mo' for months", and nothing is stored: send `3mo` for three
+  months or `3min` for three minutes. The server does not start when `REMEMBRA_CHECKPOINT_DEFAULT_TTL` has a bare
+  `m`.
 - **The background pass deletes nothing unless decay cleanup is on.** Every run, the sleep-time pass deleted up
   to 100 memories of each account that had stored or changed something since the previous run: memories over 90
   days old, never returned by a search and with no expiry, handoffs and structured checkpoints included. Now it
@@ -107,7 +109,7 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   numbers and no `mo`, so those memories were stored with no expiry. "In 10 minutes" sent `40m`, which the
   server read as 40 months. The SDK now sends whole hours, rounded up (`36h`, `1h`), or whole days (`10d`),
   which servers from 0.13 on read the same way. The server now reads decimals and `mo`.
-- **One TTL format everywhere.** A TTL is a number (decimals allowed) and a unit: `s`, `min` or `m` (minutes),
+- **One TTL format everywhere.** A TTL is a number (decimals allowed) and a unit: `s`, `min` (minutes),
   `h`, `d`, `w`, `mo` (30 days) or `y` (365 days), from 1 second to 100 years. The server, the SDK's shadow
   cache and `remembra.temporal.parse_ttl` now read it the same way; the shadow cache read `40m` as 40 minutes
   while the server read 40 months.

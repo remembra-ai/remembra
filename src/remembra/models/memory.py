@@ -245,7 +245,7 @@ class StoreRequest(BaseModel):
         default=None,
         description=(
             "Optional time-to-live: a number and a unit, e.g. '30d', '1.5d', '36h', '90min'. "
-            "Units: s, min (or m), h, d, w, mo (months, 30 days), y (365 days). "
+            "Units: s, min, h, d, w, mo (months, 30 days), y (365 days); a bare m is refused. "
             "A TTL the server cannot read is refused (422). Use expires_at for explicit expiry timestamps."
         ),
         examples=["30d"],
