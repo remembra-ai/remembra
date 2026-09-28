@@ -8,13 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 **Upgrading a server you run.** The background pass no longer deletes old notes unless you set
-`REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=true`. With `REMEMBRA_ENCRYPTION_KEY` set, take a Qdrant snapshot and
+`REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=true`. A TTL with a bare `m` is refused: write `min` for minutes or
+`mo` for months, in requests and in `REMEMBRA_CHECKPOINT_DEFAULT_TTL` (the server does not start when that
+setting has a bare `m`). With `REMEMBRA_ENCRYPTION_KEY` set, take a Qdrant snapshot and
 run `python scripts/maintenance/reencrypt_payloads.py --apply` once: vector-store records written before this
 release keep their facts and metadata lists in plaintext until you do. Keys already saved in status values or
 metadata are hidden when read; to rewrite the stored rows, back up the database and run
 `python scripts/maintenance/redact_stored_secrets.py --apply`. The server runs neither script by itself. A key
-whose scopes list permissions its role does not hold loses them, and a key with custom scopes needs
-`conflict:manage` to resolve conflicts. A sign-in in progress during the upgrade has to be started again.
+whose scopes list permissions its role does not hold loses them, a key with custom scopes needs
+`conflict:manage` to resolve conflicts, and `admin:users` is no longer a permission. To see the keys with
+scopes before you upgrade, run `SELECT api_key_id, role, scopes FROM api_key_roles WHERE scopes != ''` on the
+database. A sign-in in progress during the upgrade has to be started again. `REMEMBRA_JWT_EXPIRATION_HOURS` can
+be removed from your environment; it was never read.
 
 ### Changed
 
@@ -34,13 +39,18 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   `memory_decayed` entry in the account's security log. Handoffs, checkpoints, status values, pinned memories
   and source records are never deleted or rewritten by the pass. `GET /api/v1/admin/sleep-time/status` now
   includes `decay_cleanup_enabled`.
-- **Viewer keys are read-only.** Every API route that changes data refuses a viewer key. A viewer key can no
-  longer create or rename API keys, revoke or delete another key, or permanently delete itself (any key can
-  still revoke itself, whatever its role); create, change, delete, join or leave
-  teams, send team invites or link spaces to teams; send helpful/unhelpful feedback on a memory (feedback
-  changes how recall ranks it); start or stop audio capture; redeem a promo code or ask for the account's
-  verification email. It can still recall, read entities and list the account's keys. Editor keys can still
-  create editor and viewer keys, rename keys, and revoke keys with no more access than themselves.
+- **Viewer keys are read-only.** Every API route that changes data refuses a viewer key, except that any key can
+  revoke itself (below). A viewer key can no longer create or rename API keys, revoke or delete another key, or
+  permanently delete itself; create, change, delete, join or leave teams, send team invites or link spaces to
+  teams; send helpful/unhelpful feedback on a memory (feedback changes how recall ranks it); start or stop audio
+  capture; redeem a promo code or ask for the account's verification email. It can still recall, read entities,
+  list the account's keys, and build a meeting brief or summary from the request body
+  (`POST /api/v1/meetings/brief` and `/meetings/summarize` store nothing). Editor keys can still create editor
+  and viewer keys, rename keys, and revoke keys with no more access than themselves.
+- **Any key can revoke itself.** `DELETE /api/v1/keys/{its own id}` works for every key, whatever its role or
+  scopes, so a read-only agent can cut off its own key. Revoking another key, and deleting any key permanently
+  (`?hard=true`, its own included), still needs `key:revoke` and only reaches keys with no more access than the
+  caller.
 - **Permissions.** Scopes set on a key only narrow its role; they never add a permission the role does not
   hold (a viewer key with the `memory:store` scope could store). New permission `account:manage` (admin and
   editor): redeeming a promo code and sending the verification email of an account created by API signup.
@@ -93,6 +103,16 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   when `from_agent` or the `X-Remembra-Agent-Id` header names a different agent; the server used to replace the
   sender with the key's agent without saying so. Leaving `from_agent` out still sends as the key's agent. The
   local MCP server's `send_to_inbox` returns an error in that case; it used to report success.
+- **Dashboard wording.** The credit notices say that when credits run out, new memories still save without
+  enrichment, on Free up to 300 a day. Inbox notes are described as showing up in the agent's next session brief,
+  "after the last session", not at the top. The account check says "When you finish, we email you what you kept
+  and removed." The Enterprise card says "There is no SAML or enterprise SSO yet." instead of "SSO on request".
+  The Codex row hint says to trust its 3 hooks, and again when one changes. The message for keys that were never
+  used adds that a request may have been blocked or sent to another server.
+- **Setup wording.** `remembra-install` ends with "Next: remembra-relay connect --apply writes the session hooks
+  (without --apply it shows the changes)." (it named the dry run), and its help says it sets up Claude Desktop on
+  macOS only. The doctor, `remembra_setup`, connect's to-do list and the dashboard's `why?` slip say "Codex runs
+  a hook only after the user trusts it." instead of "Codex skips untrusted hooks without a message".
 
 ### Removed
 
@@ -166,7 +186,9 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   `user_id`, `project_id`, `memory_id`, `source_id`, `id`, `sha`, `head_commit`, `checksum`, `content_checksum`
   and `fingerprints`) are checked against known key formats only, so a long random session id is kept and a
   provider key in one is still redacted. Other metadata values that look like random tokens (32 or more
-  characters mixing upper case, lower case and digits) are redacted, as in memory text. `PATCH /memories` now
+  characters mixing upper case, lower case and digits) are redacted, as in memory text. That includes an external
+  id that looks random, such as a Clerk user id under a key like `clerk_user`, so an exact-match metadata filter
+  on such a value stops matching; keep ids like that under one of the fields above. `PATCH /memories` now
   saves the same redacted content and metadata to SQLite that it sends to the vector store. Rows saved before
   are cleaned when they are read (the status list, the brief, `GET /timeline`, the trail, `GET /memories/{id}`,
   export, recall results and memory lists), not rewritten. In the brief, an inbox message stored before inbox
@@ -235,10 +257,35 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   until 3 more deploys have happened. There is no continuous backup yet. The operations doc says a Litestream
   replica, when switched on, drops erased data within about 25 hours, not 48.
 - The privacy page says the security log records API key changes, sign-in method links and unlinks,
-  account-review events, and memory writes, reads and deletions, with the request's IP address; ordinary password
-  and Google or GitHub sign-ins are not recorded there. It says pickup events are deleted when the handoff, its
-  project or the account is deleted. The DPA page says the standard contractual clauses and the UK addendum are
-  not attached to the agreement yet.
+  account-review events, and memory stores, searches, updates and deletions, with the request's IP address;
+  ordinary password and Google or GitHub sign-ins are not recorded there. It says pickup events are deleted when
+  the handoff, its project or the account is deleted.
+- The public pages, the docs, README.md, ARCHITECTURE.md, SECURITY.md and the TypeScript SDK README were checked
+  claim by claim against the code on 2026-09-27 and corrected. Released entries below that were wrong carry a
+  "[corrected 2026-09-27: ...]" note.
+- Security and legal pages: SECURITY.md and /security say which vector-store fields are encrypted and which stay
+  readable, what secret redaction catches and misses (it matches patterns, so a password written as prose can get
+  through), and that there is no SAML or enterprise SSO. SECURITY.md also says that anomaly detection is built but
+  not run and that api.remembra.dev does not enforce TLS 1.2 yet. /privacy lists what the relay sends (including
+  the folder path and the computer's hostname), what Paddle's payment notices show us and what the dashboard keeps
+  in the browser. /terms says export works through the API only, one project and up to 100,000 memories per
+  request. The DPA page says no data processing agreement is ready to sign yet, and that no standard contractual
+  clauses or UK addendum are in place. Roadmap rows say "Planned; no date yet".
+- The configuration reference lists only settings the server reads; about 20 names it never read (a bare
+  `OPENAI_API_KEY`, `QDRANT_HOST`, `REMEMBRA_DATABASE_PATH` and others) are gone. The Docker and quickstart
+  examples set `REMEMBRA_JWT_SECRET`, mount `/data` and say the image does not include Qdrant.
+- The Python and TypeScript SDK guides, the REST API guide and the API reference were rewritten from the clients
+  and the routes: about a dozen methods that do not exist (such as `recall_as_of`, `AsyncMemory` and
+  `decayReport`) are gone, and wrong routes and response shapes are corrected. The webhooks guide names the events
+  that are sent (`memory.stored`, `memory.recalled`, `memory.deleted`) and the retries (3 tries, 2 then 4 seconds
+  apart). The plugins guide says the server does not call plugin hooks yet.
+- The roles guide covers real-time connections (close codes 4001, 4003 and 1011), self-revoke, and the
+  generated permission table. The sign-in providers guide and the Claude and ChatGPT apps page describe the new
+  Google and GitHub rules, 2FA, and which resets disconnect apps. The connect page says there is no hosted remote
+  MCP endpoint yet.
+- The OpenAPI summary of `DELETE /api/v1/memories` is "Forget memories" (it said GDPR-compliant), and the
+  `POST /session/close` and MCP `close_session` descriptions say a close updates the handoff only in the same
+  session and project.
 
 ## [0.16.1] - 2026-09-26
 
