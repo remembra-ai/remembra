@@ -217,7 +217,7 @@ Pricing
 
 ## Every handoff is free. Credits are for AI work on notes.
 
-Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes: enriching new or edited notes and the background de-duplication pass. Run out, and your notes still save without enrichment (on Free, up to 300 a day).
+Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes: enriching new or edited notes. Run out, and your notes still save without enrichment (on Free, up to 300 a day).
 
 Yearly: 2 months free, and the whole year's credits in one bank. Twelve months of credits form a yearly bank you can spend in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.
 
