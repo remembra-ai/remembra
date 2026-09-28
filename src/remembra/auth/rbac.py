@@ -107,7 +107,7 @@ PERMISSION_SUMMARIES: dict[Permission, str] = {
     Permission.MEMORY_STORE: (
         "Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, "
         "relay handoffs and session status; change spaces, teams and project links; recompute the brain "
-        "layer; start audio capture"
+        "layer; start audio capture (self-hosted servers only)"
     ),
     Permission.MEMORY_RECALL: (
         "Recall, list, read and export memories; read spaces, inbox messages, relay briefs and trails, "

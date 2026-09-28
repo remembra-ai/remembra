@@ -83,6 +83,10 @@ whose scopes list permissions its role does not hold loses them, and a key with 
   change and deactivating the account disconnect all apps; a reset on an account whose email was never verified
   keeps its app connections and lists them in the new check; a sign-in still on an app's consent page is refused
   after any reset.
+- **Audio capture is off on Remembra Cloud.** `POST /api/v1/audio/start` and `POST /api/v1/audio/stop` record
+  from the server's own microphone. A server with `REMEMBRA_CLOUD_ENABLED=true`, as Remembra Cloud runs, now
+  answers 404 on both, before it reads any credential. A server you run yourself keeps them; they need
+  `memory:store`.
 - **An agent-scoped key cannot name another sender.** `POST /inbox/send` with an agent-scoped key now answers 403
   when `from_agent` or the `X-Remembra-Agent-Id` header names a different agent; the server used to replace the
   sender with the key's agent without saying so. Leaving `from_agent` out still sends as the key's agent. The

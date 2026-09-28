@@ -221,7 +221,7 @@ Only used when `REMEMBRA_CLOUD_ENABLED=true`. See
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_CLOUD_ENABLED` | `false` | Plan limits, smart-credit metering and billing |
+| `REMEMBRA_CLOUD_ENABLED` | `false` | Plan limits, smart-credit metering and billing. Also turns off audio capture: `POST /api/v1/audio/start` and `/stop` answer 404 |
 | `REMEMBRA_PADDLE_PRICE_SOLO_MONTHLY` | - | Paddle price ID (`pri_...`) for Solo $12/mo |
 | `REMEMBRA_PADDLE_PRICE_SOLO_ANNUAL` | - | Paddle price ID for Solo $120/yr |
 | `REMEMBRA_PADDLE_PRICE_PRO_MONTHLY` | - | Paddle price ID for Pro $29/mo |

@@ -27,7 +27,7 @@ A test fails when it no longer matches the code.
 <!-- permission-table:start -->
 | Permission | admin | editor | viewer | What it allows |
 |---|:---:|:---:|:---:|---|
-| `memory:store` | yes | yes | no | Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, relay handoffs and session status; change spaces, teams and project links; recompute the brain layer; start audio capture |
+| `memory:store` | yes | yes | no | Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, relay handoffs and session status; change spaces, teams and project links; recompute the brain layer; start audio capture (self-hosted servers only) |
 | `memory:recall` | yes | yes | yes | Recall, list, read and export memories; read spaces, inbox messages, relay briefs and trails, conflicts, timelines and brain insights |
 | `memory:delete` | yes | yes | no | Delete memories and clean up expired or decayed ones |
 | `key:create` | yes | yes | no | Create API keys (never above the caller's own role, never admin) and rename them |
