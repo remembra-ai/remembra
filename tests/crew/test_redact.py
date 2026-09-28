@@ -4,15 +4,28 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 import pytest
 
 from remembra.crew.redact import PAYLOAD_TYPES, command_verb, outbound, redact_text
-from tests.crew.vectors.loader import run_redaction_corpus
+from remembra.security.secrets import redact_secrets
+from tests.crew.vectors.loader import load, run_redaction_corpus
 
 
 def test_corpus_passes_for_every_payload_type():
     assert run_redaction_corpus(outbound) == []
+
+
+def test_the_corpus_fake_stripe_key_is_caught_by_the_stripe_rule():
+    """The corpus fake is low-entropy and short of push protection's 24+ characters; the product's
+    stripe_key rule (16+) must still name it on its own, not only behind a STRIPE_SECRET_KEY= label."""
+    fakes = set(re.findall(r"(?:sk|rk)_live_[A-Za-z0-9]+", json.dumps(load("redaction/corpus.json"))))
+    assert fakes == {"sk_live_0000TESTONLY0000FAKE"}
+    for fake in fakes:
+        for text, want in ((fake, "[REDACTED:stripe_key]"), (f"key {fake} end", "key [REDACTED:stripe_key] end")):
+            res = redact_secrets(text, fallback=False)  # the named rules only, no high-entropy fallback
+            assert (res.text, res.counts) == (want, {"stripe_key": 1}), (text, res)
 
 
 def test_input_is_not_mutated_and_output_is_new():

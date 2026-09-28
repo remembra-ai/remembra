@@ -166,12 +166,12 @@
    "payload_type": "checkpoint",
    "payload": {
     "facts": {
-     "dotenv": "OPENAI_API_KEY=sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK\nSTRIPE_SECRET_KEY=sk_live_uKi3KETAN9YV9BCb78iHF4Lz\nNODE_ENV=production\n"
+     "dotenv": "OPENAI_API_KEY=sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK\nSTRIPE_SECRET_KEY=sk_live_0000TESTONLY0000FAKE\nNODE_ENV=production\n"
     }
    },
    "must_not_contain": [
     "sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK",
-    "sk_live_uKi3KETAN9YV9BCb78iHF4Lz"
+    "sk_live_0000TESTONLY0000FAKE"
    ],
    "must_contain": [
     "NODE_ENV"
