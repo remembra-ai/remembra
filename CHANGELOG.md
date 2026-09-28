@@ -96,6 +96,9 @@ whose scopes list permissions its role does not hold loses them, and a key with 
 
 - **`REMEMBRA_JWT_EXPIRATION_HOURS`.** The setting was never read: dashboard sign-ins last a fixed 24 hours.
   It is gone from the settings. A server whose environment still sets it starts as before and ignores it.
+- **The `admin:users` permission.** No route ever checked it. There are 12 permissions now.
+  `POST /api/v1/admin/roles` refuses `admin:users` as an unknown scope. A key whose stored scopes still list it
+  keeps its other scopes; `admin:users` itself gave it nothing.
 
 ### Fixed
 

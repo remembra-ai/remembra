@@ -38,11 +38,8 @@ A test fails when it no longer matches the code.
 | `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
 | `admin:audit` | yes | no | no | Read the account's audit log |
 | `admin:export` | yes | no | no | Export the account's audit log as JSON or CSV |
-| `admin:users` | yes | no | no | Nothing yet: no route checks it |
 | `account:manage` | yes | yes | no | Redeem a promo code; email the verification link of an account created by API signup |
 <!-- permission-table:end -->
-
-`admin:users` is defined but no route checks it yet.
 
 Admin keys also pass the routes that require the admin role:
 `GET`/`POST /api/v1/admin/roles`, `DELETE /api/v1/admin/roles/{api_key_id}`,

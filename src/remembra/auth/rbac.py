@@ -68,7 +68,6 @@ class Permission(StrEnum):
     # Admin-only
     ADMIN_AUDIT = "admin:audit"
     ADMIN_EXPORT = "admin:export"
-    ADMIN_USERS = "admin:users"
 
     # Account changes made with an API key (accounts created by API signup)
     ACCOUNT_MANAGE = "account:manage"
@@ -124,7 +123,6 @@ PERMISSION_SUMMARIES: dict[Permission, str] = {
     Permission.ENTITY_READ: "Read entities, their relationships and the memories that mention them",
     Permission.ADMIN_AUDIT: "Read the account's audit log",
     Permission.ADMIN_EXPORT: "Export the account's audit log as JSON or CSV",
-    Permission.ADMIN_USERS: "Nothing yet: no route checks it",
     Permission.ACCOUNT_MANAGE: "Redeem a promo code; email the verification link of an account created by API signup",
 }
 

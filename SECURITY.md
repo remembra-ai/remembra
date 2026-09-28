@@ -74,7 +74,7 @@ Remembra has several separate security layers. Each is described below, with wha
 │              (slowapi, per-endpoint)                 │
 ├─────────────────────────────────────────────────────┤
 │               Authentication & RBAC                  │
-│       (API keys, JWT, 3 roles, 13 permissions)      │
+│       (API keys, JWT, 3 roles, 12 permissions)      │
 ├─────────────────────────────────────────────────────┤
 │              Input Sanitization                      │
 │    (30 prompt injection patterns, trust scoring)     │
@@ -202,7 +202,6 @@ fails when it no longer matches the code:
 | `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
 | `admin:audit` | yes | no | no | Read the account's audit log |
 | `admin:export` | yes | no | no | Export the account's audit log as JSON or CSV |
-| `admin:users` | yes | no | no | Nothing yet: no route checks it |
 | `account:manage` | yes | yes | no | Redeem a promo code; email the verification link of an account created by API signup |
 <!-- permission-table:end -->
 

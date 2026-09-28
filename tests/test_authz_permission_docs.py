@@ -17,8 +17,15 @@ from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 
 from remembra.api.router import api_router
-from remembra.api.v1 import keys
-from remembra.auth.rbac import PERMISSION_ATTR, PERMISSION_SUMMARIES, ROLE_PERMISSIONS, Permission, permission_table
+from remembra.api.v1 import admin, keys
+from remembra.auth.rbac import (
+    PERMISSION_ATTR,
+    PERMISSION_SUMMARIES,
+    ROLE_PERMISSIONS,
+    Permission,
+    effective_permissions,
+    permission_table,
+)
 from remembra.auth.users import JWT_EXPIRATION_HOURS
 from remembra.security.audit import AuditAction
 from tests.security_harness import MASTER_KEY, secure_app
@@ -27,9 +34,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "remembra"
 DOCS_WITH_TABLE = (ROOT / "docs" / "guides" / "rbac.md", ROOT / "SECURITY.md")
 START, END = "<!-- permission-table:start -->", "<!-- permission-table:end -->"
-
-# Defined but not checked by any route yet; its table row says so.
-UNCHECKED = {Permission.ADMIN_USERS}
 
 
 def _table_in(path: Path) -> str:
@@ -90,11 +94,40 @@ def _in_handler_permissions() -> set[str]:
     return names
 
 
-def test_every_permission_guards_a_route_except_the_documented_unchecked_one():
+def test_every_permission_guards_a_route():
+    """No permission is defined that nothing checks (owner decision 6 removed admin:users, which no route checked)."""
     declared = _route_permissions()
-    assert set(declared) | UNCHECKED == set(Permission), set(Permission) - set(declared) - UNCHECKED
-    assert not UNCHECKED & set(declared), "a route now checks it: update its summary in auth/rbac.py and the docs"
-    assert PERMISSION_SUMMARIES[Permission.ADMIN_USERS] == "Nothing yet: no route checks it"
+    assert set(declared) == set(Permission), set(Permission) - set(declared)
+    for perm, summary in PERMISSION_SUMMARIES.items():
+        assert "no route checks it" not in summary, perm
+
+
+async def test_admin_users_is_gone_and_a_scope_naming_it_grants_nothing(tmp_path):
+    """Owner decision 6 (2026-09-27): admin:users was defined but no route checked it; it is removed.
+
+    A key whose stored scopes still list it keeps the rest of its scopes and
+    gains nothing; POST /admin/roles refuses it as an unknown scope.
+    """
+    assert "admin:users" not in {p.value for p in Permission}
+    assert len(Permission) == 12
+    assert effective_permissions("admin", ["admin:users", "memory:recall"]) == {Permission.MEMORY_RECALL}
+    assert effective_permissions("admin", ["admin:users"]) == frozenset()
+    for path in DOCS_WITH_TABLE:
+        assert "admin:users" not in path.read_text(), path.name
+    # The architecture box in SECURITY.md counts the permissions too.
+    assert f"3 roles, {len(Permission)} permissions" in (ROOT / "SECURITY.md").read_text()
+
+    async with secure_app(tmp_path, [admin.router, keys.router]) as h:
+        uid = await h.create_user("roles@example.com")
+        admin_key, _ = await h.api_key(uid, "admin")
+        _, target_id = await h.api_key(uid, "editor")
+        r = await h.client.post(
+            "/api/v1/admin/roles",
+            json={"api_key_id": target_id, "role": "editor", "scopes": ["admin:users"]},
+            headers={"X-API-Key": admin_key},
+        )
+        assert r.status_code == 400, r.text
+        assert "admin:users" in r.json()["detail"]
 
 
 def test_every_permission_name_the_code_checks_exists():
