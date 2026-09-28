@@ -277,23 +277,25 @@ async def send_to_inbox(
     ``X-Remembra-Agent-Id`` header) naming another agent is refused (403), as
     on ``POST /session/close``.
     """
-    # An agent-scoped key sends only as its own agent: naming another one is a 403 (checked first,
-    # so a spoofed sender is refused rather than relabelled).
-    bound = enforce_agent_scope_header(request, current_user, (payload.from_agent, "request"))
     human = is_human(current_user)
+    bound = getattr(current_user, "agent_id", None)
+    if not human and bound and is_reserved_sender(bound):
+        # This key can never send: its bound id is the sender of everything it sends.
+        raise _reserved_422(
+            f"this key is bound to agent id '{bound}', which is reserved for the server (an agent's name may not"
+            " contain 'mani', 'human', 'system' or 'remembra' as a word), and a key's bound id always wins:"
+            " create a key bound to another agent id, such as 'claude-code' or 'codex', and use that one."
+        )
+    # An agent-scoped key sends only as its own agent: a from_agent or X-Remembra-Agent-Id header naming
+    # another one is a 403 (owner decision 11), never a silent relabel.
+    scoped = enforce_agent_scope_header(request, current_user, (payload.from_agent, "request"))
     if human:
         # A dashboard login is the human principal: server-set sender provenance.
         from_agent = payload.from_agent or "human"
         sender_kind = "human"
     else:
-        from_agent = bound or payload.from_agent or "unknown"
+        from_agent = scoped or payload.from_agent or "unknown"
         sender_kind = "agent"
-        if bound and is_reserved_sender(bound):
-            raise _reserved_422(
-                f"this key is bound to agent id '{bound}', which is reserved for the server (an agent's name may not"
-                " contain 'mani', 'human', 'system' or 'remembra' as a word), and a key's bound id always wins:"
-                " create a key bound to another agent id, such as 'claude-code' or 'codex', and use that one."
-            )
         if is_reserved_sender(from_agent):
             raise _reserved_422(
                 f"sender name '{from_agent}' is reserved for the server: an agent's name may not contain"

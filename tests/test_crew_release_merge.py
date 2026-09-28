@@ -51,17 +51,20 @@ async def _key(h: Harness, user_id: str, *, projects: list[str] | None = None, a
 async def test_one_inbox_row_carries_provenance_scope_redaction_and_score(h: Harness) -> None:
     owner = await h.create_user("merge-owner@example.com")
     codex_key = await _key(h, owner, projects=["alpha"], agent="codex")
-    resp = await h.client.post(
-        "/api/v1/inbox/send",
-        headers={"X-API-Key": codex_key},
-        json={
-            "to_agent": "claude-code",
-            "from_agent": "someone-else",
-            "subject": "deploy key",
-            "body": f"use {SECRET} for the deploy. {INJECTION}",
-            "metadata": {"note": f"token {SECRET}"},
-        },
+    message = {
+        "to_agent": "claude-code",
+        "subject": "deploy key",
+        "body": f"use {SECRET} for the deploy. {INJECTION}",
+        "metadata": {"note": f"token {SECRET}"},
+    }
+    # naming another sender is refused and stores nothing (security release, owner decision 11)
+    spoof = await h.client.post(
+        "/api/v1/inbox/send", headers={"X-API-Key": codex_key}, json={**message, "from_agent": "someone-else"}
     )
+    assert spoof.status_code == 403 and "scoped to agent 'codex'" in spoof.text, spoof.text
+    cursor = await h.db.conn.execute("SELECT COUNT(*) FROM agent_inbox WHERE owner_user_id = ?", (owner,))
+    assert (await cursor.fetchone())[0] == 0
+    resp = await h.client.post("/api/v1/inbox/send", headers={"X-API-Key": codex_key}, json=message)
     assert resp.status_code == 201, resp.text
     sent = resp.json()
     # server-set provenance (crew) on a project the restricted key is limited to (release)
@@ -72,7 +75,7 @@ async def test_one_inbox_row_carries_provenance_scope_redaction_and_score(h: Har
         (sent["inbox_id"],),
     )
     row = await cursor.fetchone()
-    assert row[0] == "codex"  # the key's own agent, whatever the payload claims
+    assert row[0] == "codex"  # the key's own agent
     assert SECRET not in row[1] and SECRET not in row[2]  # redacted before it was stored (R-16)
     assert json.loads(row[2])["project_id"] == "alpha" and row[3] == "alpha"  # metadata tag and column agree
     assert (row[4], row[5], row[7]) == ("agent", 1, "directive")
