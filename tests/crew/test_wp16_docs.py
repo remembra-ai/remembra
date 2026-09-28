@@ -173,3 +173,15 @@ def test_scheduled_snapshot_command_keeps_a_bounded_number_and_covers_crew_db() 
     args = snapshot._parser().parse_args(shlex.split(command)[3:])
     assert (args.command, args.out, args.keep) == ("create", "/data/backups", 7)
     assert "`crew.db`" in section and "Coolify" in section and "0 3 * * *" in section
+
+
+def test_changelog_says_teammates_are_added_through_the_api_only() -> None:
+    """Owner decision 14: POST /crews/{id}/members (a dashboard login) is the only way in 0.17.0; no dashboard screen
+    adds a teammate, and a teammate's own agents start a crew of their own."""
+    section = (ROOT / "CHANGELOG.md").read_text().split("## [0.17.0]", 1)[1].split("\n## [", 1)[0]
+    flat = " ".join(section.split())
+    assert (
+        "The crew owner can add teammates through the API; the dashboard flow and teammates' own agents come in the next"
+        " release." in flat
+    )
+    assert "the crew owner adds people who have joined their team" not in flat

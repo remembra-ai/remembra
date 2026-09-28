@@ -58,8 +58,9 @@ A required check on the git host is not part of this release.
   joined; one that joins over it is observe-only (it sees DO NOT TOUCH but cannot claim) until an earlier one
   ends. An agent stopped on its credits gives its seat to the agent that picks up its baton. A session runs its
   first 2 live sub-agents on its own seat (the sub-agents they start count toward the same 2); every further
-  sub-agent counts toward the limit like a session of its own. On a plan with crew teammates (Team), the crew
-  owner adds people who have joined their team.
+  sub-agent counts toward the limit like a session of its own. Teammates in a crew come with the Team and
+  Enterprise plans. The crew owner can add teammates through the API; the dashboard flow and teammates' own
+  agents come in the next release.
 - **Scheduled snapshots of both databases.** `python -m remembra.storage.snapshot create --keep N` copies the
   main database and `crew.db` together (with checksums, while the server runs) and then deletes all but the
   newest N snapshots; each snapshot is readable by the server's user only. [Operations: Scheduled
