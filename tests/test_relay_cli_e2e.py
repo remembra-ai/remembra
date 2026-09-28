@@ -494,6 +494,7 @@ def test_connect_codex_writes_three_hooks_and_says_they_need_trust(home):
     """Codex skips a hook until the user trusts it in /hooks, silently. connect must say so."""
     relay_cmd = "/opt/bin/remembra-relay"
     trust = "Open Codex and run /hooks to trust the three remembra-relay hooks"
+    (home / ".codex").mkdir()  # installed; connect writes an agent only when it is detected
     dry = relay(home, "http://x", "connect", "--agent", "codex", "--relay-command", relay_cmd)
     assert dry.returncode == 0 and trust in dry.stdout and "(dry run" in dry.stdout
     out = relay(home, "http://x", "connect", "--agent", "codex", "--apply", "--relay-command", relay_cmd)
