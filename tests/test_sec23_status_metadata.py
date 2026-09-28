@@ -229,6 +229,35 @@ async def test_import_metadata_is_redacted(env):
     assert token not in await _raw_rows(db)
 
 
+async def test_random_token_metadata_values_are_redacted_on_save(env):
+    """Owner decision 12 (2026-09-27), accepted as built.
+
+    A metadata value that looks like a random token (32 or more characters
+    mixing upper case, lower case and digits) is redacted when it is saved,
+    under any key that does not name a thing, even when it is no known key
+    format: an external user id like a Clerk id is redacted, so an exact-match
+    metadata filter on it no longer matches. The same value under an
+    identifier key (``session_id`` ...) is kept.
+    """
+    c, db = env["client"], env["db"]
+    external_id = "user_2NNEqL2nrIRdJ194ndJqAHwEfxCq9"  # the shape of a Clerk user id; no provider key format
+    r = await c.post(
+        "/api/v1/memories",
+        json={
+            "content": "Signed up through the partner portal.",
+            "project_id": "alpha",
+            "metadata": {"clerk_user": external_id, "session_id": external_id, "plan": "pro"},
+        },
+    )
+    assert r.status_code == 201, r.text
+    cursor = await db.conn.execute("SELECT metadata FROM memories WHERE id = ?", (r.json()["id"],))
+    saved = json.loads((await cursor.fetchone())[0])
+    assert saved["clerk_user"] == "[REDACTED:high_entropy_token]"
+    assert saved["session_id"] == external_id
+    assert saved["plan"] == "pro"
+    assert all(external_id != m.metadata.get("clerk_user") for m in env["qdrant"].upserted)
+
+
 # ---------------------------------------------------------------------------
 # Rows stored before this fix: scrubbed when they are read (render time)
 # ---------------------------------------------------------------------------
