@@ -19,7 +19,7 @@ REPORT = {
 async def request_ready(monkeypatch, *, debug=False, token=None, authorization=None):
     import remembra.main as main
 
-    settings = Settings(auth_enabled=False, debug=debug, metrics_token=token)
+    settings = Settings(auth_enabled=False, debug=debug, metrics_token=token, cors_origins=["https://app.remembra.dev"])
     monkeypatch.setattr(main, "get_settings", lambda: settings)
     app = main.create_app()
 
@@ -29,7 +29,9 @@ async def request_ready(monkeypatch, *, debug=False, token=None, authorization=N
 
     app.state.readiness = Checker()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        headers = {"Authorization": authorization} if authorization else {}
+        headers = {"Origin": "https://app.remembra.dev"}
+        if authorization:
+            headers["Authorization"] = authorization
         return await client.get("/health/ready", headers=headers)
 
 
@@ -39,7 +41,8 @@ async def test_production_readiness_hides_details_without_operator_token(monkeyp
     assert response.status_code == 200  # preserve the existing readiness probe contract
     assert response.json() == {"status": "degraded"}
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["vary"] == "Authorization"
+    vary = {value.strip().lower() for value in response.headers["vary"].split(",")}
+    assert {"authorization", "origin"} <= vary
 
 
 async def test_unconfigured_token_does_not_authorize_an_empty_bearer(monkeypatch):
