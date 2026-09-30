@@ -53,6 +53,10 @@ class BridgePortInUseError(Exception):
     """Raised when the bridge port is already in use."""
 
 
+class BridgeTargetError(ValueError):
+    """A request attempted to leave the configured upstream origin."""
+
+
 class BridgeStartupError(Exception):
     """Raised when the bridge fails to start or become healthy."""
 
@@ -358,6 +362,9 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 api_key=server.config.api_key,
                 agent_name=server.config.agent_name,
             )
+        except BridgeTargetError:
+            self._write_json_error(400, "Request must use the configured upstream origin")
+            return
         except httpx.HTTPError as exc:
             self._write_json_error(502, str(exc))
             return
@@ -448,12 +455,17 @@ def forward_upstream_request(
         api_key=api_key,
         agent_name=agent_name,
     )
-    return client.request(
+    request = client.build_request(
         method=method,
         url=path,
         content=body,
         headers=forwarded_headers,
     )
+    upstream = client.base_url
+    if (request.url.scheme, request.url.host, request.url.port) != (upstream.scheme, upstream.host, upstream.port):
+        raise BridgeTargetError("Request must use the configured upstream origin")
+    # Return redirects to the caller; an upstream redirect must not forward the injected key to another host.
+    return client.send(request, follow_redirects=False)
 
 
 @dataclass(slots=True)

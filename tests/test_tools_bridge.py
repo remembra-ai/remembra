@@ -411,3 +411,47 @@ def test_format_doctor_report_orphan_suggests_force(tmp_path: Path) -> None:
     assert "ORPHAN" in text
     assert "1329" in text
     assert "--stop --force" in text
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["https://outside.invalid/collect", "http://127.0.0.1:6333/collections", "https://api.remembra.dev:8443/health"],
+)
+def test_forwarding_cannot_send_credentials_outside_the_configured_origin(target: str) -> None:
+    sent: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(base_url="https://api.remembra.dev", transport=httpx.MockTransport(transport)) as client,
+        pytest.raises(ValueError, match="configured upstream"),
+    ):
+        forward_upstream_request(
+            client=client,
+            method="GET",
+            path=target,
+            headers=Message(),
+            body=None,
+            api_key="test-bridge-key",
+        )
+    assert sent == []
+
+
+def test_bridge_does_not_follow_redirects_with_an_injected_key() -> None:
+    sent: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(302, headers={"Location": "https://outside.invalid/collect"})
+
+    with httpx.Client(
+        base_url="https://api.remembra.dev", transport=httpx.MockTransport(transport), follow_redirects=True
+    ) as client:
+        response = forward_upstream_request(
+            client=client, method="GET", path="/health", headers=Message(), body=None, api_key="test-bridge-key"
+        )
+    assert response.status_code == 302
+    assert len(sent) == 1
+    assert sent[0].url.host == "api.remembra.dev"
