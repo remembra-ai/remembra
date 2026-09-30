@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,6 +16,23 @@ from remembra.retrieval.reranker import CrossEncoderReranker, sigmoid
 from tests._ret_harness import USER, make_stack, unit, with_cosine
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_loader_never_enables_custom_model_code(monkeypatch) -> None:
+    import remembra.retrieval.reranker as module
+
+    calls = []
+    model = object()
+
+    def construct(name, **kwargs):
+        calls.append((name, kwargs))
+        return model
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", SimpleNamespace(CrossEncoder=construct))
+    monkeypatch.setattr(module, "_cross_encoder", None)
+    monkeypatch.setattr(module, "_cross_encoder_loaded", False)
+    assert module._load_cross_encoder("configured-model") is model
+    assert calls == [("configured-model", {"trust_remote_code": False})]
 
 
 class FakeCrossEncoder:
