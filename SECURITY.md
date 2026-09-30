@@ -163,8 +163,9 @@ follow-up; until then volume-level encryption is the control for SQLite data.
 ### Encryption in Transit
 
 - TLS is handled by the reverse proxy in front of the API, not by the server
-  itself. On Remembra Cloud that is Cloudflare, and api.remembra.dev still
-  accepts TLS 1.0 and 1.1 today: a TLS 1.2 minimum is not enforced yet.
+  itself. On Remembra Cloud that is Cloudflare. The remembra.dev zone requires
+  TLS 1.2 or newer; external checks on September 30, 2026 verified that the API,
+  dashboard, main site, www redirect, and docs reject TLS 1.0 and 1.1.
 - On Remembra Cloud, HTTP redirects to HTTPS. The API sends HSTS (1 year,
   `includeSubDomains`) whenever debug mode is off.
 - Webhook deliveries carry an HMAC-SHA256 signature (`X-Remembra-Signature`)
