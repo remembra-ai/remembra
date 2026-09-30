@@ -848,16 +848,30 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready", tags=["ops"], include_in_schema=False)
     async def health_ready(request: Request) -> JSONResponse:
-        """Readiness: can this instance store and recall right now? Always 200."""
+        """Readiness stays public; detailed diagnostics require the operator token or debug mode."""
+        import hmac
+
+        cfg = get_settings()
         checker = getattr(request.app.state, "readiness", None)
         if checker is None:
             body: dict[str, Any] = {"status": "degraded", "degraded_components": ["app"], "components": {}}
         else:
             body = await checker.check()
-        body["version"] = __version__
-        if get_settings().build_sha:
-            body["build_sha"] = get_settings().build_sha
-        return JSONResponse(content=body, status_code=200)
+        supplied = request.headers.get("authorization", "")
+        diagnostics_allowed = cfg.debug or (
+            bool(cfg.metrics_token) and hmac.compare_digest(supplied.encode(), f"Bearer {cfg.metrics_token}".encode())
+        )
+        if diagnostics_allowed:
+            body["version"] = __version__
+            if cfg.build_sha:
+                body["build_sha"] = cfg.build_sha
+        else:
+            body = {"status": body["status"]}
+        return JSONResponse(
+            content=body,
+            status_code=200,
+            headers={"Cache-Control": "no-store", "Vary": "Authorization"},
+        )
 
     @app.get("/metrics", tags=["ops"], include_in_schema=False)
     async def metrics(request: Request) -> Response:
