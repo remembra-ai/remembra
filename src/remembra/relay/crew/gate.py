@@ -605,6 +605,19 @@ def _load_snapshot(layout: Layout, crew_id: str) -> dict[str, Any] | None:
     return load_snapshot(layout.snapshot_file(crew_id))
 
 
+def _session_snapshot(layout: Layout, session: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The local snapshot as the gate evaluates it for ``session``: with the session's own checkout.
+
+    crewd publishes a joining session's checkout into the snapshot before the join returns; this
+    covers a snapshot written without it (an older crewd, a crewd stopped in between), where every
+    path of the session's own checkout would otherwise be "outside every checkout" (rule 0: allow).
+    """
+    from remembra.relay.crew.snapshot import with_own_checkout
+
+    snap = _load_snapshot(layout, str(session.get("crew_id") or ""))
+    return dict(with_own_checkout(snap, session)) if snap is not None else None
+
+
 def _server_dt(snapshot: Mapping[str, Any] | None, local_now: float) -> Any:
     from datetime import UTC, datetime
 
@@ -715,6 +728,62 @@ def _spool_unconfirmed(ctx: HookContext, key: str, session: Mapping[str, Any], v
         rpc_send(ctx.layout, "flush")  # the confirmation normally lands within 2 s (D11)
 
 
+SERVER_GUARD_FALLBACK: Final = {
+    "deny": "BLOCKED by Remembra Crew: the crew server refused this write. Work outside this path, or ask with crew_say.",
+    "ask": "Remembra Crew: the crew server asks for confirmation before this write.",
+}
+
+
+def _server_guard(
+    ctx: HookContext,
+    session: Mapping[str, Any],
+    key: str,
+    tool: str,
+    tool_input: Mapping[str, Any],
+    cwd: str,
+    budget_end: float,
+) -> tuple[str, dict[str, Any]] | None:
+    """The server's guard decision for a file edit while there is no local snapshot; ``None`` without an answer.
+
+    crewd forwards it with the session's token (``POST /crews/{id}/guard``); the server decides with the
+    same decision core over its live state (auto-claiming a free zone, as the gate's own auto-claim
+    would). The question must fit in the claim budget (§8.2), so PreToolUse keeps its deadline.
+    """
+    from remembra.crew import schemas as S
+
+    if tool not in EDIT_TOOLS:
+        return None
+    rel = _rel(str(tool_input.get(EDIT_TOOLS[tool]) or ""), cwd, session.get("toplevel"))
+    if rel is None or rel == "." or not S.is_path_rel(rel):
+        return None
+    remaining = budget_end - time.monotonic()
+    if remaining <= 0.1:
+        return None
+    args = {"key": key, "op": "write", "paths": [rel], "timeout": round(remaining - 0.05, 3)}
+    res = rpc(ctx.layout, "guard", args, timeout=remaining)
+    if not res or not res.get("ok"):
+        return None
+    decision = str(res.get("decision") or "")
+    if decision not in ("allow", "warn", "deny", "ask"):
+        return None
+    try:
+        rule = int(res.get("rule") or 0)
+    except (TypeError, ValueError):
+        rule = 0
+    info: dict[str, Any] = {"rule": rule, "decision": decision, "variant": "server_guard", "path_rel": rel}
+    out = ""
+    if decision in ("deny", "ask"):
+        reason = next((r for r in res.get("reasons") or () if isinstance(r, str) and r.strip()), "")
+        render = S.hook_pretool_deny if decision == "deny" else S.hook_pretool_ask
+        try:
+            out = render(reason) if reason else render(SERVER_GUARD_FALLBACK[decision])
+        except ValueError:  # a reason outside the channel's text rules is never shown to the agent
+            out = render(SERVER_GUARD_FALLBACK[decision])
+    phase = "blocked" if decision == "deny" else "start"
+    _activity(ctx, session, phase, {"tool": tool, "paths": [rel], "verb": None})
+    return out, info
+
+
 def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     """Decide one PreToolUse call. Returns ``(stdout, verdict dict or None)``."""
     from remembra.crew import gatecore as G
@@ -739,16 +808,25 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
     elif tool not in EDIT_TOOLS:
         return "", None
     crew_id = str(session["crew_id"])
-    snap = _load_snapshot(ctx.layout, crew_id)
+    snap = _session_snapshot(ctx.layout, session)
     status = crewd_status(ctx.layout)
     if not status.get("running"):
         respawn_crewd(ctx.layout)
+    budget_end = ctx.started + CLAIM_AND_REFRESH_CAP_S
     if snap is None:
+        # A joined session with no snapshot yet (its join's snapshot read failed and this host had none):
+        # the server decides instead, through crewd, inside the claim budget. Only when it cannot answer
+        # in time is the write allowed unchecked (never brick the agent, §10.3).
+        answered = _server_guard(ctx, session, key, tool, tool_input, cwd, budget_end)
         rpc_send(ctx.layout, "refresh", {"crew_id": crew_id})
-        submit_events(ctx.layout, session, key, [{"type": "gate.deadline", "payload": {"stage": "no_snapshot", "elapsed_ms": 0}}])
+        if answered is not None:
+            return answered
+        elapsed_ms = int(ctx.elapsed() * 1000)
+        submit_events(
+            ctx.layout, session, key, [{"type": "gate.deadline", "payload": {"stage": "no_snapshot", "elapsed_ms": elapsed_ms}}]
+        )
         _err("no crew snapshot yet: this write is allowed; crew rules apply once crewd has synced")
         return "", {"rule": 0, "decision": "allow", "variant": "no_snapshot"}
-    budget_end = ctx.started + CLAIM_AND_REFRESH_CAP_S
     reachable = bool(status.get("server_reachable", True)) if status.get("running") else False
     outage = bool(status.get("server_outage")) and status.get("running")
     human = str(session.get("human_name") or "the owner")
@@ -780,7 +858,7 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
         # a stale snapshot: one sync refresh (≤400 ms), skipped when an auto-claim already answered (§8.2)
         res = rpc(ctx.layout, "refresh", {"crew_id": crew_id, "sync": True}, timeout=SYNC_REFRESH_TIMEOUT_S)
         if res and res.get("ok"):
-            fresh = _load_snapshot(ctx.layout, crew_id)
+            fresh = _session_snapshot(ctx.layout, session)
             if fresh is not None:
                 snap = fresh
                 verdict = run(snap)
@@ -1407,6 +1485,9 @@ def _git_evaluate(
     snap = _load_snapshot(layout, crew_id) if crew_id else None
     if snap is None:
         return GitGateResult(True)
+    from remembra.relay.crew.snapshot import with_own_checkout
+
+    snap = dict(with_own_checkout(snap, session))
     # §8.5: the git gates enforce for every agent, including advisory (unverified or observe-mode) adapters
     # whose pre-write hooks only log would_deny; only the crew-level setting (observe / off) relaxes them.
     mode = G.mode_for({**snap, "sessions": []}, "")

@@ -24,13 +24,14 @@ from remembra.api.v1 import relay as relay_api
 from remembra.crew.bus import CrewBus, db_loader
 from remembra.crew.db import CrewDatabase
 from remembra.crew.events import CrewEventLog
+from remembra.crew.limits import CrewRateLimiter, set_crew_rate_limiter
 from remembra.main import CREW_ROUTER_MODULES
 from remembra.relay.config import RelayConfig
 from remembra.relay.crew.crewd import Crewd, Peer
 from remembra.relay.crew.gate import Layout
 from remembra.services.memory import MemoryService
 from tests.agent_api_harness import FakeEmbeddings, FakeQdrant, OneFactExtractor
-from tests.security_harness import secure_app
+from tests.security_harness import make_settings, secure_app
 
 ZONES_YML = """version: 1
 zones:
@@ -124,14 +125,21 @@ class Server:
 
 
 @asynccontextmanager
-async def crew_server(tmp_path: Path):
+async def crew_server(tmp_path: Path, *, rate_limits: bool = False):
+    """The crew routers in process. ``rate_limits`` turns on the real crew rate limiter (a fresh
+    in-memory one), as production runs it: e.g. the snapshot bucket's 1 read per 10 s."""
     db = CrewDatabase(str(tmp_path / "crew.db"))
     await db.init_schema()
     bus = CrewBus(loader=db_loader(db))
     log = CrewEventLog(db, bus)
     routers = [auth.router, relay_api.router, *(importlib.import_module(n).router for n in CREW_ROUTER_MODULES)]
+    settings = make_settings(rate_limit_enabled=True) if rate_limits else None
+    if rate_limits:
+        set_crew_rate_limiter(CrewRateLimiter("memory://"))
     try:
-        async with secure_app(tmp_path, routers, state={"crew_db": db, "crew_bus": bus, "crew_events": log}) as h:
+        async with secure_app(
+            tmp_path, routers, settings=settings, state={"crew_db": db, "crew_bus": bus, "crew_events": log}
+        ) as h:
             from remembra.config import Settings
 
             service = MemoryService(
@@ -158,6 +166,8 @@ async def crew_server(tmp_path: Path):
                     await d.shutdown()
     finally:
         await db.close()
+        if rate_limits:
+            set_crew_rate_limiter(None)
 
 
 def new_crewd(layout: Layout, server: Server, *, alive: set[int] | None = None, **kw: Any) -> Crewd:
@@ -168,8 +178,8 @@ def new_crewd(layout: Layout, server: Server, *, alive: set[int] | None = None, 
 
     d = Crewd(
         layout,
-        config_loader=server.config_loader(),
-        transport=server.transport(),
+        config_loader=kw.pop("config_loader", None) or server.config_loader(),
+        transport=kw.pop("transport", None) or server.transport(),
         is_alive=is_alive,
         hostname="test-host",
         restore_gate=kw.pop("restore_gate", False),

@@ -83,6 +83,52 @@ def checkout_entry(
     }
 
 
+def session_checkout(session: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The ``checkouts[]`` entry of one session crewd joined (its session record or session file), or ``None``."""
+    toplevel = session.get("toplevel")
+    session_id = session.get("session_id")
+    if not isinstance(toplevel, str) or not toplevel or not isinstance(session_id, str) or not session_id:
+        return None
+    return checkout_entry(
+        toplevel=toplevel,
+        worktree_id=str(session.get("worktree_id") or ""),
+        git_common_dir=str(session.get("git_common_dir") or ""),
+        case_insensitive=bool(session.get("case_insensitive")),
+        session_id=session_id,
+        default_branch=session.get("default_branch") if isinstance(session.get("default_branch"), str) else None,
+    )
+
+
+def with_own_checkout(snapshot: Mapping[str, Any], session: Mapping[str, Any]) -> Mapping[str, Any]:
+    """``snapshot`` as the gate evaluates it for ``session``: its own checkout listed.
+
+    A path in no listed checkout is outside crew control (rule 0: allow), so a snapshot written
+    before this session's checkout reached it (an older crewd, a crewd stopped between writing the
+    session file and the snapshot) must not turn the session's own checkout into "outside". The
+    entry comes from the session file crewd wrote at join (crew policy, never agent-writable).
+    """
+    own = session_checkout(session)
+    listed = snapshot.get("checkouts") or []
+    if own is None or any(isinstance(c, Mapping) and c.get("session_id") == own["session_id"] for c in listed):
+        return snapshot
+    return {**snapshot, "checkouts": [*listed, own]}
+
+
+def with_checkouts(snapshot: Mapping[str, Any], checkouts: Iterable[Mapping[str, Any]], *, hmac_key: bytes) -> dict[str, Any]:
+    """``snapshot`` with this host's current ``checkouts`` and a new seal; everything else unchanged.
+
+    The checkouts are local knowledge, never read from the server: crewd publishes them this way
+    when the server read that normally carries them fails (a session that just joined must be
+    listed before its first tool call). The server part, ``synced_at`` and ``skew_s`` stay those
+    of the last read, so the snapshot's age (and with it the gate's refresh and offline rules)
+    stays true.
+    """
+    snap: dict[str, Any] = {k: v for k, v in snapshot.items() if k != "hmac"}
+    snap["checkouts"] = [dict(c) for c in checkouts][:50]
+    snap["hmac"] = S.snapshot_hmac(hmac_key, snap)
+    return snap
+
+
 def build_local_snapshot(
     server: Mapping[str, Any],
     *,

@@ -82,6 +82,7 @@ from remembra.relay.crew.gate import (
     write_json,
 )
 from remembra.relay.handoff import police_item
+from remembra.relay.hints import HINT_KEYS, RELAY_PROJECT_ENV, hint_fields
 
 CREWD_VERSION: Final = "1.0.0"
 HEARTBEAT_S: Final = 60.0
@@ -95,14 +96,21 @@ CREW_EXISTS_REPO_S: Final = 1.5
 CREW_EXISTS_REQUEST_S: Final = 3.0
 CREW_EXISTS_NEGATIVE_TTL_S: Final = 300.0
 CREW_EXISTS_UNREACHABLE_TTL_S: Final = 60.0
+RESOLVE_GIT_S: Final = 3.0  # git's budget for reading the checkout a join resolves to a project
 ZONES_S: Final = 30.0
 TREE_EVERY_S: Final = 86400.0
 BATON_SWEEP_S: Final = 3600.0
 SETTINGS_EVERY_S: Final = 300.0
+# a snapshot read refused with 429 is read again after Retry-After (the bucket is 1 per 10 s), bounded
+RESYNC_MIN_S: Final = 0.5
+RESYNC_MAX_S: Final = 30.0
+RESYNC_DEFAULT_S: Final = 10.0
 CHECKPOINT_INTERVAL_S: Final = 600.0
 TEST_CHECKPOINT_MIN_S: Final = 120.0
 END_GRACE_S: Final = 1.5  # SessionEnd waits this long so a StopFailure fired at the same time is handled first
 AUTO_CLAIM_TIMEOUT_S: Final = 0.7
+GUARD_TIMEOUT_MAX_S: Final = 5.0  # the gate passes what is left of its claim budget (≤0.9 s)
+GUARD_PATHS_MAX: Final = 200  # the GuardRequest limit
 GIT_DELTA_TIMEOUT_S: Final = 0.8
 MAX_NEWS: Final = 30
 MAX_TOOL_WINDOWS: Final = 64
@@ -535,6 +543,27 @@ def default_config_loader(home: Path) -> ConfigLoader:
     return load
 
 
+def relay_project_of(args: Mapping[str, Any]) -> str | None:
+    """``REMEMBRA_RELAY_PROJECT`` as the calling hook's environment has it (``relay_project``, sent by
+    ``remembra-crew start`` even when unset), so a join follows the same rule as that session's relay hooks;
+    crewd's own environment only for a caller that does not send it (an earlier ``remembra-crew`` build)."""
+    if "relay_project" in args:
+        value = args.get("relay_project")
+        return value if isinstance(value, str) else None
+    return os.environ.get(RELAY_PROJECT_ENV)
+
+
+def refused_fields(resp: Resp, names: Iterable[str]) -> bool:
+    """A 422 that refuses one of ``names`` as an extra field (a server whose request model predates it)."""
+    detail = resp.body.get("detail") if resp.status == 422 and isinstance(resp.body, dict) else None
+    if not isinstance(detail, list):
+        return False
+    wanted = set(names)
+    return any(
+        isinstance(e, dict) and e.get("type") == "extra_forbidden" and list(e.get("loc") or [None])[-1] in wanted for e in detail
+    )
+
+
 class CrewdError(Exception):
     def __init__(self, code: str, message: str = "", **extra: Any) -> None:
         super().__init__(message or code)
@@ -594,6 +623,7 @@ class Crewd:
         self.commits_seen: dict[str, str] = {}
         self.test_verdicts: dict[str, dict[str, dict[str, Any]]] = {}
         self.background: set[asyncio.Task[Any]] = set()
+        self.resyncs: dict[str, asyncio.Task[Any]] = {}  # crew_id -> a snapshot re-read waiting for Retry-After
         self.server: asyncio.AbstractServer | None = None
         self.stopping = asyncio.Event()
         self.started_at = clock()
@@ -840,7 +870,7 @@ class Crewd:
             raise CrewdError("no_api_key", "no Remembra API key configured")
         api = self.api_for_cfg(cfg, agent_id)
         host = await self.ensure_host(cfg, api)
-        project_id = args.get("project_id") or await self.resolve_project(api, cfg, cwd)
+        project_id = args.get("project_id") or await self.resolve_project(api, cfg, cwd, relay_project_of(args))
         zones_sha = None
         plan = ZC.plan_upload(facts.toplevel, facts.default_branch, None)
         if plan.result is not None and plan.result.ok:
@@ -929,6 +959,9 @@ class Crewd:
             self.commits_seen[facts.toplevel] = facts.head  # commits after the join are scanned for trailers
             self.save_commits_seen()
         crew_id = str(data["crew_id"])
+        # the session file above makes the gate treat this session as a crew session: its checkout goes
+        # into the local snapshot at once, before any server round trip (the read below may be refused)
+        self.publish_checkouts(crew_id)
         if plan.upload:
             with contextlib.suppress(Exception):
                 await self.upload_zones(sess, plan)
@@ -953,13 +986,18 @@ class Crewd:
             "githook_state": sess["githook_state"],
         }
 
-    async def resolve_project(self, api: Api, cfg: RelayConfig, cwd: str) -> str:
+    async def resolve_project(self, api: Api, cfg: RelayConfig, cwd: str, relay_project: str | None = None) -> str:
+        """This checkout's project (so its crew), resolved and recorded by the server under the relay's rule.
+
+        The same fields ``remembra-relay`` sends (:func:`remembra.relay.hints.hint_fields`): a git repository
+        gets its own project whatever ``REMEMBRA_PROJECT`` says, the configured project names only a folder,
+        and ``relay_project`` (``REMEMBRA_RELAY_PROJECT``) keeps one project for everything.
+        """
         from remembra.relay import facts as factlib
 
-        info = factlib.repo_info(Path(cwd), factlib.Deadline(3.0))
+        info = await asyncio.to_thread(factlib.repo_info, Path(cwd), factlib.Deadline(RESOLVE_GIT_S))
         locator = info.locator(Path(cwd), self.hostname)
-        if cfg.project and cfg.project != "default":
-            locator["hint_project"] = cfg.project
+        locator.update(hint_fields(cfg, info.git_repo, relay_project))
         resp = await self.request(api, "POST", "/projects/resolve", json_body=locator)
         if not resp.ok or not isinstance(resp.body, dict) or not resp.body.get("project_id"):
             raise CrewdError("project_unresolved", f"project resolution failed: HTTP {resp.status} {resp.error()}")
@@ -976,11 +1014,12 @@ class Crewd:
         cfg = self.config_loader(str(args.get("agent_id") or adapter), ADAPTER_CONFIG_SOURCE.get(adapter))
         if not cfg.api_key:
             return {"ok": True, "exists": False, "error": "no_api_key"}
+        relay_project = relay_project_of(args)
         # SessionStart asks this in every git repo on the machine (global install): answer from a short
         # cache when the server said "no crew" or could not be reached, so an unrelated repo never waits
         # on the network twice (§10.4 SessionStart 10 s hard).
         now = self.clock()
-        cache_key = f"{cfg.url}\0{os.path.realpath(cwd)}"
+        cache_key = f"{cfg.url}\0{cfg.project or ''}\0{relay_project or ''}\0{os.path.realpath(cwd)}"
         unreachable_key = f"{cfg.url}\0<unreachable>"
         for k in (cache_key, unreachable_key):
             hit = self.crew_exists_cache.get(k)
@@ -991,14 +1030,13 @@ class Crewd:
             return {"ok": True, "exists": False}
         locator = info.locator(Path(cwd), self.hostname)
         locator.pop("host", None)
+        api = self.api_for_cfg(cfg, str(args.get("agent_id") or adapter))
+        # asked the way the join resolves (resolve_project), so "a crew exists" names the crew it joins
+        hinted = {**locator, **hint_fields(cfg, info.git_repo, relay_project)}
         try:
-            resp = await self.request(
-                self.api_for_cfg(cfg, str(args.get("agent_id") or adapter)),
-                "POST",
-                "/crews/resolve",
-                json_body=locator,
-                timeout=CREW_EXISTS_REQUEST_S,
-            )
+            resp = await self.request(api, "POST", "/crews/resolve", json_body=hinted, timeout=CREW_EXISTS_REQUEST_S)
+            if refused_fields(resp, HINT_KEYS):  # a server from before /crews/resolve took them: ask as before
+                resp = await self.request(api, "POST", "/crews/resolve", json_body=locator, timeout=CREW_EXISTS_REQUEST_S)
         except Unreachable:
             result = {"ok": False, "exists": False, "error": "unreachable"}
             self.crew_exists_cache[unreachable_key] = (now + CREW_EXISTS_UNREACHABLE_TTL_S, result)
@@ -1040,30 +1078,94 @@ class Crewd:
         return [s for s in self.sessions.values() if s.get("crew_id") == crew_id and not s.get("ended")]
 
     def checkouts_for(self, crew_id: str) -> list[dict[str, Any]]:
-        return [
-            SN.checkout_entry(
-                toplevel=str(s["toplevel"]),
-                worktree_id=str(s["worktree_id"]),
-                git_common_dir=str(s.get("git_common_dir") or ""),
-                case_insensitive=bool(s.get("case_insensitive")),
-                session_id=str(s["session_id"]),
-                default_branch=s.get("default_branch"),
-            )
-            for s in self.crew_sessions(crew_id)
-        ]
+        return [c for c in (SN.session_checkout(s) for s in self.crew_sessions(crew_id)) if c is not None]
 
-    async def crew_settings_for(self, crew_id: str, api: Api, version: int | None) -> dict[str, Any]:
+    async def crew_settings_for(self, crew_id: str, api: Api, version: int | None) -> dict[str, Any] | None:
+        """The crew's settings (cached ``SETTINGS_EVERY_S``); ``None`` when neither the server nor the cache has them."""
         cached = self.crew_settings.get(crew_id)
         if cached and (version is None or cached[1] == version) and self.clock() - cached[0] < SETTINGS_EVERY_S:
             return cached[2]
-        resp = await self.request(api, "GET", f"/crews/{crew_id}", timeout=5.0)
-        if resp.ok and isinstance(resp.body, dict):
+        try:
+            resp = await self.request(api, "GET", f"/crews/{crew_id}", timeout=5.0)
+        except Unreachable:
+            resp = None
+        if resp is not None and resp.ok and isinstance(resp.body, dict):
             settings = dict(resp.body.get("settings") or {})
             self.crew_settings[crew_id] = (self.clock(), int(resp.body.get("settings_version") or 0), settings)
             return settings
-        return cached[2] if cached else {}
+        return cached[2] if cached else None
+
+    def publish_checkouts(self, crew_id: str) -> bool:
+        """Write this host's current checkouts into the local snapshot, without a server read.
+
+        The gate knows a checkout only from the snapshot, and a path in no known checkout is rule 0
+        (allow). A session that joins must therefore be in the snapshot before its first tool call,
+        also when the server read that normally carries it fails: a 429 (the snapshot bucket allows
+        one read per 10 s per key, agent and crew, shared by every session of that agent here), a
+        timeout or a 5xx. The last read's server part, ``synced_at`` and ``skew_s`` are kept, so the
+        gate still sees the snapshot's true age. An advisory session (no pre-write hook) is held by the
+        read-only fence instead, which is local too: a changed set of checkouts applies it here, as a
+        read does. Returns whether a snapshot exists for the crew.
+        """
+        snap = self.snapshots.get(crew_id)
+        if snap is None:
+            on_disk = SN.load_snapshot(self.layout.snapshot_file(crew_id))
+            if on_disk is None or not SN.verify(on_disk, self.hmac_key):
+                return False  # nothing known yet (the gate asks the server's guard meanwhile)
+            snap = on_disk
+        checkouts = self.checkouts_for(crew_id)
+        changed = snap.get("checkouts") != checkouts
+        if changed:
+            snap = SN.with_checkouts(snap, checkouts, hmac_key=self.hmac_key)
+            SN.write_snapshot(self.layout.snapshot_file(crew_id), snap)
+        self.snapshots[crew_id] = snap
+        if changed:
+            try:
+                self.apply_fence(crew_id, snap)
+            except Exception as e:  # the snapshot is written; a fence problem is logged, never raised into a join
+                log.warning("fence after a local snapshot update failed: %s", e)
+        return True
+
+    def resync_after(self, crew_id: str, delay_s: float) -> None:
+        """Read the snapshot again once the server allows it (a 429's ``Retry-After``), once per crew.
+
+        Without this a refused read was retried only by the next heartbeat or by a gate that found
+        the snapshot stale; meanwhile claims made since the last read were missing from it.
+        """
+        if crew_id in self.resyncs or self.stopping.is_set():
+            return
+        delay = min(max(delay_s, RESYNC_MIN_S), RESYNC_MAX_S)
+
+        async def later() -> None:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.stopping.wait(), timeout=delay)
+                return  # shutting down
+            self.resyncs.pop(crew_id, None)  # a read refused again schedules the next one
+            try:
+                await self.sync_snapshot(crew_id)
+            except Exception as e:  # a timer never takes crewd down
+                log.warning("snapshot re-read failed: %s", e)
+
+        task = asyncio.ensure_future(later())
+        self.resyncs[crew_id] = task
+        task.add_done_callback(lambda t: self.resyncs.pop(crew_id, None) if self.resyncs.get(crew_id) is t else None)
+
+    @staticmethod
+    def retry_after_s(resp: Resp) -> float:
+        """Seconds a 429 asks to wait: its ``Retry-After`` header, else ``retry_after_s`` in the body."""
+        for raw in (resp.headers.get("retry-after"), resp.detail().get("retry_after_s")):
+            try:
+                if raw is not None:
+                    return max(0.0, float(raw))
+            except (TypeError, ValueError):
+                continue
+        return RESYNC_DEFAULT_S
 
     async def sync_snapshot(self, crew_id: str) -> bool:
+        """Read the crew snapshot and write the local one; ``False`` when the server read failed.
+
+        Whatever the read gives, this host's checkouts reach the local snapshot (:meth:`publish_checkouts`).
+        """
         members = self.crew_sessions(crew_id)
         if not members:
             return False
@@ -1072,6 +1174,7 @@ class Crewd:
         try:
             resp = await self.request(api, "GET", f"/crews/{crew_id}/snapshot", if_none_match=etag, timeout=5.0)
         except Unreachable:
+            self.publish_checkouts(crew_id)
             return False
         now = self.clock()
         if resp.status == 304 and crew_id in self.snapshots:
@@ -1082,9 +1185,18 @@ class Crewd:
             if resp.headers.get("etag"):
                 self.etags[crew_id] = resp.headers["etag"]
         else:
+            if resp.status == 304:
+                self.etags.pop(crew_id, None)  # nothing to reuse: the next read asks for the full body
+            elif resp.status == 429:
+                self.resync_after(crew_id, self.retry_after_s(resp))
+            self.publish_checkouts(crew_id)
             return False
         version = int((server.get("crew") or {}).get("settings_version") or 0) or None
         settings = await self.crew_settings_for(crew_id, api, version)
+        if settings is None:
+            # no settings from the server or the cache: keep the ones in force (fail_closed_zones included)
+            previous = self.snapshots.get(crew_id) or {}
+            settings = dict(previous.get("settings") or {})
         host = self.hosts.get(str(members[0].get("host_fp") or "")) or {}
         local = SN.build_local_snapshot(
             {
@@ -1800,6 +1912,42 @@ class Crewd:
                 self.arbiter.lost_race(crew_id, zone_id)
         await self.flush_outbox()
         await self.heartbeat()
+
+    async def guard(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
+        """The server's guard decision for a write by one of this host's sessions (``POST /crews/{id}/guard``).
+
+        The gate asks this only while it has no local snapshot for the session (its join's snapshot
+        read failed and this host had none), so a zone held elsewhere is still refused. Only the
+        session's own process tree may ask (peer check), with repo-relative paths; the server decides
+        with the same decision core and auto-claims a free zone, as the gate's auto-claim would.
+        """
+        sess = self.require(peer, args.get("key"))
+        op = str(args.get("op") or "write")
+        if op not in ("write", "delete"):
+            raise CrewdError("invalid_guard", "op must be write or delete")
+        paths = [str(p) for p in args.get("paths") or () if S.is_path_rel(p)][:GUARD_PATHS_MAX]
+        if not paths:
+            raise CrewdError("invalid_guard", "no repo-relative path to decide")
+        try:
+            timeout = min(max(float(args.get("timeout") or AUTO_CLAIM_TIMEOUT_S), 0.05), GUARD_TIMEOUT_MAX_S)
+        except (TypeError, ValueError):
+            timeout = AUTO_CLAIM_TIMEOUT_S
+        crew_id = str(sess["crew_id"])
+        resp = await self.request(
+            self.api_for(sess),
+            "POST",
+            f"/crews/{crew_id}/guard",
+            json_body={"session_id": sess["session_id"], "op": op, "paths": paths},
+            session_token=self.token_of(sess),
+            timeout=timeout,
+        )
+        if not resp.ok or not isinstance(resp.body, dict):
+            return {"ok": False, "error": resp.error(), "status": resp.status}
+        body = resp.body
+        if body.get("auto_claimed"):
+            self.spawn(self.sync_snapshot(crew_id))
+        reasons = [r for r in body.get("reasons") or () if isinstance(r, str)][:3]
+        return {"ok": True, "decision": body.get("decision"), "rule": body.get("rule"), "reasons": reasons}
 
     async def commons(self, peer: Peer | None, args: Mapping[str, Any]) -> dict[str, Any]:
         """Row 12 effects: serialize micro-lease and the ``schema:<db>`` claim for new migrations."""
@@ -2825,6 +2973,8 @@ class Crewd:
                 return await self.claim(peer, args)
             if op == "commons":
                 return await self.commons(peer, args)
+            if op == "guard":
+                return await self.guard(peer, args)
             if op == "flush":
                 self.spawn(self.flush_outbox())
                 return {"ok": True}
@@ -3000,7 +3150,7 @@ class Crewd:
                 await api.close()
         with contextlib.suppress(OSError):
             self.layout.socket.unlink()
-        for task in list(self.background):
+        for task in [*self.background, *self.resyncs.values()]:  # incl. a re-read still waiting for Retry-After
             task.cancel()
 
 
