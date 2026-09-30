@@ -430,6 +430,16 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (when debug is o
 
 ---
 
+## Operational Diagnostics
+
+In production, `/health/ready` returns only the aggregate status to public callers.
+Component, model, queue, and error details require
+`Authorization: Bearer $REMEMBRA_METRICS_TOKEN`, using the same operator token as
+`/metrics`. With no token configured, those details remain unavailable remotely.
+Explicit debug mode retains detailed local diagnostics; it must stay disabled in
+production. Readiness responses use `Cache-Control: no-store` and vary by
+`Authorization`.
+
 ## Docker Security
 
 - **Non-root user:** Runs as `remembra:remembra`
