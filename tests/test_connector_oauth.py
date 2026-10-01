@@ -131,6 +131,7 @@ async def test_full_flow_with_real_mcp_client_refresh_and_revoke(h):
         tools = {t.name: t for t in (await session.list_tools()).tools}
         assert set(tools) == {
             "session_brief",
+            "session_open_work",
             "trail",
             "recall_memories",
             "send_to_inbox",

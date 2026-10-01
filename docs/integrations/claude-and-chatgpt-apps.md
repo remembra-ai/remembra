@@ -15,6 +15,7 @@ From a chat on your phone you will be able to:
 | Ask for | Tool | What it does |
 |---|---|---|
 | "Where did we leave the billing work?" | `session_brief` | Latest handoff, current status values, recent work by time, and an agent's unread inbox |
+| "Show all unfinished work, including older failures" | `session_open_work` | Read-only project-scoped pages; use `next_after` for the next page |
 | "What have my agents done this week?" | `trail` | Handoffs and checkpoints your agents left, newest first |
 | "What did we decide about the invoice format?" | `recall_memories` | Searches your memory (semantic + keyword) |
 | "Tell Claude Code to fix the flaky login test" | `send_to_inbox` | Leaves an instruction in an agent's inbox |
@@ -25,6 +26,13 @@ From a chat on your phone you will be able to:
 The connector cannot edit or delete general memories, control Crew, or approve owner decisions.
 `close_session` can update its own session handoff. Existing note/search connections do **not** gain
 that permission: reconnect and explicitly allow `session:close` before using it.
+
+The new server's `session_open_work` uses the existing `session:brief` read permission.
+It lists persistent TODOs and failures even after a later unrelated handoff. Pass a
+`limit` from 1 to 100 and the previous page's `next_after` as `after`. Reports remain
+unverified agent data. This remote tool cannot propose, confirm or reopen an item;
+owner confirmation requires authenticated account-holder review. These changes need
+the new server release; real Claude/ChatGPT phone acceptance remains a release gate.
 
 Use a stable `session_id` for the conversation, select its project and provide facts: open work in
 `todos_open`, failures in `errors`, the next action in `next_step`, and a string in `notes`. A repeated
