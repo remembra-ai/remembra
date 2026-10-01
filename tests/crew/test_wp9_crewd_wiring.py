@@ -190,6 +190,10 @@ async def test_githook_missing_event_and_presence_frames_and_redaction(tmp_path)
         await d.checkpoint(sess, "test", force=True)
         ck = await srv.rows("SELECT facts FROM crew_checkpoints WHERE session_id = ?", (a["session_id"],))
         assert ck and "sk-ant-api03" not in ck[-1]["facts"]
+        observed = json.loads(ck[-1]["facts"])["tests"][0]["observed_at"]
+        await d.checkpoint(sess, "turn", force=True)
+        later = await srv.rows("SELECT facts FROM crew_checkpoints WHERE session_id = ?", (a["session_id"],))
+        assert json.loads(later[-1]["facts"])["tests"][0]["observed_at"] == observed
         assert str(layout.home) not in json.dumps(events)
 
 

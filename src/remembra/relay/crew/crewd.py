@@ -55,7 +55,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -1681,7 +1681,12 @@ class Crewd:
             dirty = []
         shortstat = B.try_out(["diff", "--shortstat", "HEAD"], top) or ""
         tests = [
-            {"fingerprint": fp, "passed": v.get("passed", 0), "failed": v.get("failed", 0)}
+            {
+                "fingerprint": fp,
+                "passed": v.get("passed", 0),
+                "failed": v.get("failed", 0),
+                **({"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat()} if v.get("at") is not None else {}),
+            }
             for fp, v in (sess.get("tests") or {}).items()
         ]
         facts: dict[str, Any] = {
@@ -2745,7 +2750,12 @@ class Crewd:
         if started:
             commits = (B.try_out(["rev-list", "--max-count=200", f"{started}..HEAD"], top) or "").split()
         tests = [
-            {"command": fp, "passed": int(v.get("passed") or 0), "failed": int(v.get("failed") or 0)}
+            {
+                "command": fp,
+                "passed": int(v.get("passed") or 0),
+                "failed": int(v.get("failed") or 0),
+                **({"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat()} if v.get("at") is not None else {}),
+            }
             for fp, v in (sess.get("tests") or {}).items()
         ][:50]
         sections = {k: [str(x)[:500] for x in (args.get("sections") or {}).get(k, [])][:50] for k in S.MCP_REPORT_SECTIONS}

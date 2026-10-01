@@ -62,7 +62,12 @@ class Env:
         await self.tasks.start(CREW, t["id"], Caller.for_session(session))
         return t
 
-    async def checkpoint(self, session, facts, trigger="test"):
+    async def checkpoint(self, session, facts, trigger="test", *, legacy=False):
+        if not legacy:
+            facts = {
+                **facts,
+                "tests": [{"observed_at": now_iso(datetime.now(UTC)), **test} for test in facts.get("tests") or []],
+            }
         return await self.checkpoints.ingest(
             CREW, Caller.for_session(session), {"session_id": session["id"], "trigger": trigger, "facts": facts, "task_id": None}
         )
@@ -82,7 +87,9 @@ class Env:
             ],
         )
 
-    async def report(self, session, task, **body):
+    async def report(self, session, task, *, legacy=False, **body):
+        if not legacy and "tests" in body:
+            body["tests"] = [{"observed_at": now_iso(datetime.now(UTC)), **test} for test in body["tests"]]
         return await self.reports.submit(CREW, task["id"], Caller.for_session(session), body)
 
 
@@ -179,6 +186,73 @@ async def test_a_pass_older_than_the_last_zone_change_is_unknown(env):
     assert res.report["criteria"][0]["status"] == "unknown"
     detail = res.report["criteria_detail"][0]
     assert detail["detail"] == "passed before the last change to zone files"
+    assert res.report["verdict"] == "partial"
+
+
+async def test_a_later_checkpoint_cannot_refresh_a_cached_pass(env):
+    s = await seed_session(env.db)
+    z = await seed_zone(env.db)
+    t = await env.started(s, zone_ids=[z])
+    observed = datetime.now(UTC) - timedelta(seconds=10)
+    changed = datetime.now(UTC) - timedelta(seconds=5)
+    facts = {"tests": [{"command": "npm test -- pos", "passed": 12, "failed": 0, "observed_at": now_iso(observed)}]}
+    async with env.db.transaction():
+        await env.db.conn.execute(
+            "INSERT INTO crew_footprints (crew_id, session_id, path, zone_ids, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (CREW, s["id"], "src/app/pos/cart.ts", json.dumps([z]), now_iso(changed), now_iso(changed)),
+        )
+    # The checkpoint is new; the test result inside it predates the edit.
+    await env.checkpoint(s, facts)
+    await env.push(s)
+    res = await env.report(s, t)
+    assert res.report["criteria"][0]["status"] == "unknown"
+    assert res.report["verdict"] == "partial"
+    assert res.report["criteria_detail"][0]["detail"] == "passed before the last change to zone files"
+
+
+@pytest.mark.parametrize("observed_at", ["not-a-time", "2099-01-01T00:00:00Z"])
+async def test_an_invalid_or_future_run_time_is_not_receipt_time_evidence(env, observed_at):
+    s = await seed_session(env.db)
+    t = await env.started(s)
+    await env.checkpoint(s, {"tests": [{"command": "npm test -- pos", "passed": 12, "failed": 0, "observed_at": observed_at}]})
+    await env.push(s)
+    res = await env.report(s, t)
+    assert res.report["criteria"][0]["status"] == "unknown"
+    assert res.report["verdict"] == "partial"
+
+
+@pytest.mark.parametrize("channel", ["checkpoint", "report"])
+async def test_a_legacy_cached_pass_without_run_time_cannot_satisfy_observed_evidence(env, channel):
+    s = await seed_session(env.db)
+    t = await env.started(s)
+    await env.push(s)
+    tests = [{"command": "npm test -- pos", "passed": 12, "failed": 0}]
+    if channel == "checkpoint":
+        await env.checkpoint(s, {"tests": tests}, legacy=True)
+        res = await env.report(s, t)
+    else:
+        res = await env.report(s, t, tests=tests, legacy=True)
+    assert res.report["criteria"][0]["status"] == "unknown"
+    assert res.report["criteria_detail"][0]["detail"] == "test run time was not supplied"
+    assert res.report["verdict"] == "partial"
+
+
+async def test_a_report_body_cannot_refresh_a_cached_pass(env):
+    s = await seed_session(env.db)
+    z = await seed_zone(env.db)
+    t = await env.started(s, zone_ids=[z])
+    observed = datetime.now(UTC) - timedelta(seconds=10)
+    changed = datetime.now(UTC) - timedelta(seconds=5)
+    async with env.db.transaction():
+        await env.db.conn.execute(
+            "INSERT INTO crew_footprints (crew_id, session_id, path, zone_ids, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (CREW, s["id"], "src/app/pos/cart.ts", json.dumps([z]), now_iso(changed), now_iso(changed)),
+        )
+    await env.push(s)
+    res = await env.report(
+        s, t, tests=[{"command": "npm test -- pos", "passed": 12, "failed": 0, "observed_at": now_iso(observed)}]
+    )
+    assert res.report["criteria"][0]["status"] == "unknown"
     assert res.report["verdict"] == "partial"
 
 

@@ -119,6 +119,7 @@ class Observation:
     at: datetime
     source: str  # relay-cli | agent-declared
     order: int = 0
+    run_time_known: bool = True
 
 
 @dataclass
@@ -130,7 +131,9 @@ class Evidence:
     commits: list[str] = field(default_factory=list)
 
     def add(self, obs: Observation) -> None:
-        self.observations.append(Observation(obs.kind, obs.value, obs.passed, obs.at, obs.source, len(self.observations)))
+        self.observations.append(
+            Observation(obs.kind, obs.value, obs.passed, obs.at, obs.source, len(self.observations), obs.run_time_known)
+        )
 
 
 def _int(value: Any) -> int | None:
@@ -177,7 +180,15 @@ def facts_observations(evidence: Evidence, facts: Mapping[str, Any], at: datetim
     """Add what one checkpoint's facts (or a report body) show."""
     for t in facts.get("tests") or []:
         if isinstance(t, Mapping) and (fp := _fingerprint(t)):
-            evidence.add(Observation("test", fp, _test_passed(t), at, source))
+            observed = at
+            if "observed_at" in t:
+                timestamp = _ts(t["observed_at"])
+                # Never turn an invalid/future client timestamp into a fresh
+                # receipt-time pass.
+                if timestamp is None or timestamp > at:
+                    continue
+                observed = timestamp
+            evidence.add(Observation("test", fp, _test_passed(t), observed, source, run_time_known="observed_at" in t))
     for c in facts.get("commands") or []:
         if isinstance(c, Mapping) and isinstance(c.get("fingerprint"), str):
             code = c.get("exit_code")
@@ -318,7 +329,7 @@ async def collect_evidence(
                 if changed_at is not None and (latest is None or changed_at > latest):
                     latest = changed_at
         evidence.last_zone_change = latest
-    # The body: tests and commits count at submission time, labelled by the submitting channel.
+    # Cached test results retain their run time; commits use submission time.
     facts_observations(evidence, {"tests": body.get("tests") or [], "commits": body.get("commits") or []}, now, body_source)
     for item in body.get("criteria_evidence") or []:
         if isinstance(item, Mapping) and isinstance(item.get("id"), str):
@@ -386,6 +397,8 @@ def evaluate_criterion(
         assert last is not None
         if not last.passed:
             return {**out, "status": "unmet", "source": last.source, "detail": "latest matching run failed"}
+        if last.kind == "test" and last.source == "relay-cli" and not last.run_time_known:
+            return {**out, "status": "unknown", "source": last.source, "detail": "test run time was not supplied"}
         if evidence.last_zone_change is not None and last.source == "relay-cli" and last.at < evidence.last_zone_change:
             return {**out, "status": "unknown", "source": last.source, "detail": "passed before the last change to zone files"}
         return {**out, "status": "met", "source": last.source, "detail": "latest matching run passed"}

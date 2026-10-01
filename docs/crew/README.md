@@ -57,6 +57,21 @@ A new event type, a new payload key or a change in rule order is a spec change (
 
 ## Console scripts
 
+### Test run times in reports
+
+Checkpoint test facts and the REST report's test results can carry `observed_at`,
+the UTC time the test result was observed. The daemon preserves this time when
+it repeats cached results in later checkpoints and reports. A receipt time is
+not a new test run. A passing run before the latest zone edit remains `unknown`.
+Invalid or future run times do not count as evidence.
+
+The field is optional on the wire for older clients, but a `relay-cli` result
+without it cannot satisfy an observed test criterion: the report stays partial
+with "test run time was not supplied". Upgrade the client and rerun the tests.
+Agent-declared results retain their self-reported label and the strict report
+review requirement. Observed client evidence is not independent verification
+of the application or its deployment.
+
 `pyproject.toml` declares, once, for the whole build (§14 interface file):
 
 ```toml
