@@ -8,6 +8,7 @@ remain on CrewDatabase's serialized writer connection.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +27,8 @@ class CrewReadPool:
         self._available: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue()
         self._readers: list[aiosqlite.Connection] = []
         self._uri: str | None = None
+        self._path: str | None = None
+        self._file_identity: tuple[int, int] | None = None
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
 
@@ -50,11 +53,21 @@ class CrewReadPool:
 
     @asynccontextmanager
     async def snapshot(self, path: str) -> AsyncIterator[aiosqlite.Connection]:
-        uri = Path(path).resolve().as_uri() + "?mode=ro"
-        if self._uri is None:
-            self._uri = uri
-        elif self._uri != uri:
-            raise RuntimeError("A Crew reader pool cannot switch databases")
+        # Resolve the configured path once, rather than walking each parent
+        # directory on every authorization lookup. Still detect replacement:
+        # reusing an old connection after a file swap could mix auth databases.
+        stat = os.stat(path)
+        identity = (stat.st_dev, stat.st_ino)
+        if self._file_identity is not None and self._file_identity != identity:
+            raise RuntimeError("Crew reader database file changed; restart required")
+        if self._path != path:
+            uri = Path(path).resolve().as_uri() + "?mode=ro"
+            if self._uri is not None and self._uri != uri:
+                raise RuntimeError("A Crew reader pool cannot switch databases")
+            self._uri, self._path = uri, path
+        self._file_identity = identity
+        assert self._uri is not None
+        uri = self._uri
         async with self._slots:
             if self._closed:
                 raise RuntimeError("Crew reader pool is closed")
