@@ -32,14 +32,16 @@ from urllib.parse import urlsplit, urlunsplit
 SCOPE_RECALL = "memory:recall"
 SCOPE_STORE = "memory:store"
 SCOPE_BRIEF = "session:brief"
+SCOPE_CLOSE = "session:close"
 
-SUPPORTED_SCOPES: tuple[str, ...] = (SCOPE_BRIEF, SCOPE_RECALL, SCOPE_STORE)
+SUPPORTED_SCOPES: tuple[str, ...] = (SCOPE_BRIEF, SCOPE_RECALL, SCOPE_STORE, SCOPE_CLOSE)
 
 # Plain-language consent text for each scope (shown on the consent page).
 SCOPE_DESCRIPTIONS: dict[str, str] = {
     SCOPE_BRIEF: "Read the pickup brief and the handoff/checkpoint trail your agents left",
     SCOPE_RECALL: "Search your memories",
     SCOPE_STORE: "Leave notes, and messages or requests in your agents' inboxes (no edits, no deletes)",
+    SCOPE_CLOSE: "Leave or update this connection's structured session handoff, including unfinished work and failures",
 }
 
 # Clients may ask for these; they are accepted and ignored because a refresh

@@ -2,8 +2,7 @@
 
 !!! warning "Coming: not live on Remembra Cloud yet"
     The connector is built and tested against Remembra's own server, but it is switched off
-    at `api.remembra.dev`: `POST https://api.remembra.dev/mcp` answers 405 today, so the steps
-    below do not work against the hosted service yet. It has also not been verified inside the
+    at `api.remembra.dev`, so the steps below do not work against the hosted service yet. It has also not been verified inside the
     live Claude and ChatGPT apps. On a server you host yourself you can switch it on (see
     [For the server owner](#for-the-server-owner-production-setup)).
 
@@ -20,9 +19,19 @@ From a chat on your phone you will be able to:
 | "What did we decide about the invoice format?" | `recall_memories` | Searches your memory (semantic + keyword) |
 | "Tell Claude Code to fix the flaky login test" | `send_to_inbox` | Leaves an instruction in an agent's inbox |
 | "Note: call the printer vendor Monday" | `store_memory` | Saves a note (always a new memory) |
+| "Leave a handoff with the failed test and next work" | `close_session` | Structured handoff for this connection, with separate `session:close` consent |
 | "Which projects can you see?" | `list_projects` | The projects this connection may use |
 
-Nothing over this connector edits or deletes memories.
+The connector cannot edit or delete general memories, control Crew, or approve owner decisions.
+`close_session` can update its own session handoff. Existing note/search connections do **not** gain
+that permission: reconnect and explicitly allow `session:close` before using it.
+
+Use a stable `session_id` for the conversation, select its project and provide facts: open work in
+`todos_open`, failures in `errors`, the next action in `next_step`, and a string in `notes`. A repeated
+close for that session updates one current handoff. The server treats these as agent-declared facts,
+not independent verification. The desktop agent's next brief carries the handoff under the chat
+connection's identity; the chat cannot impersonate the desktop agent or end its Crew session.
+Never include credentials, private user content or raw logs in a handoff.
 
 **How the phone-to-desktop hand-off works.** `send_to_inbox` with `to_agent: "claude-code"`
 puts a message in Claude Code's inbox. The next time Claude Code starts a session and calls
@@ -171,7 +180,7 @@ Code" above.
   or an authorization code used twice, ends the whole connection.
 - **Every token, code and client secret is stored only as a SHA-256 hash.**
 - **Scopes**: `session:brief` (brief and trail), `memory:recall` (search),
-  `memory:store` (notes and inbox messages only). A call without the needed scope gets
+  `memory:store` (notes and inbox messages only), and `session:close` (this connection's structured handoffs). A call without the needed scope gets
   `403 insufficient_scope`. Scopes Remembra doesn't know (for example a client's own
   `claudeai`) are ignored at registration and dropped at sign-in; the consent page and the
   token response list exactly what was granted.
