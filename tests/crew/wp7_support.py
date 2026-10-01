@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,13 +68,22 @@ _ENVS: list[Env] = []
 
 
 @pytest.fixture(autouse=True)
-def events_honour_the_contract() -> Iterator[None]:
+async def events_honour_the_contract() -> AsyncIterator[None]:
     """Every event any WP-7 test emitted validates against the closed contract (schemas.validate_envelope)."""
     _ENVS.clear()
-    yield
-    bad = [item for env in _ENVS for item in env.invalid]
-    _ENVS.clear()
-    assert bad == []
+    try:
+        yield
+    finally:
+        envs = list(_ENVS)
+        _ENVS.clear()
+        bad = [item for env in envs for item in env.invalid]
+        # Bus listeners retain each environment in a cycle. Dropping the list
+        # does not stop its non-daemon SQLite worker; close on this test's loop.
+        results = await asyncio.gather(*(env.db.close() for env in envs), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        assert bad == []
 
 
 async def seed_crew(db: CrewDatabase, crew_id: str, *, owner: str = OWNER, project: str = "yaadbooks") -> None:
