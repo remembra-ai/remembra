@@ -685,7 +685,16 @@ an authenticated account login, `action="confirm_resolution"`, `project_id`, and
 the current `version`. API-key authentication cannot confirm. The evidence must
 still exist, be unexpired, and match the digest recorded with the proposal. This
 records acceptance of agent evidence, not independent verification by Remembra.
-No dashboard confirmation screen is included in this candidate.
+On the dashboard, open Trail and select a project. **Unresolved work** shows
+the complete paginated personal ledger for that project across all agents,
+independently of the trail's agent filter. Each report links to its source
+handoff. Expand **Review proposed resolution** to read its stored evidence,
+then acknowledge your review and choose **Accept resolution**. Account login
+is required; an API key can read but cannot accept. Acceptance removes the
+item only after the server confirms it. A stale report or changed evidence
+blocks acceptance; changed evidence requires a fresh proposal for review.
+Switching projects clears any review in progress. Recorded evidence is not
+independent verification of a commit, test result or deployment.
 
 The ledger stores references and state rather than a second copy of private
 content. Expired source content is withheld while its unresolved count remains.

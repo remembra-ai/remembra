@@ -14,6 +14,7 @@ import { hrefFor, navigate, useRoute } from '../lib/nav';
 import { dayLabel, relativeTime } from '../lib/time';
 import { AgentAvatar, CopyCommand, ErrorNotice, StaleNotice, TrailSkeleton } from '../components/relay/ui';
 import { TrailNode } from '../components/relay/Handoff';
+import { OpenWork } from '../components/relay/OpenWork';
 
 const PAGE = 30;
 
@@ -204,6 +205,10 @@ export function Trail() {
           )}
         </div>
       </div>
+
+      {project ? <OpenWork key={project} projectId={project} /> : (
+        <p className="px-1 text-sm text-ink-2">Select a project to review its persistent unresolved tasks and failures.</p>
+      )}
 
       <div className="rr-card rounded-[3px]">
         {head.loading && <TrailSkeleton rows={5} />}
