@@ -20,14 +20,23 @@ from fastapi.responses import JSONResponse
 
 from remembra.crew import schemas as S
 from remembra.crew import zones as Z
-from remembra.crew.access import CrewAccess, CrewEntity, crew_access, crew_entity, crew_error, not_found
+from remembra.crew.access import (
+    CrewAccess,
+    CrewEntity,
+    access_lifespan,
+    access_snapshot,
+    crew_access,
+    crew_entity,
+    crew_error,
+    not_found,
+)
 from remembra.crew.claims import SESSION_HEADER, authenticate_session
 from remembra.crew.db import CrewDatabase
 from remembra.crew.events import CrewEventLog, IdempotencyConflict, TokenBearingResponse, idem_lookup, idem_store
 from remembra.crew.limits import crew_limits_for_owner
 from remembra.crew.store import NotFound
 
-router = APIRouter(tags=["crew-zones"])
+router = APIRouter(tags=["crew-zones"], lifespan=access_lifespan)
 
 PR, PW, PO, PA = "crew:read", "crew:write", "crew:override", "crew:admin"
 
@@ -71,9 +80,9 @@ async def principal_for(request: Request, access: CrewAccess) -> Z.Principal:
     named by the session-token header."""
     if access.human:
         return Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id, privileged=access.privileged)
-    async with crew_errors():
+    async with crew_errors(), access_snapshot(request) as conn:
         session = await authenticate_session(
-            access_conn(request),
+            conn,
             request.headers.get(SESSION_HEADER),
             user_id=access.user.user_id,
             crew_id=access.crew_id,

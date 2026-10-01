@@ -35,18 +35,20 @@ read it from ``app.state.crew_db`` (a connection, or an object with ``.conn``).
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 import aiosqlite
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.routing import APIRoute
 
 from remembra.auth.middleware import AuthenticatedUser, get_current_user
 from remembra.auth.rbac import SYNTHETIC_KEY_IDS, KeyRole, Permission, Role
 from remembra.config import get_settings
+from remembra.crew.read_pool import CrewReadPool
 from remembra.crew.schemas import CREW_ROLES, HUMAN_ONLY_PERMISSIONS, PERMISSIONS, ROUTES, Route, is_id
 
 HUMAN_CREDENTIAL_ID: Final = "jwt_auth"
@@ -435,6 +437,34 @@ def get_crew_conn(request: Request) -> Any:
     return getattr(db, "conn", db)
 
 
+@asynccontextmanager
+async def access_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    pool = CrewReadPool()
+    app.state.crew_access_read_pool = pool
+    try:
+        yield
+    finally:
+        await pool.close()
+
+
+@asynccontextmanager
+async def access_snapshot(request: Request) -> AsyncIterator[Any]:
+    conn = get_crew_conn(request)  # retain the normal unavailable503 contract
+    db = request.app.state.crew_db
+    pool = getattr(request.app.state, "crew_access_read_pool", None)
+    path = getattr(db, "db_path", ":memory:")
+    if isinstance(pool, CrewReadPool) and path != ":memory:":
+        async with pool.snapshot(str(path)) as reader:
+            yield reader
+    elif hasattr(db, "read_snapshot"):
+        # Small harnesses without an ASGI lifespan retain scoped readers; the
+        # database also preserves in-memory and transaction-owner behavior.
+        async with db.read_snapshot() as reader:
+            yield reader
+    else:
+        yield conn
+
+
 @dataclass(frozen=True)
 class AccessMarker:
     """Attached to every dependency built here so the route-table audit can find it."""
@@ -453,15 +483,15 @@ def crew_access(perm: str, *, step_up: bool = False, param: str = "crew_id") -> 
         raise ValueError("step-up applies only to human-only permissions")
 
     async def _dep(request: Request, user: AuthenticatedUser = Depends(get_current_user)) -> CrewAccess:
-        conn = get_crew_conn(request)
-        return await load_crew(
-            conn,
-            request.path_params.get(param),
-            user,
-            perm,
-            step_up=step_up,
-            auth_time_ms=jwt_auth_time_ms(request, user),
-        )
+        async with access_snapshot(request) as conn:
+            return await load_crew(
+                conn,
+                request.path_params.get(param),
+                user,
+                perm,
+                step_up=step_up,
+                auth_time_ms=jwt_auth_time_ms(request, user),
+            )
 
     _dep.__crew_access__ = AccessMarker("crew", perm, None, step_up, param)  # type: ignore[attr-defined]
     return _dep
@@ -477,16 +507,16 @@ def crew_entity(kind: str, perm: str, *, step_up: bool = False, param: str | Non
     name = param or ENTITY_PATH_PARAMS.get(kind, f"{kind}_id")
 
     async def _dep(request: Request, user: AuthenticatedUser = Depends(get_current_user)) -> CrewEntity:
-        conn = get_crew_conn(request)
-        return await load_crew_entity(
-            conn,
-            kind,
-            request.path_params.get(name),
-            user,
-            perm,
-            step_up=step_up,
-            auth_time_ms=jwt_auth_time_ms(request, user),
-        )
+        async with access_snapshot(request) as conn:
+            return await load_crew_entity(
+                conn,
+                kind,
+                request.path_params.get(name),
+                user,
+                perm,
+                step_up=step_up,
+                auth_time_ms=jwt_auth_time_ms(request, user),
+            )
 
     _dep.__crew_access__ = AccessMarker("entity", perm, kind, step_up, name)  # type: ignore[attr-defined]
     return _dep
