@@ -383,7 +383,7 @@ class CrewDatabase:
             db_path = db_path.split("///")[-1]
         self.db_path = db_path
         self._connection: aiosqlite.Connection | None = None
-        self._tx = TxCoordinator()
+        self._tx = TxCoordinator(control_priorities=True)
         # Distinct from the short SQLite transaction lock: handlers may await I/O.
         # File-backed databases also use an OS lock across connections/processes.
         self.outbox_run_lock = asyncio.Lock()
