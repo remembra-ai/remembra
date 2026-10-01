@@ -74,7 +74,7 @@ is planned for the next one. Until then, the push gate is also local.
 
 "Enforced" here means enforced **for an agent that cooperates**, in the sense above. Local
 enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on
-your machine; every bypass is recorded.
+your machine. Owner-issued bypass codes used through Crew are recorded; a write or skipped git hook outside Crew may leave no Crew audit event. Git-gate entries require the hooks to be installed and the session to be joined.
 
 ---
 

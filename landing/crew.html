@@ -249,10 +249,10 @@
       <ol class="layers" style="margin-top:36px">
         <li><span class="n">Before the edit</span><h3>Hook guard</h3><p>A check will run before every file write. It is not shipped yet: it will be turned on for each agent once it has been tested against that agent, Claude Code first.</p></li>
         <li><span class="n">In other folders</span><h3>Read-only fence</h3><p>For agents whose hooks are not yet verified, files in a held zone are made read-only in that agent's own worktree until the zone is released.</p></li>
-        <li><span class="n">At commit and push</span><h3>Git gates</h3><p>In repos where you install the git gates (connect --git-hooks), a commit or push that touches a held zone is stopped, for every agent.</p></li>
+        <li><span class="n">At commit and push</span><h3>Git gates</h3><p>Installed git gates check commits and pushes for joined Crew sessions. MCP-only agents receive advisory checks unless the local git gates are installed. Human, script and non-joined writes are not covered by these gates.</p></li>
         <li><span class="n">After the fact</span><h3>Collision alerts</h3><p>Any overlap that still gets through is flagged in the feed and the inbox, with who did it.</p></li>
       </ol>
-      <p class="limit"><b>The honest limit:</b> on your own machine these layers will stop mistakes, not a deliberately hostile agent. Agents will not be able to switch protection off: only you will, with a code from your dashboard or <code>remembra-crew bypass</code> at your own terminal when the server is unreachable. Every bypass will be logged, and a GitHub-side check is planned as the hard lock in a later release.</p>
+      <p class="limit"><b>The honest limit:</b> these local layers coordinate cooperating agents. Local git hooks can be skipped with <code>--no-verify</code>, and advisory MCP checks cannot block arbitrary file writes. Owner-issued bypass codes are logged when used through Crew; attempts outside Crew may not be recorded. A required check on the git host is planned and is not shipped.</p>
     </div>
   </section>
 
