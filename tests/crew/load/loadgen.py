@@ -28,6 +28,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import random
 import secrets
 import sys
@@ -282,7 +283,7 @@ async def sweep_loop(admin: Api, stats: Stats, stop: asyncio.Event) -> None:
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     random.seed(args.seed)
     workdir = Path(args.workdir or tempfile.mkdtemp(prefix="crew-load-"))
-    server = ServerProc(workdir / "server", seed_users=args.crews)
+    server = ServerProc(workdir / "server", seed_users=args.crews, qdrant_url=os.environ.get("REMEMBRA_E2E_QDRANT_URL"))
     stats = Stats()
     stop = asyncio.Event()
     tasks: list[asyncio.Task[Any]] = []
@@ -292,6 +293,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     failure: dict[str, str] | None = None
     metrics: dict[str, Any] = {}
     retention: dict[str, Any] | None = None
+    retention_task: asyncio.Task[Any] | None = None
+    elapsed_workload_s: float | None = None
     try:
         server.start()
         phase = "setup"
@@ -318,14 +321,19 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < args.duration:
             await asyncio.sleep(1.0)
-            if retention is None and time.monotonic() - started >= args.duration * 0.8:
-                resp = await admin.call("POST", "/__e2e/retention", root=True, params={"days": 400}, timeout=600)
-                retention = resp.body if resp.ok else {"error": resp.status, "body": resp.body}
+            if retention_task is None and time.monotonic() - started >= args.duration * 0.8:
+                retention_task = asyncio.create_task(
+                    admin.call("POST", "/__e2e/retention", root=True, params={"days": 400}, timeout=600)
+                )
         stop.set()
+        elapsed_workload_s = time.monotonic() - started
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 stats.errors.append(f"load worker: {type(outcome).__name__}")
+        if retention_task is not None:
+            resp = await retention_task
+            retention = resp.body if resp.ok else {"error": resp.status, "body": resp.body}
         metrics = (await admin.call("GET", "/__e2e/metrics", root=True)).body
     except Exception as exc:
         # Preserve partial counts and transport errors even when setup never
@@ -334,6 +342,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         stats.errors.append(f"{phase}: {type(exc).__name__}")
     finally:
         stop.set()
+        if retention_task is not None and not retention_task.done():
+            retention_task.cancel()
+            await asyncio.gather(retention_task, return_exceptions=True)
         try:
             for task in tasks:
                 if not task.done():
@@ -346,6 +357,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             server.stop()
     report = summarize(args, metrics, retention or {}, stats)
+    report["elapsed_workload_s"] = elapsed_workload_s
     report["phase"] = phase if failure else "complete"
     if failure:
         report["failure"] = failure
@@ -428,6 +440,7 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
         "heartbeat_workload": hb.get("count", 0) >= args.crews * (args.duration / args.heartbeat_s) * 0.8,
         "claim_workload": claim.get("count", 0) > args.crews * args.sessions,
         "requests_completed": bool(stats.attempted) and stats.attempted == completed,
+        "requested_vector_backend": metrics.get("vector_backend") == args.vector_backend,
         "no_client_errors": not stats.errors,
         "no_server_errors": not report["server"]["errors"],
         "expected_client_statuses": not unexpected_statuses,
@@ -448,6 +461,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--claim-s", type=float, default=3.0, help="mean seconds between a session's auto-claims")
     p.add_argument("--ingest-rate", type=float, default=10.0, help="memory stores per second (all owners)")
     p.add_argument("--seed", type=int, default=15)
+    p.add_argument(
+        "--vector-backend",
+        choices=["in-process-local", "isolated-server"],
+        default="isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
+    )
     p.add_argument("--workdir")
     p.add_argument("--out")
     return p.parse_args(argv)
