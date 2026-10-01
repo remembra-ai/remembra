@@ -111,13 +111,40 @@ def test_applied_verified_connect_command_is_allowed():
     assert desk_command_kind("remembra-relay connect --apply --agent codex", server_urls=[], projects=[]) == "terminal"
 
 
-def test_model_cannot_override_a_proven_agent_fix():
+@pytest.mark.parametrize(
+    "command",
+    [
+        "remembra-relay connect --apply --agent codex",
+        "remembra-relay connect --apply",
+        "remembra-install --all",
+        "remembra-install --all --url https://api.remembra.dev",
+    ],
+)
+def test_model_cannot_override_a_proven_agent_fix(command):
     from tests.test_marshal_desk_validate import _answer, _diagnosis_read, _check
 
     read = _diagnosis_read()
     read.payload["verdict"].update(proven=True, commands=["/hooks"])
-    answer = _check(_answer("Codex needs trusted hooks.", ["r1"], ["remembra-relay connect --apply --agent codex"]), [read])
+    answer = _check(_answer("Codex needs trusted hooks.", ["r1"], [command]), [read])
     assert answer.fallback_reason == "command_contradicts_verdict"
+
+
+def test_global_setup_is_allowed_when_it_is_the_proven_fix():
+    from tests.test_marshal_desk_validate import _answer, _diagnosis_read, _check
+
+    read = _diagnosis_read()
+    command = "remembra-relay connect --apply"
+    read.payload["verdict"].update(proven=True, commands=[command])
+    assert not _check(_answer("Codex is waiting.", ["r1"], [command]), [read]).fallback
+
+
+def test_hooks_cannot_replace_a_proven_close_fix():
+    from tests.test_marshal_desk_validate import _answer, _diagnosis_read, _check
+
+    read = _diagnosis_read()
+    read.payload["verdict"].update(proven=True, commands=["remembra-relay close --agent codex"])
+    result = _check(_answer("Codex is waiting.", ["r1"], ["/hooks"]), [read])
+    assert result.fallback_reason == "command_contradicts_verdict"
 
 
 @pytest.mark.parametrize(

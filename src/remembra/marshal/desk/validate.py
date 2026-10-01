@@ -458,12 +458,18 @@ def _check(raw: str, reads: Sequence[ReadResult], server_urls: list[str | None],
         kind = commands.desk_command_kind(cmd, server_urls=server_urls, projects=turn.projects)
         if kind is None:
             raise _Refused("command_not_allowed")
-        targets = re.findall(r"(?:--agent |for )([A-Za-z0-9-]+)", cmd)
+        targets = set(re.findall(r"(?:--agent |for )([A-Za-z0-9-]+)", cmd))
+        if cmd == commands.CODEX_HOOKS:
+            targets.add("codex")
+        if "remembra-install --all" in cmd or ("remembra-relay connect --apply" in cmd and not targets):
+            # A global setup command affects diagnosed agents too. Omitting
+            # --agent must not bypass the proof-bound fix check.
+            targets.update(REGISTRY)
         for read in reads:
             verdict = read.payload.get("verdict") or {}
             if (
                 read.tool == "diagnose_agent"
-                and read.payload.get("agent_id") in targets
+                and canonical_agent_id(str(read.payload.get("agent_id") or "")) in targets
                 and verdict.get("proven") is True
                 and cmd not in (verdict.get("commands") or [])
             ):
