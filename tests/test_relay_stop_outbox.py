@@ -35,6 +35,7 @@ from remembra.core.limiter import limiter
 from remembra.inbox.manager import InboxManager
 from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY
+from remembra.relay.handoff import redact
 from remembra.security.audit import AuditLogger
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
@@ -368,8 +369,32 @@ def test_close_while_the_api_is_down_is_queued_then_delivered_by_the_next_brief(
     # The API comes back on the same URL; the next brief (another agent, another clone) sends the queue first.
     with api_server(tmp_path / "back.db", port) as back:
         brief = relay(home, back, "brief", "--agent", "codex", "--cwd", str(drive))
-        assert brief.returncode == 0, brief.stderr
-        assert brief.stdout.splitlines()[0] == "Remembra: sent 2 queued handoffs from claude-code, gemini."
+        # Preserve the original delivery gate. A budget failure needs the
+        # queue's error and elapsed time, not only its user-facing first line.
+        # Do not dump queued payloads or keys into public CI output.
+        diagnostic = redact(
+            json.dumps(
+                {
+                    "returncode": brief.returncode,
+                    "elapsed_seconds": brief.elapsed,
+                    "stdout": brief.stdout,
+                    "stderr": brief.stderr,
+                    "relay_log": log.read_text()[-8000:],
+                    "remaining_queue": [
+                        {
+                            "agent_id": item.agent_id,
+                            "attempts": item.attempts,
+                            "last_error": item.data.get("last_error"),
+                        }
+                        for item in outbox.pending(home)
+                    ],
+                },
+                indent=2,
+            )
+        ).replace(KEY, "[REDACTED:test-key]")
+        assert brief.returncode == 0, diagnostic
+        first_line = brief.stdout.splitlines()[0] if brief.stdout.splitlines() else ""
+        assert first_line == "Remembra: sent 2 queued handoffs from claude-code, gemini.", diagnostic
         assert "Last session: " in brief.stdout
         items = _trail(back, "outage")
         assert {i["session_id"] for i in items} >= {"sess-outage"}
