@@ -89,6 +89,22 @@ async def test_related_zone_snapshot_preserves_archived_hierarchy_behavior(env):
         assert await zone_id(db, "pos") not in cached
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("queued", [False, True])
+async def test_insert_returns_complete_claim_without_reloading_on_supported_sqlite(env, monkeypatch, legacy, queued):
+    db, ops, _, a, b = env
+    if queued:
+        assert (await _claim(ops, a, db, "pos")).status == "granted"
+    reload_claim = AsyncMock(wraps=C._reload)
+    monkeypatch.setattr(C, "_reload", reload_claim)
+    if legacy:
+        monkeypatch.setattr(C.sqlite3, "sqlite_version_info", (3, 34, 0))
+    result = await _claim(ops, b, db, "pos", wait=queued)
+    assert result.status == ("queued" if queued else "granted")
+    assert result.claim == await C.get_claim(db.conn, result.claim["id"])
+    assert reload_claim.await_count == int(legacy)
+
+
 async def test_grant_deny_queue_and_fifo_promotion(env):
     db, ops, _, a, b = env
     got = await _claim(ops, a, db, "pos")

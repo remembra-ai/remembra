@@ -774,34 +774,40 @@ async def _insert_claim(
         granted_at = stamp
         if session is not None:
             lease = _lease(settings, now, source=source)
-    await conn.execute(
-        """INSERT INTO crew_claims (id, crew_id, zone_id, path_glob, resource, mode, holder_kind, holder_session_id,
+    sql = """INSERT INTO crew_claims (id, crew_id, zone_id, path_glob, resource, mode, holder_kind, holder_session_id,
                holder_user_id, holder_agent_id, task_id, state, source, epoch, reason, lease_expires_at, queue_pos, granted_at,
                created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            claim_id,
-            crew_id,
-            target.zone_id,
-            target.path_glob,
-            target.resource,
-            mode,
-            "session" if session is not None else "human",
-            session["id"] if session is not None else None,
-            principal.user_id,
-            session["agent_id"] if session is not None else None,
-            task_id,
-            state,
-            source,
-            epoch,
-            clip(reason, 280),
-            lease,
-            queue_pos,
-            granted_at,
-            stamp,
-            stamp,
-        ),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    params = (
+        claim_id,
+        crew_id,
+        target.zone_id,
+        target.path_glob,
+        target.resource,
+        mode,
+        "session" if session is not None else "human",
+        session["id"] if session is not None else None,
+        principal.user_id,
+        session["agent_id"] if session is not None else None,
+        task_id,
+        state,
+        source,
+        epoch,
+        clip(reason, 280),
+        lease,
+        queue_pos,
+        granted_at,
+        stamp,
+        stamp,
     )
+    if sqlite3.sqlite_version_info >= (3, 35, 0):
+        # Return the database's actual defaults in the insert's single worker
+        # call. Keep uniqueness enforcement and the writer transaction intact.
+        inserted = await fetchone(conn, sql + " RETURNING *", params)
+        assert inserted is not None
+        return inserted
+    # Retain compatibility with SQLite runtimes predating RETURNING.
+    await conn.execute(sql, params)
     return await _reload(conn, claim_id)
 
 
