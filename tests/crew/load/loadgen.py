@@ -385,6 +385,8 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
         "server": {
             "vector_backend": metrics.get("vector_backend", "unknown"),
             "embedding_backend": metrics.get("embedding_backend", "unknown"),
+            "event_loop_backend": metrics.get("event_loop_backend", "unknown"),
+            "event_loop_class": metrics.get("event_loop_class", "unknown"),
             "heartbeat": hb,
             "claim": claim,
             "memory_store": routes.get("POST /memories") or {},
@@ -444,6 +446,10 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
         "claim_workload": claim.get("count", 0) > args.crews * args.sessions,
         "requests_completed": bool(stats.attempted) and stats.attempted == completed,
         "requested_vector_backend": metrics.get("vector_backend") == args.vector_backend,
+        "requested_event_loop": (
+            getattr(args, "expect_event_loop", None) is None
+            or metrics.get("event_loop_backend") == args.expect_event_loop
+        ),
         "no_client_errors": not stats.errors,
         "no_server_errors": not report["server"]["errors"],
         "expected_client_statuses": not unexpected_statuses,
@@ -470,6 +476,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
     )
     p.add_argument("--workdir")
+    p.add_argument("--expect-event-loop", choices=["uvloop", "asyncio"], default="uvloop")
     p.add_argument("--out")
     return p.parse_args(argv)
 

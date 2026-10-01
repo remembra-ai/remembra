@@ -42,7 +42,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -390,6 +390,8 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_li
             **METRICS.summary(),
             "vector_backend": "isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
             "embedding_backend": "deterministic-hashed-64",
+            "event_loop_backend": "uvloop" if type(asyncio.get_running_loop()).__module__.startswith("uvloop") else "asyncio",
+            "event_loop_class": type(asyncio.get_running_loop()).__module__ + "." + type(asyncio.get_running_loop()).__name__,
         }
 
     @app.post("/__e2e/metrics/reset")
@@ -480,6 +482,15 @@ async def serve(workdir: Path, port: int, webhook_forward: str | None, users: in
         await task
 
 
+def run_fixture(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Use production Uvicorn's auto-loop choice, without changing global policy."""
+    try:
+        import uvloop
+    except ImportError:
+        return asyncio.run(coro)
+    return uvloop.run(coro)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--workdir", required=True)
@@ -488,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed-users", type=int, default=0, help="extra owners with one admin key each (load tests)")
     p.add_argument("--crew-rate-limits", action="store_true", help="the crew rate limiter on, as in production")
     args = p.parse_args(argv)
-    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users, args.crew_rate_limits))
+    run_fixture(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users, args.crew_rate_limits))
     return 0
 
 

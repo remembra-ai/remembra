@@ -1,10 +1,32 @@
 """Keep the capacity fixture from connecting to a real owner service or reusing its collection."""
 
 from types import SimpleNamespace
+import asyncio
+import sys
 
 import pytest
 
 from tests.crew.e2e import server
+
+
+def test_fixture_runs_the_installed_production_auto_loop():
+    pytest.importorskip("uvloop")
+
+    async def probe():
+        return type(asyncio.get_running_loop()).__module__
+
+    policy = asyncio.get_event_loop_policy()
+    assert server.run_fixture(probe()).startswith("uvloop")
+    assert asyncio.get_event_loop_policy() is policy
+
+
+def test_fixture_labels_portable_asyncio_fallback(monkeypatch):
+    monkeypatch.setitem(sys.modules, "uvloop", None)
+
+    async def probe():
+        return type(asyncio.get_running_loop()).__module__
+
+    assert server.run_fixture(probe()).startswith("asyncio")
 
 
 @pytest.mark.asyncio
