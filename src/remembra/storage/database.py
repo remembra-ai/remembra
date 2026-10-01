@@ -450,6 +450,59 @@ VERSIONED_MIGRATIONS: list[Migration] = [
         ],
     ),
     (13, "persistent_open_work", [*CONTINUITY_DDL, backfill_open_work]),
+    (
+        14,
+        "marshal_desk",
+        [
+            # The Marshal desk's model spend (remembra.marshal.desk.budget): one row
+            # per UTC day ('day:2026-10-12') and month ('month:2026-10'), in integer
+            # micro-dollars, so the platform caps hold under concurrent asks. The
+            # spend is Remembra's own; it never reaches a user's smart credits.
+            """
+            CREATE TABLE IF NOT EXISTS marshal_budget (
+                period TEXT PRIMARY KEY,
+                reserved_micro INTEGER NOT NULL DEFAULT 0 CHECK (reserved_micro >= 0),
+                spent_micro INTEGER NOT NULL DEFAULT 0 CHECK (spent_micro >= 0),
+                asks INTEGER NOT NULL DEFAULT 0 CHECK (asks >= 0),
+                updated_at TEXT NOT NULL
+            )
+            """,
+            # Asks and spend per user per UTC day (the per-user daily ask cap).
+            """
+            CREATE TABLE IF NOT EXISTS marshal_user_day (
+                user_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                asks INTEGER NOT NULL DEFAULT 0 CHECK (asks >= 0),
+                spent_micro INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, day)
+            )
+            """,
+            # One hold per ask, with the day and month it was reserved in: a hold
+            # left by a crashed ask expires at its full reserve.
+            """
+            CREATE TABLE IF NOT EXISTS marshal_reservations (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                month TEXT NOT NULL,
+                reserved_micro INTEGER NOT NULL,
+                spent_micro INTEGER,
+                state TEXT NOT NULL CHECK (state IN ('held', 'settled', 'released', 'expired')),
+                created_at TEXT NOT NULL,
+                settled_at TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_marshal_reservations_held ON marshal_reservations(state, created_at)",
+            # The per-account opt-out (a missing row means the desk is on).
+            """
+            CREATE TABLE IF NOT EXISTS marshal_prefs (
+                user_id TEXT PRIMARY KEY,
+                desk INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            )
+            """,
+        ],
+    ),
 ]
 
 

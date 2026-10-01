@@ -19,6 +19,7 @@ from remembra.api.v1 import (
     inbox,
     ingest,
     keys,
+    marshal,
     meetings,
     memories,
     plugins,
@@ -62,3 +63,4 @@ api_router.include_router(agent_session.router, prefix="/v1")
 api_router.include_router(relay.router, prefix="/v1")
 api_router.include_router(brain.router, prefix="/v1")
 api_router.include_router(csp_report.router, prefix="/v1")
+api_router.include_router(marshal.router, prefix="/v1")

@@ -12,6 +12,7 @@ from typing import Annotated, Any
 import structlog
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
+from starlette.requests import HTTPConnection
 
 from remembra.auth.keys import APIKeyManager
 from remembra.auth.rbac import PERMISSION_ATTR, Permission, effective_permissions
@@ -58,6 +59,59 @@ def connector_principal(user: "AuthenticatedUser") -> Iterator[None]:
         yield
     finally:
         _connector_principal.reset(token)
+
+
+# Delegated principals: in-process callers acting for a user without the user's
+# own credential. ``oauth:<grant>`` is the remote MCP connector (it may write the
+# few things its grant allows); ``marshal:<conv>`` is the dashboard's Marshal desk
+# and ``copilot:`` is reserved for another read-only copilot: those two never write.
+# None of them reaches the account, billing, key, sharing or admin routers
+# (``refuse_delegated_principal``), and none of them gets RBAC's editor default.
+DELEGATED_PREFIXES: tuple[str, ...] = ("marshal:", "copilot:", "oauth:")
+READ_ONLY_PREFIXES: tuple[str, ...] = ("marshal:", "copilot:")
+READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+DELEGATED_REFUSED: dict[str, str] = {
+    "error": "delegated_principal_refused",
+    "message": "This needs your own dashboard login. Marshal and connected apps can't do it.",
+}
+
+
+def delegated_principal() -> AuthenticatedUser | None:
+    """The in-process principal of this call (connector grant, Marshal desk), or None for a real request.
+
+    Only code in this process sets it (:func:`connector_principal`), always for a
+    caller acting on a user's behalf, so every such principal is delegated.
+    """
+    return _connector_principal.get()
+
+
+def is_delegated(user: AuthenticatedUser) -> bool:
+    return user.api_key_id.startswith(DELEGATED_PREFIXES)
+
+
+async def refuse_delegated_principal() -> None:
+    """Router dependency: 403 for any delegated principal, whatever the method.
+
+    It reads only the in-process principal and authenticates nothing, so the
+    anonymous routes of a guarded router (login, signup, the public plan list)
+    keep working, and a dashboard login or API key is unaffected.
+    """
+    if delegated_principal() is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=dict(DELEGATED_REFUSED))
+
+
+async def refuse_delegated_writes(connection: HTTPConnection) -> None:
+    """App dependency: 403 for a read-only delegated principal on any method but GET, HEAD or OPTIONS.
+
+    Installed on the whole app, so every router (Crew mode's included) refuses
+    a Marshal desk write even where a route forgot to check its permissions.
+    """
+    principal = delegated_principal()
+    if principal is None or not principal.api_key_id.startswith(READ_ONLY_PREFIXES):
+        return
+    method = str(connection.scope.get("method") or "GET").upper()
+    if method not in READ_METHODS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=dict(DELEGATED_REFUSED))
 
 
 def resolve_api_key(request: Request, api_key: str | None) -> str | None:

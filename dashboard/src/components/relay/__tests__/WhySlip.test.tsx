@@ -3,8 +3,12 @@
 // the why? button wiring.
 
 import { readFileSync } from 'node:fs';
+import { isValidElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { MARSHAL_DESK_OFF, MarshalDeskContext, type DeskOpen, type MarshalDeskApi } from '../../../hooks/marshalDesk';
+import { SlipAskButton } from '../../marshal/SlipAskButton';
+import { TrailNode } from '../Handoff';
 import { AgentRow, ConnectChecklist } from '../HomeCards';
 import { SlipView, WhySlip } from '../WhySlip';
 import { KEY_CAVEAT, SLIP_FOOTER, diagnoseAgent, initialSlipState, type KeyEvidence, type SlipState } from '../../../lib/marshal';
@@ -185,7 +189,7 @@ const ACTIVE: AgentActivity = {
 
 function rows(html: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of html.matchAll(/<li data-row-state="([^"]+)">(.*?)<\/li>/gs)) {
+  for (const m of html.matchAll(/<li data-row-state="([^"]+)"[^>]*>(.*?)<\/li>/gs)) {
     const name = /<span class="block truncate text-sm font-semibold text-ink">([^<]+)<\/span>/.exec(m[2])?.[1] ?? '';
     out[name.split(' ')[0]] = m[1];
   }
@@ -210,7 +214,7 @@ describe('ConnectChecklist rows', () => {
     expect(html).not.toContain('aria-label="Why is Claude Code waiting?"');
     // A Claude-Code-only account has no Codex entry either: the dashboard can't tell whether Codex is
     // installed or its hooks trusted, so the row waits like any other and only reminds, dimly.
-    const row = /<li data-row-state="codex-waiting">(.*?)<\/li>/s.exec(html)?.[1] ?? '';
+    const row = /<li data-row-state="codex-waiting"[^>]*>(.*?)<\/li>/s.exec(html)?.[1] ?? '';
     const codex = text(row);
     expect(codex).toMatch(/^Codex waiting for its first handoff Not connected yet why\? command /);
     expect(codex).toMatch(/using Codex\? trust its 3 hooks, and again when one changes: Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
@@ -266,5 +270,48 @@ describe('ConnectChecklist rows', () => {
     );
     expect(html).not.toContain('why?');
     expect(html).not.toContain('<section');
+  });
+});
+
+describe('ask Marshal about this', () => {
+  const inDesk = (desk: Partial<MarshalDeskApi>, state: SlipState) =>
+    renderToStaticMarkup(
+      <MarshalDeskContext.Provider value={{ ...MARSHAL_DESK_OFF, ...desk }}>
+        <SlipView id="slip-x" agentId="codex" state={state} now={NOW} onRetry={() => {}} />
+      </MarshalDeskContext.Provider>,
+    );
+
+  it('shows after the footer only when the account has the desk and has not turned it off', () => {
+    const state = done([KEY], [item()]);
+    const on = inDesk({ available: true }, state);
+    expect(text(on)).toContain(`${SLIP_FOOTER} ask Marshal about this`);
+    expect(on.indexOf('ask Marshal about this')).toBeGreaterThan(on.indexOf(SLIP_FOOTER));
+    expect(text(inDesk({}, state))).not.toContain('ask Marshal about this');
+    expect(text(inDesk({ available: true, optedOut: true }, state))).not.toContain('ask Marshal about this');
+    expect(text(slip('codex', state))).not.toContain('ask Marshal about this'); // no provider: no desk
+    // Not while the slip is still reading.
+    expect(text(inDesk({ available: true }, initialSlipState()))).not.toContain('ask Marshal about this');
+  });
+
+  it('opens the desk prefilled for that agent, without asking', () => {
+    const opened: DeskOpen[] = [];
+    const button = SlipAskButton({ agentId: 'codex', open: (request) => opened.push(request) });
+    expect(isValidElement(button)).toBe(true);
+    const invoker = { tagName: 'BUTTON' } as unknown as HTMLElement;
+    (button as ReactElement<{ onClick: (e: unknown) => void }>).props.onClick({ currentTarget: invoker });
+    expect(opened).toEqual([{ question: 'why is codex waiting', agentId: 'codex', ask: false, source: 'why_slip', invoker }]);
+  });
+});
+
+describe('rows an evidence chip can point at', () => {
+  it('an agent row is agent:<canonical id>, a trail node entry:<id>', () => {
+    const row = renderToStaticMarkup(
+      <ul>
+        <AgentRow agentId="claude" activity={undefined} state="waiting" now={NOW} open={false} onToggle={() => {}} onCopy={() => {}} idBase="t" />
+      </ul>,
+    );
+    expect(row).toContain('data-marshal-ref="agent:claude-code"');
+    const node = renderToStaticMarkup(<TrailNode item={item({ id: 'h-42' })} expanded={false} onToggle={() => {}} now={NOW} />);
+    expect(node).toContain('data-marshal-ref="entry:h-42"');
   });
 });

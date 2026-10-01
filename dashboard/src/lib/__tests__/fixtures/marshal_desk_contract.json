@@ -1,0 +1,326 @@
+{
+  "_about": "Copied verbatim from the Marshal desk API contract (desk-contract.json, contract_version 1). The dashboard tests replay these; the server sends exactly these shapes and strings.",
+  "contract_version": "1",
+  "errors": {
+    "delegated_principal_refused": {
+      "status": 403,
+      "message": "This needs your own dashboard login. Marshal and connected apps can't do it."
+    },
+    "marshal_unavailable": {
+      "status": 404,
+      "message": "Marshal isn't available on this account."
+    },
+    "marshal_login_required": {
+      "status": 403,
+      "message": "Marshal answers in a dashboard login only. API keys and connected apps can't use it."
+    },
+    "marshal_opted_out": {
+      "status": 403,
+      "message": "Marshal desk is off for this account. Turn it on in Settings > Diagnostics."
+    },
+    "marshal_offline": {
+      "status": 503,
+      "extra": {
+        "reason": "no_key | breaker_open | daily_budget | monthly_budget | budget_unavailable",
+        "retry_after_seconds": "number, breaker_open only",
+        "resets_at": "ISO time, daily_budget and monthly_budget only"
+      },
+      "messages": {
+        "no_key": "Marshal's model is off for today. Rules-only checks still work.",
+        "breaker_open": "Marshal's model is off for today. Rules-only checks still work.",
+        "daily_budget": "Marshal's model is off for today. Rules-only checks still work.",
+        "monthly_budget": "Marshal's model is off until next month. Rules-only checks still work.",
+        "budget_unavailable": "Marshal's model is off for today. Rules-only checks still work."
+      }
+    },
+    "marshal_daily_limit": {
+      "status": 429,
+      "message": "40 questions today is the limit. Rules-only checks still work.",
+      "message_note": "40 is settings.marshal_user_daily_asks",
+      "extra": {
+        "limit": "int",
+        "used": "int",
+        "resets_at": "next UTC midnight"
+      }
+    },
+    "preview_required": {
+      "status": 403,
+      "message": "Marshal reads briefs with preview=1 only.",
+      "route": "GET /api/v1/session/brief, marshal: principal only"
+    }
+  },
+  "error_body_exceptions": {
+    "401": {
+      "detail": "Authentication required. Use X-API-Key header with your API key (rem_...) or Authorization: Bearer with a JWT token."
+    },
+    "422": {
+      "detail": [
+        {
+          "loc": [
+            "body",
+            "question"
+          ],
+          "type": "string_too_long",
+          "msg": "..."
+        }
+      ]
+    },
+    "429_slowapi": {
+      "error": "Rate limit exceeded: 20 per 1 minute"
+    }
+  },
+  "board": {
+    "status_line": "codex hooks likely not firing · 2 unread in inbox · relay 64% of fair-use",
+    "calls": [
+      {
+        "agent_id": "codex",
+        "code": "HOOKS_NOT_FIRING",
+        "proven": false,
+        "text": "The key works, but nothing from Codex has reached Remembra.",
+        "ask": "why is codex waiting"
+      }
+    ],
+    "suggestions": [
+      "why is codex waiting",
+      "what did claude-code hand off last"
+    ],
+    "model": {
+      "state": "ready",
+      "reason": null,
+      "name": "gpt-4o-mini",
+      "retry_after_seconds": null
+    },
+    "asks": {
+      "used": 3,
+      "limit": 40,
+      "resets_at": "2026-10-13T00:00:00Z"
+    },
+    "footer": "Built by rules from your keys, trail and inbox. No model wrote this.",
+    "generated_at": "2026-10-12T14:02:11Z"
+  },
+  "dashboard_copy": {
+    "reading": "reading…",
+    "caption": "runs on your machine · Marshal can't run it",
+    "notBilled": "not billed to your credits",
+    "fallbackDoc": "ask a person · remembra.dev/contact",
+    "pagesGovern": "From remembra.dev pages; the page governs.",
+    "limitedMinute": "20 questions a minute is the limit. Try again in a minute.",
+    "expired": "Your session has expired: sign in again.",
+    "unreachable": "Couldn't reach Remembra. Ask again.",
+    "redacted": "your question held a key-shaped string · removed before the model received it",
+    "settingLabel": "Marshal desk",
+    "settingHelp": "Ask about your relay here. The transcript stays on this page; usage counts are stored. The desk cannot make changes.",
+    "footer_format": "<model> · <n> read(s) · <usd> · not billed to your credits",
+    "usd_format": "<$0.001 below 0.001, else $ + toFixed(3)"
+  },
+  "sse_error_messages": {
+    "model_unavailable": "Marshal's model didn't answer. Rules-only checks still work.",
+    "timeout": "Marshal took too long to answer. Ask again.",
+    "internal": "Marshal hit an error. Ask again."
+  },
+  "stream_a": {
+    "request": {
+      "question": "why is codex waiting",
+      "conv": "5b1f2c7e-9d0a-4c1e-8f7b-2a3d4e5f6a7b",
+      "history": [],
+      "context": {
+        "agent_id": "codex"
+      },
+      "source": "why_slip"
+    },
+    "raw": "event: read\ndata: {\"id\":\"r1\",\"tool\":\"diagnose_agent\",\"label\":\"trail/diagnosis\",\"args\":{\"agent_id\":\"codex\"},\"ok\":true,\"http_status\":200,\"summary\":\"codex · CODEX_TRUST_MISSING · inferred\",\"ms\":41,\"anchor\":\"agent:codex\"}\n\nevent: read\ndata: {\"id\":\"r2\",\"tool\":\"trail_summary\",\"label\":\"trail/summary\",\"args\":{\"days\":7},\"ok\":true,\"http_status\":200,\"summary\":\"1 agent · claude-code 9 handoffs · newest 2h ago · 7d\",\"ms\":38,\"anchor\":null}\n\nevent: answer\ndata: {\"text\":\"Codex: no brief or handoff has reached Remembra, while Claude Code handed off 9 times in 7 days. Likely cause: its hooks aren't trusted yet. Trust them with /hooks in the Codex CLI.\",\"evidence\":[{\"ref\":\"r1\",\"label\":\"trail/diagnosis · codex · CODEX_TRUST_MISSING · inferred\",\"anchor\":\"agent:codex\"},{\"ref\":\"r2\",\"label\":\"trail/summary · 1 agent · claude-code 9 handoffs · newest 2h ago · 7d\",\"anchor\":null}],\"commands\":[{\"text\":\"/hooks\",\"kind\":\"codex_ui\",\"prompt\":\">\"},{\"text\":\"remembra-relay doctor --agent codex\",\"kind\":\"terminal\",\"prompt\":\"$\"}],\"fallback\":false,\"fallback_reason\":null,\"summary\":[],\"doc\":null}\n\nevent: usage\ndata: {\"model\":\"gpt-4o-mini\",\"reads\":2,\"model_calls\":2,\"input_tokens\":5000,\"cached_tokens\":1792,\"output_tokens\":110,\"usd\":0.000682,\"billed_to_credits\":false,\"asks_today\":4,\"asks_limit\":40,\"input_redactions\":0}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "events": [
+      {
+        "event": "read",
+        "data": {
+          "id": "r1",
+          "tool": "diagnose_agent",
+          "label": "trail/diagnosis",
+          "args": {
+            "agent_id": "codex"
+          },
+          "ok": true,
+          "http_status": 200,
+          "summary": "codex · CODEX_TRUST_MISSING · inferred",
+          "ms": 41,
+          "anchor": "agent:codex"
+        }
+      },
+      {
+        "event": "read",
+        "data": {
+          "id": "r2",
+          "tool": "trail_summary",
+          "label": "trail/summary",
+          "args": {
+            "days": 7
+          },
+          "ok": true,
+          "http_status": 200,
+          "summary": "1 agent · claude-code 9 handoffs · newest 2h ago · 7d",
+          "ms": 38,
+          "anchor": null
+        }
+      },
+      {
+        "event": "answer",
+        "data": {
+          "text": "Codex: no brief or handoff has reached Remembra, while Claude Code handed off 9 times in 7 days. Likely cause: its hooks aren't trusted yet. Trust them with /hooks in the Codex CLI.",
+          "evidence": [
+            {
+              "ref": "r1",
+              "label": "trail/diagnosis · codex · CODEX_TRUST_MISSING · inferred",
+              "anchor": "agent:codex"
+            },
+            {
+              "ref": "r2",
+              "label": "trail/summary · 1 agent · claude-code 9 handoffs · newest 2h ago · 7d",
+              "anchor": null
+            }
+          ],
+          "commands": [
+            {
+              "text": "/hooks",
+              "kind": "codex_ui",
+              "prompt": ">"
+            },
+            {
+              "text": "remembra-relay doctor --agent codex",
+              "kind": "terminal",
+              "prompt": "$"
+            }
+          ],
+          "fallback": false,
+          "fallback_reason": null,
+          "summary": [],
+          "doc": null
+        }
+      },
+      {
+        "event": "usage",
+        "data": {
+          "model": "gpt-4o-mini",
+          "reads": 2,
+          "model_calls": 2,
+          "input_tokens": 5000,
+          "cached_tokens": 1792,
+          "output_tokens": 110,
+          "usd": 0.000682,
+          "billed_to_credits": false,
+          "asks_today": 4,
+          "asks_limit": 40,
+          "input_redactions": 0
+        }
+      },
+      {
+        "event": "done",
+        "data": {
+          "ok": true
+        }
+      }
+    ],
+    "footer_rendered": "gpt-4o-mini · 2 reads · <$0.001 · not billed to your credits"
+  },
+  "stream_b": {
+    "request": {
+      "question": "how much is solo a month",
+      "conv": "5b1f2c7e-9d0a-4c1e-8f7b-2a3d4e5f6a7b",
+      "history": [],
+      "context": null,
+      "source": "palette"
+    },
+    "raw": "event: read\ndata: {\"id\":\"r1\",\"tool\":\"plan\",\"label\":\"cloud/plan\",\"args\":{},\"ok\":true,\"http_status\":200,\"summary\":\"free · keys 2 of 3 · create_key allowed\",\"ms\":22,\"anchor\":null}\n\nevent: answer\ndata: {\"text\":\"That's all I can confirm.\",\"evidence\":[{\"ref\":\"r1\",\"label\":\"cloud/plan · free · keys 2 of 3 · create_key allowed\",\"anchor\":null}],\"commands\":[],\"fallback\":true,\"fallback_reason\":\"unsourced_figure\",\"summary\":[\"cloud/plan · free · keys 2 of 3 · create_key allowed\"],\"doc\":\"https://remembra.dev/contact\"}\n\nevent: usage\ndata: {\"model\":\"gpt-4o-mini\",\"reads\":1,\"model_calls\":2,\"input_tokens\":3900,\"cached_tokens\":0,\"output_tokens\":64,\"usd\":0.000623,\"billed_to_credits\":false,\"asks_today\":5,\"asks_limit\":40,\"input_redactions\":0}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "events": [
+      {
+        "event": "read",
+        "data": {
+          "id": "r1",
+          "tool": "plan",
+          "label": "cloud/plan",
+          "args": {},
+          "ok": true,
+          "http_status": 200,
+          "summary": "free · keys 2 of 3 · create_key allowed",
+          "ms": 22,
+          "anchor": null
+        }
+      },
+      {
+        "event": "answer",
+        "data": {
+          "text": "That's all I can confirm.",
+          "evidence": [
+            {
+              "ref": "r1",
+              "label": "cloud/plan · free · keys 2 of 3 · create_key allowed",
+              "anchor": null
+            }
+          ],
+          "commands": [],
+          "fallback": true,
+          "fallback_reason": "unsourced_figure",
+          "summary": [
+            "cloud/plan · free · keys 2 of 3 · create_key allowed"
+          ],
+          "doc": "https://remembra.dev/contact"
+        }
+      },
+      {
+        "event": "usage",
+        "data": {
+          "model": "gpt-4o-mini",
+          "reads": 1,
+          "model_calls": 2,
+          "input_tokens": 3900,
+          "cached_tokens": 0,
+          "output_tokens": 64,
+          "usd": 0.000623,
+          "billed_to_credits": false,
+          "asks_today": 5,
+          "asks_limit": 40,
+          "input_redactions": 0
+        }
+      },
+      {
+        "event": "done",
+        "data": {
+          "ok": true
+        }
+      }
+    ]
+  },
+  "error_tail": {
+    "events": [
+      {
+        "event": "error",
+        "data": {
+          "error": "model_unavailable",
+          "message": "Marshal's model didn't answer. Rules-only checks still work.",
+          "retryable": true
+        }
+      },
+      {
+        "event": "usage",
+        "data": {
+          "model": "gpt-4o-mini",
+          "reads": 1,
+          "model_calls": 1,
+          "input_tokens": 0,
+          "cached_tokens": 0,
+          "output_tokens": 0,
+          "usd": 0,
+          "billed_to_credits": false,
+          "asks_today": 4,
+          "asks_limit": 40,
+          "input_redactions": 0
+        }
+      },
+      {
+        "event": "done",
+        "data": {
+          "ok": false
+        }
+      }
+    ]
+  }
+}

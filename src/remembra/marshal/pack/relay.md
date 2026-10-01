@@ -644,3 +644,51 @@ the path). A blocked value becomes `[REDACTED:pii]`; a close is never rejected f
 root-commit fingerprint keys are stored as identifiers, without that scrub. The brief's `handoff_location`
 field holds the repository key without the fingerprint keys, but the brief JSON also returns the handoff's
 stored metadata, and that includes `relay.location.fingerprints`.
+
+
+## Persistent unresolved work (candidate source)
+
+The open-work API and `session_open_work` tool described here require the new
+server and MCP package. An older deployment does not gain them from a client
+restart alone.
+
+A close captures explicit TODOs, failing test or command results, and reported
+errors independently of the compact handoff's display limits. A later unrelated
+handoff or a re-close that omits an item does not resolve it. On schema migration,
+older relay handoffs—including superseded ones—contribute their explicit TODOs
+and failures. Historical reports are unverified; migration does not establish
+that a problem still occurs today.
+
+The brief shows a bounded page with failures first, a total, and a cursor when
+more items exist. Call `session_open_work` with `after` set to that cursor to read
+the next page. Every value remains untrusted agent data. Items are scoped to the
+authenticated user and project; a shared project does not automatically expose
+another user's personal open-work ledger.
+
+Each item has an opaque `id`, a `version`, and one of three states:
+
+- `open`: still reported unresolved.
+- `resolution_proposed`: an agent or account holder submitted a stored evidence
+  reference. The item stays in the unresolved view.
+- `resolved`: the authenticated account holder accepted the proposal. A genuinely
+  newer report of the same problem reopens it; a retry or older offline delivery
+  does not.
+
+`session_open_work(action="propose_resolution", item_id=..., version=...,
+evidence_memory_id=...)` proposes evidence in the same user's project.
+`action="reopen"` reopens an item. Concurrent or stale updates return a conflict;
+read the current version before retrying. The MCP tool and Python SDK cannot
+confirm a resolution, and a caller cannot supply a human flag.
+
+Account-holder confirmation uses `POST /api/v1/session/open-work/{item_id}` with
+an authenticated account login, `action="confirm_resolution"`, `project_id`, and
+the current `version`. API-key authentication cannot confirm. The evidence must
+still exist, be unexpired, and match the digest recorded with the proposal. This
+records acceptance of agent evidence, not independent verification by Remembra.
+No dashboard confirmation screen is included in this candidate.
+
+The ledger stores references and state rather than a second copy of private
+content. Expired source content is withheld while its unresolved count remains.
+Deleting the source memory removes its item; project and account erasure remove
+both items and their event history. This ledger does not yet define a canonical
+owner-approved project goal or automatically enforce every agent's behavior.

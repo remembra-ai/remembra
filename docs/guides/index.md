@@ -7,6 +7,7 @@ In-depth guides for using Remembra effectively.
 - [Python SDK](python-sdk.md) — Full Python client reference
 - [JavaScript SDK](javascript-sdk.md) — TypeScript/JS client reference  
 - [REST API](rest-api.md) — Direct API access
+- [Marshal desk](marshal-desk.md) — Dashboard diagnostics, availability, limits and model usage
 
 ## Memory Features
 

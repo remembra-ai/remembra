@@ -7,9 +7,10 @@
 - ``GET    /api/v1/projects/links``    links of a project (both directions)
 - ``DELETE /api/v1/projects/links``    remove a link
 - ``POST   /api/v1/session/close``     session facts -> ONE structured handoff (idempotent per agent+session)
-- ``GET    /api/v1/session/brief``     pickup brief (accepts a project id or a location)
+- ``GET    /api/v1/session/brief``     pickup brief (accepts a project id or a location; ``preview=1`` records nothing)
 - ``GET    /api/v1/trail``             handoffs + checkpoints across agents, newest first
 - ``GET    /api/v1/trail/summary``     per-agent / per-project activity (dashboard)
+- ``GET    /api/v1/trail/diagnosis``   Marshal's rules verdict for one agent (the "why?" slip's, server-side)
 
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
@@ -25,7 +26,8 @@ location bindings.
 Reads never bind: GET brief and trail compute the project for an unseen
 location without recording it; only close and ``POST /projects/resolve``
 record bindings. The one thing a brief records is a pickup event (R-18): the
-ids and times of a handoff served to a different agent, never its content.
+ids and times of a handoff served to a different agent, never its content;
+a brief read with ``preview=1`` records nothing.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ import contextlib
 import re
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 import structlog
@@ -44,6 +46,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from remembra.api.v1.agent_session import screen_text
 from remembra.auth.middleware import (
     AGENT_HEADER,
+    READ_ONLY_PREFIXES,
     AuthenticatedUser,
     CurrentUser,
     enforce_agent_scope,
@@ -55,9 +58,12 @@ from remembra.auth.middleware import (
 from remembra.client.project import normalize_project_id
 from remembra.cloud.limits import hold_unenriched_writes, record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
+from remembra.marshal.diagnosis import SLIP_AGENT_LIMIT, SLIP_TRAIL_LIMIT, diagnose_agent
 from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
 from remembra.security.audit import AuditAction
 from remembra.services import relay_split
+from remembra.services.marshal_diagnosis import evidence as diagnosis_evidence
+from remembra.services.marshal_diagnosis import gather_diagnosis_input, utc_z
 from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, RelayService
 
 router = APIRouter(tags=["relay"])
@@ -828,6 +834,10 @@ async def session_brief(
     ] = None,
     hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
     git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
+    preview: Annotated[
+        bool,
+        Query(description="Read without recording a pickup (Marshal, previews). Nothing is written, whatever the key's agent."),
+    ] = False,
 ) -> dict[str, Any]:
     """Latest handoff that recorded any work ("Last session: ..."; newer empty
     ones are skipped and counted in ``handoffs_skipped``), unread inbox,
@@ -850,8 +860,15 @@ async def session_brief(
 
     Records one pickup event when a handoff written by another agent is
     served (per handoff, reader agent and ``session_id``); nothing else is
-    written."""
+    written. ``preview=1`` records nothing at all, whatever the caller's
+    agent (an agent-scoped key included): the Marshal desk reads briefs this
+    way only, and is refused (``preview_required``) without it."""
     _require(current_user, "memory:recall")
+    if not preview and current_user.api_key_id.startswith(READ_ONLY_PREFIXES):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "preview_required", "message": "Marshal reads briefs with preview=1 only."},
+        )
     notes: list[str] = []
     agent, verified = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo)
@@ -888,6 +905,8 @@ async def session_brief(
     )
     brief["resolution"] = resolution
     reader_session = (session_id or "").strip()
+    if preview:
+        return brief
     if agent and _AGENT_RE.match(agent) and (not reader_session or _SESSION_RE.match(reader_session)):
         await service.record_pickup(
             user_id=current_user.user_id,
@@ -974,3 +993,36 @@ async def trail_summary(
         tz_offset_minutes=tz_offset_minutes,
         allowed=current_user.project_ids or None,
     )
+
+
+@router.get("/trail/diagnosis", summary="Marshal's rules verdict for one agent (why is it waiting?)")
+@limiter.limit("30/minute")
+async def trail_diagnosis(
+    request: Request,
+    current_user: CurrentUser,
+    agent_id: Annotated[str, Query(min_length=1, max_length=128, description="The agent to diagnose, e.g. codex")],
+) -> dict[str, Any]:
+    """The dashboard's "why?" verdict for one agent, computed on the server from
+    the same reads the slip makes: your active keys, the newest 100 trail
+    entries (with who picked each handoff up) and the agent's own newest 5
+    (``window``). The verdict says whether the data proves it or it is
+    inferred, and gives the one fix; ``evidence`` holds the counts it rests
+    on. Rules only, no model. Read-only: nothing is recorded. A key restricted
+    to projects reads only those projects and sees no key names."""
+    _require(current_user, "memory:recall")
+    agent = (agent_id or "").strip()
+    if not _AGENT_RE.match(agent):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid agent_id: use 1-128 chars of letters, digits and ._:@/+-",
+        )
+    now = datetime.now(UTC)
+    inp = await gather_diagnosis_input(request.app.state, current_user, agent, now)
+    verdict = diagnose_agent(inp)
+    return {
+        "agent_id": inp.agent_id,
+        "generated_at": utc_z(now),
+        "window": {"trail_limit": SLIP_TRAIL_LIMIT, "agent_limit": SLIP_AGENT_LIMIT},
+        "verdict": verdict.as_dict(),
+        "evidence": diagnosis_evidence(inp),
+    }

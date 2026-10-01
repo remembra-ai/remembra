@@ -104,3 +104,51 @@ def test_broken_json_list_fails_with_the_setting_name(monkeypatch):
 def test_list_settings_passed_in_code_are_untouched():
     s = Settings(_env_file=None, trusted_proxies=[], superadmin_user_ids=["u1"])  # type: ignore[call-arg]
     assert s.trusted_proxies == [] and s.superadmin_user_ids == ["u1"]
+
+
+# ---------------------------------------------------------------------------
+# The Marshal desk's settings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("user_a,user_b", ["user_a", "user_b"]), ('["user_a", "user_b"]', ["user_a", "user_b"]), ("user_a", ["user_a"])],
+)
+def test_marshal_allow_users_accepts_json_or_comma_lists(monkeypatch, raw, expected):
+    assert _settings(monkeypatch, marshal_allow_users=raw).marshal_allow_users == expected
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_blank_marshal_allow_users_means_everyone(monkeypatch, value):
+    assert _settings(monkeypatch, marshal_allow_users=value).marshal_allow_users == []
+
+
+def test_marshal_defaults_are_off_and_capped(monkeypatch):
+    s = _settings(monkeypatch)
+    assert s.marshal_enabled is False and s.marshal_model == "gpt-4o-mini"
+    assert (s.marshal_daily_usd, s.marshal_monthly_usd, s.marshal_user_daily_asks) == (5.0, 100.0, 40)
+    with pytest.raises(ValidationError):
+        _settings(monkeypatch, marshal_daily_usd="0")
+
+
+def test_the_desk_key_falls_back_to_the_openai_key(monkeypatch):
+    from remembra.marshal.desk.llm import desk_key
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert desk_key(_settings(monkeypatch, openai_api_key="sk-shared")) == "sk-shared"
+    assert desk_key(_settings(monkeypatch, openai_api_key="sk-shared", marshal_openai_api_key="sk-desk")) == "sk-desk"
+    assert desk_key(_settings(monkeypatch, openai_api_key="sk-shared", marshal_openai_api_key="  ")) == "sk-shared"
+    monkeypatch.delenv("REMEMBRA_OPENAI_API_KEY")
+    monkeypatch.delenv("REMEMBRA_MARSHAL_OPENAI_API_KEY")
+    assert desk_key(_settings(monkeypatch)) is None
+
+
+def test_the_desk_base_url_blank_is_unset_and_must_be_http(monkeypatch):
+    assert _settings(monkeypatch, marshal_openai_base_url="").marshal_openai_base_url is None
+    assert (
+        _settings(monkeypatch, marshal_openai_base_url="http://127.0.0.1:8799/v1").marshal_openai_base_url
+        == "http://127.0.0.1:8799/v1"
+    )
+    with pytest.raises(ValidationError, match="marshal_openai_base_url"):
+        _settings(monkeypatch, marshal_openai_base_url="ftp://stub/v1")
