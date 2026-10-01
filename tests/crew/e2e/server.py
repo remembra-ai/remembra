@@ -212,7 +212,22 @@ class Metrics:
         self.tx_waits: dict[str, list[float]] = defaultdict(list)
         self.sweep_steps: dict[str, list[float]] = defaultdict(list)
         self.sqlite_calls: dict[str, dict[str, float]] = {}
+        self.statement_waits: dict[str, list[float]] = defaultdict(list)
+        self.resource_baseline = self.process_resources()
         self.errors: list[str] = []
+
+    @staticmethod
+    def process_resources() -> dict[str, float]:
+        try:
+            usage = __import__("resource").getrusage(0)
+        except ImportError:
+            return {}
+        return {
+            "user_s": usage.ru_utime,
+            "system_s": usage.ru_stime,
+            "voluntary_switches": usage.ru_nvcsw,
+            "involuntary_switches": usage.ru_nivcsw,
+        }
 
     def summary(self) -> dict[str, Any]:
         def pct(values: list[float], q: float) -> float:
@@ -250,6 +265,16 @@ class Metrics:
             },
             "sweep_steps": {step: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for step, v in self.sweep_steps.items()},
             "sqlite_calls": self.sqlite_calls,
+            "statement_waits": {
+                tag: {
+                    "count": len(v),
+                    "p95_ms": round(pct(v, 0.95) * 1000, 2),
+                    "total_ms": round(sum(v) * 1000, 2),
+                    "max_ms": round(max(v) * 1000, 2),
+                }
+                for tag, v in self.statement_waits.items()
+            },
+            "process_resources": {k: v - self.resource_baseline.get(k, 0) for k, v in self.process_resources().items()},
             "database_locked": self.locked.count,
             "database_locked_samples": self.locked.samples,
             "errors": self.errors[:20],
@@ -291,7 +316,7 @@ class TimingMiddleware:
             METRICS.statuses[key][status["code"]] += 1
 
 
-def instrument_transactions(crew_db: Any) -> None:
+def instrument_transactions(crew_db: Any, *, prefix: str = "") -> None:
     """Time every ``crew.db`` transaction; tagged ones (retention) are reported separately."""
     original: Callable[[], Any] = crew_db.transaction
 
@@ -300,17 +325,32 @@ def instrument_transactions(crew_db: Any) -> None:
         waiting = time.perf_counter()
         async with original():
             started = time.perf_counter()
-            METRICS.tx_waits[_TAG.get() or "all"].append(started - waiting)
+            METRICS.tx_waits[prefix + (_TAG.get() or "all")].append(started - waiting)
             try:
                 yield
             finally:
-                METRICS.tx_holds[_TAG.get() or "all"].append(time.perf_counter() - started)
+                METRICS.tx_holds[prefix + (_TAG.get() or "all")].append(time.perf_counter() - started)
 
     crew_db.transaction = timed
     # Test-only diagnostics: distinguish SQLite execution from worker scheduling
     # and coroutine overhead. No parameters, tokens or SQL text are retained.
     raw = crew_db.conn.raw
     original_execute = raw._execute
+    coord = crew_db._tx
+    original_run = coord.run
+
+    async def measured_run(factory: Any) -> Any:
+        if coord.owns():
+            return await original_run(factory)
+        waiting = time.perf_counter()
+
+        async def entered() -> Any:
+            METRICS.statement_waits[prefix + (_TAG.get() or "background")].append(time.perf_counter() - waiting)
+            return await factory()
+
+        return await original_run(entered)
+
+    coord.run = measured_run
 
     async def measured_execute(fn: Any, *args: Any, **kwargs: Any) -> Any:
         elapsed = [0.0]
@@ -326,7 +366,12 @@ def instrument_transactions(crew_db: Any) -> None:
         try:
             return await original_execute(measured)
         finally:
-            key = f"{_TAG.get() or 'background'}:{getattr(fn, '__name__', type(fn).__name__)}"
+            operation = getattr(fn, "__name__", type(fn).__name__)
+            if args and isinstance(args[0], str):
+                table = re.search(r"\b(?:FROM|UPDATE|INTO)\s+([a-z_]+)", args[0], re.IGNORECASE)
+                if table:
+                    operation += ":" + table[1].lower()
+            key = f"{prefix}{_TAG.get() or 'background'}:{operation}"
             stat = METRICS.sqlite_calls.setdefault(key, {"count": 0, "worker_ms": 0, "wall_ms": 0})
             stat["count"] += 1
             stat["worker_ms"] += elapsed[0]
@@ -512,6 +557,7 @@ async def serve(workdir: Path, port: int, webhook_forward: str | None, users: in
             raise RuntimeError("the e2e server stopped during start-up")
         await asyncio.sleep(0.05)
     instrument_transactions(app.state.crew_db)
+    instrument_transactions(app.state.db, prefix="main:")
     instrument_reaper(app)
     creds = await seed_owner(app)
     extra = await seed_users(app, users) if users else []
