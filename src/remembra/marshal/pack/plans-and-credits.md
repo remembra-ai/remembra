@@ -23,7 +23,8 @@ combined with other offers.
 (Solo: 26,400) go into one bank you can use in any month of your subscription
 year. A new yearly plan unlocks the full bank 14 days after purchase; until
 then one month's credits are available. The bank resets when your subscription year renews.
-A refund or chargeback of the subscription ends the plan and its bank at once.
+An approved full refund or chargeback ends the paid plan and its bank at once.
+A partial refund leaves the plan, its remaining credits and renewal active.
 
 **Team is pooled.** The owner pays per seat. A member of the owner's teams
 who has no paid plan of their own (seats go to the earliest joiners first, up
@@ -32,14 +33,14 @@ cap and limits. Notes themselves are shared only through shared spaces.
 
 ### Input limits
 
-| | Free | Solo, Pro, Team |
-|---|------|------------------|
-| Characters per stored item | 8,000 | 50,000 |
-| Items per batch request | 10 | 100 |
-| Queries per batch recall | 5 | 20 |
-| Recall burst | 20 / minute | 60 / minute |
-| Handoff burst | 30 / minute | 60 / minute |
-| Stores without enrichment (atomic, relay, out of credits) | 300 / day | No daily limit |
+| | Free | Solo | Pro, Team |
+|---|------|------|-----------|
+| Characters per stored item | 8,000 | 50,000 | 50,000 |
+| Items per batch request | 10 | 100 | 100 |
+| Queries per batch recall | 5 | 20 | 20 |
+| Recall burst | 20 / minute | 60 / minute | 120 / minute |
+| Handoff burst | 30 / minute | 60 / minute | 120 / minute |
+| Stores without enrichment (atomic, relay, out of credits) | 300 / day | No daily limit | No daily limit |
 
 ### Crew mode limits
 

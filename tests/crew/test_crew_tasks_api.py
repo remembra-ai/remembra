@@ -12,6 +12,7 @@ from remembra.api.v1.crew_tasks import SESSION_TOKEN_HEADER
 from remembra.crew.access import _walk_routes, audit_crew_routes
 from remembra.crew.limits import CrewRateLimiter, set_crew_rate_limiter
 from remembra.crew.schemas import ROUTES
+from remembra.core.time import utcnow
 from tests.crew.wp6_support import CREW, OTHER_CREW, open_db, seed_crew, seed_session, seed_zone, set_settings
 from tests.security_harness import JWT_SECRET, make_settings, secure_app
 
@@ -90,7 +91,9 @@ async def test_session_flow_create_start_checkpoint_report(tmp_path):
             ckp = {
                 "session_id": session["id"],
                 "trigger": "test",
-                "facts": {"tests": [{"command": "npm test -- pos", "passed": 3, "failed": 0}]},
+                "facts": {
+                    "tests": [{"command": "npm test -- pos", "passed": 3, "failed": 0, "observed_at": utcnow().isoformat()}]
+                },
             }
             r = await h.client.post(f"{API}/crews/{CREW}/checkpoints", json=ckp, headers=as_session)
             assert r.status_code == 201 and r.json()["created"] and r.json()["checkpoint"]["facts_source"] == "relay-cli"

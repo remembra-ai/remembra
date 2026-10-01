@@ -1232,11 +1232,13 @@ def test_terms_pricing_and_refunds_state_the_same_refund_policy() -> None:
     assert 'href="/refunds"' in (LANDING / "pricing.html").read_text()
 
 
-def test_refund_policy_says_a_refund_cancels_the_subscription_and_the_webhook_does() -> None:
-    # "A refund ends the plan" alone let the Paddle subscription renew and charge again.
+def test_refund_policy_distinguishes_full_partial_and_chargeback() -> None:
     refunds = _text((LANDING / "refunds.html").read_text())
+    assert "An approved full refund ends the plan at once" in refunds
     assert "We cancel the subscription with Paddle at the same time, so it does not renew" in refunds
-    assert "A chargeback ends the paid plan and cancels the subscription" in refunds
+    assert "the paid plan and its remaining credits stay active" in refunds
+    assert "A partial refund does not cancel renewal" in refunds
+    assert "An approved chargeback ends the paid plan and cancels the subscription" in refunds
     billing = (Path(__file__).resolve().parent.parent / "src" / "remembra" / "api" / "v1" / "billing.py").read_text()
     refund_handler = billing[billing.index("async def _apply_paddle_refund") :]
     assert "_cancel_refunded_subscription(" in refund_handler
