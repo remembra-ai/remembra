@@ -116,37 +116,36 @@ def test_stdio_client_discovers_and_resolves_its_own_collision(live, clock):
     async def run():
         params = StdioServerParameters(command=sys.executable, args=["-m", "remembra.mcp.server"], env=env)
         with open(os.devnull, "w") as errors:
-            async with stdio_client(params, errlog=errors) as (reader, writer):
-                async with ClientSession(reader, writer) as client:
-                    await client.initialize()
-                    tools = await client.list_tools()
-                    tool = next(t for t in tools.tools if t.name == "crew_collision")
-                    assert tool.inputSchema["properties"]["action"]["enum"] == ["list", "ack", "resolve"]
-                    await client.call_tool("crew_status", {"project_id": project})
-                    await client.call_tool("crew_checkpoint", {"files_changed": [path]})
-                    await server.mcp.call_tool("crew_checkpoint", {"files_changed": [path]})
-                    listed = await client.call_tool("crew_collision", {})
-                    text = "\n".join(b.text for b in listed.content if hasattr(b, "text"))
-                    collision = re.search(r"col_[A-Za-z0-9_-]+", text)
-                    assert not listed.isError and collision is not None
-                    denied = await client.call_tool("crew_collision", {"action": "dismiss", "collision": collision[0]})
-                    assert denied.isError
-                    result = await client.call_tool(
-                        "crew_collision",
-                        {"action": "resolve", "collision": collision[0], "resolution": "Compared both synthetic checkpoints"},
-                    )
-                    assert not result.isError
-                    assert any(f"COLLISION {collision[0]}: resolved" in b.text for b in result.content if hasattr(b, "text"))
-                    stored = live.crew_rows("SELECT state, resolved_by FROM crew_collisions WHERE id = ?", (collision[0],))[0]
-                    child = live.crew_rows("SELECT id FROM crew_sessions WHERE session_id = ?", ("wire-child",))[0]
-                    assert stored == {"state": "resolved", "resolved_by": child["id"]}
-                    await client.call_tool(
-                        "close_session",
-                        {
-                            "project_id": project,
-                            "facts": {"notes": "Synthetic MCP wire collision test completed"},
-                            "end_reason": "done",
-                        },
-                    )
+            async with stdio_client(params, errlog=errors) as (reader, writer), ClientSession(reader, writer) as client:
+                await client.initialize()
+                tools = await client.list_tools()
+                tool = next(t for t in tools.tools if t.name == "crew_collision")
+                assert tool.inputSchema["properties"]["action"]["enum"] == ["list", "ack", "resolve"]
+                await client.call_tool("crew_status", {"project_id": project})
+                await client.call_tool("crew_checkpoint", {"files_changed": [path]})
+                await server.mcp.call_tool("crew_checkpoint", {"files_changed": [path]})
+                listed = await client.call_tool("crew_collision", {})
+                text = "\n".join(b.text for b in listed.content if hasattr(b, "text"))
+                collision = re.search(r"col_[A-Za-z0-9_-]+", text)
+                assert not listed.isError and collision is not None
+                denied = await client.call_tool("crew_collision", {"action": "dismiss", "collision": collision[0]})
+                assert denied.isError
+                result = await client.call_tool(
+                    "crew_collision",
+                    {"action": "resolve", "collision": collision[0], "resolution": "Compared both synthetic checkpoints"},
+                )
+                assert not result.isError
+                assert any(f"COLLISION {collision[0]}: resolved" in b.text for b in result.content if hasattr(b, "text"))
+                stored = live.crew_rows("SELECT state, resolved_by FROM crew_collisions WHERE id = ?", (collision[0],))[0]
+                child = live.crew_rows("SELECT id FROM crew_sessions WHERE session_id = ?", ("wire-child",))[0]
+                assert stored == {"state": "resolved", "resolved_by": child["id"]}
+                await client.call_tool(
+                    "close_session",
+                    {
+                        "project_id": project,
+                        "facts": {"notes": "Synthetic MCP wire collision test completed"},
+                        "end_reason": "done",
+                    },
+                )
 
     asyncio.run(run())
