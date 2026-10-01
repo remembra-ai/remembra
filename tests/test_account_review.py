@@ -539,24 +539,25 @@ async def test_keys_made_while_the_review_is_open_are_listed_too(tmp_path, provi
         assert len(keys_listed) == 2 and await key_works(h, old_key)
 
 
-async def test_migration_10_is_additive_and_reapplies_on_a_schema_9_database(tmp_path) -> None:
+async def test_migration_10_is_additive_and_reapplies_on_a_schema_9_database(tmp_path, monkeypatch) -> None:
     from remembra.storage.database import VERSIONED_MIGRATIONS, Database
 
-    assert [v for v, _, _ in VERSIONED_MIGRATIONS][-1] == 10
+    import remembra.storage.database as database
+
+    assert {v: n for v, n, _ in VERSIONED_MIGRATIONS}[10] == "account_reviews"
     # 5 is Crew mode's (merged after 0.16.1 shipped 6-10): production databases get it on the next boot.
     assert {v: n for v, n, _ in VERSIONED_MIGRATIONS}[5] == "crew_agent_inbox_scoping"
     db = Database(str(tmp_path / "m.db"))
     await db.connect()
     try:
-        await db.init_schema()
-        assert await db.get_schema_version() == 10
-        # A production database at schema 9: the table and the version row are absent.
-        await db.conn.execute("DROP TABLE account_reviews")
-        await db.conn.execute("DELETE FROM schema_version WHERE version = 10")
-        await db.conn.commit()
+        # Build a real schema-9 fixture, excluding later tables and versions.
+        with monkeypatch.context() as patch:
+            patch.setattr(database, "VERSIONED_MIGRATIONS", [m for m in VERSIONED_MIGRATIONS if m[0] <= 9])
+            await db.init_schema()
+        assert await db.get_schema_version() == 9
         assert await account_review.get_review(db, "u1") is None  # tolerated before the upgrade
         await db.init_schema()
-        assert await db.get_schema_version() == 10
+        assert await db.get_schema_version() == 12
         cursor = await db.conn.execute("SELECT name FROM schema_version WHERE version = 10")
         assert (await cursor.fetchone())[0] == "account_reviews"
         review = await account_review.open_review(

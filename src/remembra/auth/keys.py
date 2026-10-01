@@ -1,5 +1,6 @@
 """API key generation and management."""
 
+import asyncio
 import hashlib
 import os
 import re
@@ -150,7 +151,7 @@ class APIKeyManager:
         """
         key_id = self.generate_key_id()
         raw_key = self.generate_key()
-        key_hash = self.hash_key(raw_key)
+        key_hash = await asyncio.to_thread(self.hash_key, raw_key)
         key_lookup = self.compute_lookup(raw_key)
 
         await self.db.save_api_key(
@@ -252,8 +253,12 @@ class APIKeyManager:
         # 2) O(1) indexed lookup by deterministic hash, then bcrypt verify
         lookup_row = await self.db.get_active_api_key_by_lookup(cache_key)
         if lookup_row:
-            if self.verify_key(raw_key, lookup_row["key_hash"]):
-                key_data = self._normalize_key_data(lookup_row)
+            if await asyncio.to_thread(self.verify_key, raw_key, lookup_row["key_hash"]):
+                # Revocation or permission changes can happen while bcrypt runs.
+                validated_row = await self.db.get_active_api_key_by_lookup(cache_key)
+                if validated_row is None or validated_row["key_hash"] != lookup_row["key_hash"]:
+                    return None
+                key_data = self._normalize_key_data(validated_row)
                 if record_use:
                     await self.db.update_api_key_last_used(key_data["id"])
                 self._cache_put(cache_key, key_data)
@@ -266,9 +271,12 @@ class APIKeyManager:
         # 3) Bounded legacy fallback for keys predating the key_lookup column
         unmigrated = await self.db.get_unmigrated_active_api_keys()
         for legacy_row in unmigrated:
-            if self.verify_key(raw_key, legacy_row["key_hash"]):
+            if await asyncio.to_thread(self.verify_key, raw_key, legacy_row["key_hash"]):
                 await self.db.set_api_key_lookup(legacy_row["id"], cache_key)  # backfill → O(1) next time
-                key_data = self._normalize_key_data(legacy_row)
+                validated_row = await self.db.get_active_api_key_by_lookup(cache_key)
+                if validated_row is None or validated_row["key_hash"] != legacy_row["key_hash"]:
+                    return None
+                key_data = self._normalize_key_data(validated_row)
                 if record_use:
                     await self.db.update_api_key_last_used(key_data["id"])
                 self._cache_put(cache_key, key_data)
@@ -285,7 +293,7 @@ class APIKeyManager:
         row = await self.db.get_active_api_key_by_lookup(cache_key)
         if row is None:
             for legacy_row in await self.db.get_unmigrated_active_api_keys():
-                if self.verify_key(raw_key, legacy_row["key_hash"]):
+                if await asyncio.to_thread(self.verify_key, raw_key, legacy_row["key_hash"]):
                     row = legacy_row
                     break
         if row is None:

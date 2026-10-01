@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -94,3 +95,43 @@ async def test_unexpected_client_failure_is_recorded_without_a_success():
     assert await L.timed(stats, "heartbeat", Api(), "POST", "/crew/heartbeat") is None
     assert stats.statuses == {"heartbeat": {0: 1}}
     assert stats.errors == ["heartbeat: ValueError"]
+
+
+def test_setup_failure_is_written_before_nonzero_exit(monkeypatch, tmp_path, capsys):
+    closed, stopped = [], []
+
+    class Server:
+        def __init__(self, *_args, **_kwargs):
+            self.info = {"keys": ["synthetic"]}
+            self.url, self.key = "http://example.invalid", "synthetic"
+
+        def start(self):
+            return self
+
+        def stop(self):
+            stopped.append(True)
+
+    class Api:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def call(self, *_args, **_kwargs):
+            raise L.Unreachable("synthetic transport timeout")
+
+        async def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(L, "ServerProc", Server)
+    monkeypatch.setattr(L, "Api", Api)
+    out = tmp_path / "report.json"
+    assert L.main(["--crews", "1", "--sessions", "5", "--duration", "3600", "--out", str(out), "--workdir", str(tmp_path)]) == 1
+    report = json.loads(out.read_text())
+    assert report["ok"] is False
+    assert report["phase"] == "setup"
+    assert report["failure"] == {"phase": "setup", "exception": "AssertionError"}
+    assert report["config"]["duration"] == 3600 and report["config"]["sessions"] == 5
+    assert report["requests"]["attempted"] == {"host_register": 1}
+    assert report["client_statuses"] == {"host_register": {"0": 1}}
+    assert "synthetic transport timeout" in report["client_errors"][0]
+    assert len(closed) == 2 and stopped == [True]
+    assert json.loads(capsys.readouterr().out) == report

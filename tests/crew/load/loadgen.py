@@ -282,13 +282,19 @@ async def sweep_loop(admin: Api, stats: Stats, stop: asyncio.Event) -> None:
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     random.seed(args.seed)
     workdir = Path(args.workdir or tempfile.mkdtemp(prefix="crew-load-"))
-    server = ServerProc(workdir / "server", seed_users=args.crews).start()
+    server = ServerProc(workdir / "server", seed_users=args.crews)
     stats = Stats()
     stop = asyncio.Event()
     tasks: list[asyncio.Task[Any]] = []
     crews: list[Crew] = []
     admin: Api | None = None
+    phase = "startup"
+    failure: dict[str, str] | None = None
+    metrics: dict[str, Any] = {}
+    retention: dict[str, Any] | None = None
     try:
+        server.start()
+        phase = "setup"
         keys: list[str] = list(server.info["keys"])
         crews = [
             Crew(
@@ -304,12 +310,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         reset = await admin.call("POST", "/__e2e/metrics/reset", root=True)
         if not reset.ok:
             raise RuntimeError(f"metrics reset failed: HTTP {reset.status}")
+        phase = "workload"
         tasks = [asyncio.ensure_future(heartbeat_loop(c, stats, stop, args.heartbeat_s)) for c in crews]
         tasks += [asyncio.ensure_future(session_loop(c, s, stats, stop, args.claim_s)) for c in crews for s in c.sessions]
         tasks.append(asyncio.ensure_future(ingest_loop(crews, stats, stop, args.ingest_rate)))
         tasks.append(asyncio.ensure_future(sweep_loop(admin, stats, stop)))
         started = time.monotonic()
-        retention: dict[str, Any] | None = None
         while time.monotonic() - started < args.duration:
             await asyncio.sleep(1.0)
             if retention is None and time.monotonic() - started >= args.duration * 0.8:
@@ -321,6 +327,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             if isinstance(outcome, BaseException):
                 stats.errors.append(f"load worker: {type(outcome).__name__}")
         metrics = (await admin.call("GET", "/__e2e/metrics", root=True)).body
+    except Exception as exc:
+        # Preserve partial counts and transport errors even when setup never
+        # reaches the workload. Do not retry or turn an aborted run into a pass.
+        failure = {"phase": phase, "exception": type(exc).__name__}
+        stats.errors.append(f"{phase}: {type(exc).__name__}")
     finally:
         stop.set()
         try:
@@ -334,7 +345,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 await admin.close()
         finally:
             server.stop()
-    return summarize(args, metrics, retention or {}, stats)
+    report = summarize(args, metrics, retention or {}, stats)
+    report["phase"] = phase if failure else "complete"
+    if failure:
+        report["failure"] = failure
+        report["checks"]["run_completed"] = False
+        report["ok"] = False
+    return report
 
 
 def _p(values: list[float], q: float) -> float:

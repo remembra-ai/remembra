@@ -223,13 +223,13 @@ async def test_cli_create_verify_restore(tmp_path: Path, monkeypatch) -> None:
 
 async def test_scheduled_create_with_keep_covers_crew_db_and_prunes_only_old_snapshots(tmp_path: Path, monkeypatch) -> None:
     """The scheduled task (`create --out /data/backups --keep N`) on a 0.17.0 volume: the main database at
-    schema 10 with v5, and crew.db. Each run snapshots both files; only older snapshot folders are deleted."""
+    schema 12 with v5, and crew.db. Each run snapshots both files; only older snapshot folders are deleted."""
     volume = tmp_path / "data"
     db, crew_db, _crew_id = await _open_world(volume)
     applied = sorted(await main_migrations().applied_versions(db.conn))
     await crew_db.close()
     await db.close()
-    assert applied == list(range(1, 11))  # 1-4, 5 (crew_agent_inbox_scoping), 6-9, 10 (account_reviews)
+    assert applied == list(range(1, 13))  # Includes v11 claim fences and v12 durable erasure.
     monkeypatch.setenv("REMEMBRA_DATABASE_URL", f"sqlite+aiosqlite:///{volume / 'remembra.db'}")
     import remembra.config as config_module
 
@@ -253,7 +253,7 @@ async def test_scheduled_create_with_keep_covers_crew_db_and_prunes_only_old_sna
 
     assert [r["crew_included"] for r in runs] == [True] * 4
     by_role = {d["role"]: d for d in runs[-1]["databases"]}
-    assert by_role["main"]["schema_version"] == 10 and by_role["crew"]["counts"]["crews"] == 1
+    assert by_role["main"]["schema_version"] == 12 and by_role["crew"]["counts"]["crews"] == 1
     assert [len(r["pruned"]) for r in runs] == [0, 0, 1, 1]
     assert [Path(p).name for r in runs for p in r["pruned"]] == [
         "remembra-snapshot-20260926T030000Z",

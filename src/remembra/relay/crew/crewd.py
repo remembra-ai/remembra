@@ -355,7 +355,14 @@ class Api:
         url = path if root else f"/api/v1{path}"
         try:
             r = await asyncio.wait_for(
-                self.client.request(method, url, json=json_body, params=dict(params or {}) or None, headers=headers),
+                self.client.request(
+                    method,
+                    url,
+                    json=json_body,
+                    params=dict(params or {}) or None,
+                    headers=headers,
+                    timeout=httpx.Timeout(timeout, connect=min(3.0, timeout)),
+                ),
                 timeout=timeout,
             )
         except (httpx.TransportError, TimeoutError, OSError) as e:
