@@ -68,8 +68,8 @@ def test_main_and_crew_lists_are_versioned_append_only() -> None:
     # 6-10 shipped before crew merged (10 is 0.16.1's account_reviews)
     assert [v for v, _, _ in VERSIONED_MIGRATIONS] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert main_migrations().latest_version == 12
-    assert [v for v, _, _ in CREW_MIGRATIONS] == [1]
-    assert CREW_MIGRATION_RUNNER.latest_version == 1
+    assert [v for v, _, _ in CREW_MIGRATIONS] == [1, 2]
+    assert CREW_MIGRATION_RUNNER.latest_version == 2
     # One runner class serves both files.
     assert type(main_migrations()) is type(CREW_MIGRATION_RUNNER) is MigrationRunner
 
@@ -333,8 +333,8 @@ async def test_crew_db_v1_fresh_creates_every_table_and_index(tmp_path: Path) ->
     path = tmp_path / "crew.db"
     db = CrewDatabase(str(path))
     try:
-        assert await db.init_schema() == [1]
-        assert await db.get_schema_version() == 1
+        assert await db.init_schema() == [1, 2]
+        assert await db.get_schema_version() == 2
     finally:
         await db.close()
     tables = {r[0] for r in sync_rows(path, "SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -374,7 +374,35 @@ async def test_crew_db_v1_twice_keeps_data(tmp_path: Path) -> None:
         assert (await db.fetchone("SELECT project_id FROM crews WHERE id = 'crw_x'")) == {"project_id": "p"}
     finally:
         await db.close()
-    assert sync_rows(path, "SELECT COUNT(*) FROM schema_version") == [(1,)]
+    assert sync_rows(path, "SELECT COUNT(*) FROM schema_version") == [(2,)]
+
+
+async def test_crew_v1_upgrade_adds_history_indexes_without_changing_records(tmp_path: Path) -> None:
+    db = CrewDatabase(str(tmp_path / "upgrade.db"))
+    try:
+        await db.connect()
+        legacy = MigrationRunner(CREW_MIGRATIONS[:1], label="crew")
+        assert await legacy.apply(db.conn, db.transaction) == [1]
+        async with db.transaction():
+            await db.conn.execute(
+                "INSERT INTO crew_claims(id,crew_id,resource,mode,holder_kind,state,source,epoch,created_at,updated_at)"
+                " VALUES('claim-old','crew-old','service:old','exclusive','human','released','explicit',43,'t','t')"
+            )
+        before = await db.fetchone("SELECT * FROM crew_claims WHERE id='claim-old'")
+        assert await db.init_schema() == [2]
+        assert await db.get_schema_version() == 2
+        assert await db.fetchone("SELECT * FROM crew_claims WHERE id='claim-old'") == before
+        indexes = {r["name"] for r in await db.fetchall("SELECT name FROM sqlite_master WHERE type='index'")}
+        assert {
+            "idx_claims_zone_epoch",
+            "idx_claims_path_epoch",
+            "idx_claims_resource_epoch",
+            "idx_events_session_type_time",
+            "idx_events_type_time",
+        } <= indexes
+        assert await db.init_schema() == []
+    finally:
+        await db.close()
 
 
 async def test_two_processes_migrating_one_crew_file_apply_v1_once(tmp_path: Path) -> None:
@@ -382,7 +410,7 @@ async def test_two_processes_migrating_one_crew_file_apply_v1_once(tmp_path: Pat
     a, b = CrewDatabase(path), CrewDatabase(path)
     try:
         results = await asyncio.gather(a.init_schema(), b.init_schema())
-        assert sorted(results) == [[], [1]]
+        assert sorted(results) == [[], [1, 2]]
     finally:
         await a.close()
         await b.close()
@@ -485,6 +513,6 @@ def test_resolve_crew_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 async def test_in_memory_crew_db(tmp_path: Path) -> None:
     db = await open_crew_db(":memory:")
     try:
-        assert await db.get_schema_version() == 1
+        assert await db.get_schema_version() == 2
     finally:
         await db.close()

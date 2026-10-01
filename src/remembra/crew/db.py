@@ -315,6 +315,23 @@ CREW_MIGRATIONS: list[Migration] = [
             *_V1_OUTBOX_IDEMPOTENCY_NOTIFY,
         ],
     ),
+    (
+        2,
+        "crew_history_query_indexes",
+        [
+            # Fencing includes ended claims: live-state indexes cannot bound
+            # MAX(epoch) as the historical log grows.
+            "CREATE INDEX idx_claims_zone_epoch ON crew_claims(crew_id, zone_id, epoch DESC) WHERE zone_id IS NOT NULL",
+            "CREATE INDEX idx_claims_path_epoch ON crew_claims(crew_id, path_glob, epoch DESC)"
+            " WHERE zone_id IS NULL AND path_glob IS NOT NULL",
+            "CREATE INDEX idx_claims_resource_epoch ON crew_claims(crew_id, resource, epoch DESC)"
+            " WHERE zone_id IS NULL AND resource IS NOT NULL",
+            # A due session must not scan its entire event history for a
+            # checkpoint.missed/guard.blocked event on every alarm sweep.
+            "CREATE INDEX idx_events_session_type_time ON crew_events(crew_id, session_id, type, ts)",
+            "CREATE INDEX idx_events_type_time ON crew_events(crew_id, type, ts, seq)",
+        ],
+    ),
 ]
 
 CREW_MIGRATION_RUNNER = MigrationRunner(CREW_MIGRATIONS, label="crew")

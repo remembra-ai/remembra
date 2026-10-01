@@ -120,7 +120,7 @@ async def test_register_opens_crew_db_and_runs_the_outbox_with_no_manual_state(t
     with TestClient(app) as client:
         db = app.state.crew_db
         assert db is not None and db.db_path == str(tmp_path / "crew.db")
-        assert (tmp_path / "crew.db").exists() and client.portal.call(db.get_schema_version) == 1
+        assert (tmp_path / "crew.db").exists() and client.portal.call(db.get_schema_version) == 2
         worker = app.state.crew_outbox
         assert worker.running and {"memory_promotion", "relay_handoff", "crew_notify"} <= set(worker.handlers)
         screen, scrub = db_hook._relay_filters(app)  # the relay routes' filters, read from app.state
