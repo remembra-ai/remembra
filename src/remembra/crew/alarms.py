@@ -254,83 +254,148 @@ async def _missed_since(conn: aiosqlite.Connection, session: Mapping[str, Any], 
     return row is not None
 
 
-async def _contested(log_: Any, now: datetime, out: dict[str, int]) -> None:
-    conn = log_.db.conn
-    since = format_ts(now - timedelta(seconds=2 * CONTESTED_AFTER_S))
-    held = await fetchall(
+_HELD_ZONES = (
+    "SELECT c.*, z.slug AS zone_slug FROM crew_claims c JOIN crew_zones z ON z.id = c.zone_id"
+    " WHERE c.mode = 'exclusive' AND c.state IN ('active','offered','reserved') AND c.zone_id IS NOT NULL"
+)
+
+_RECENT_BLOCKS = (
+    "SELECT ts, session_id, payload FROM crew_events WHERE crew_id = ? AND type = 'guard.blocked' AND ts >= ? ORDER BY seq"
+)
+_OPEN_CONTESTED = (
+    "SELECT crew_id, dedupe_key, ref_id FROM crew_inbox_items"
+    " WHERE kind = 'zone_contested' AND state IN ('open','seen','claimed')"
+)
+_OPEN_ITEM = "SELECT id FROM crew_inbox_items WHERE crew_id = ? AND dedupe_key = ? AND state IN ('open','seen','claimed')"
+
+
+def _contest_facts(
+    claim: Mapping[str, Any],
+    queued: list[dict[str, Any]],
+    recent: list[dict[str, Any]],
+    now: datetime,
+) -> tuple[float, int] | None:
+    holder = claim.get("holder_session_id")
+    waited = [t for q in queued if q.get("holder_session_id") != holder and (t := _pts(q.get("created_at"))) is not None]
+    blocks = []
+    for row in recent:
+        payload = json.loads(row["payload"] or "{}")
+        if payload.get("zone") == claim["zone_slug"] and payload.get("decision") == "deny" and row["session_id"] != holder:
+            blocks.append((_pts(row["ts"]), row["session_id"]))
+    blocked_for = 0.0
+    if blocks:
+        first, last = blocks[0][0], blocks[-1][0]
+        if first and last and (now - last).total_seconds() <= CONTESTED_AFTER_S:
+            blocked_for = (last - first).total_seconds()
+    queued_for = max(((now - t).total_seconds() for t in waited), default=0.0)
+    duration = max(blocked_for, queued_for)
+    if duration <= CONTESTED_AFTER_S:
+        return None
+    return duration, len({sid for _, sid in blocks} | ({"q"} if waited else set()))
+
+
+async def _current_contest(
+    conn: aiosqlite.Connection, crew_id: str, zone_id: str, now: datetime, since: str
+) -> tuple[dict[str, Any], float, int] | None:
+    # Every alarm mutation revalidates the holder and waiters under the writer
+    # transaction. A stale snapshot cannot create or dismiss an owner's alarm.
+    held = await fetchall(conn, _HELD_ZONES + " AND c.crew_id = ? AND c.zone_id = ?", (crew_id, zone_id))
+    if not held:
+        return None
+    queued = await fetchall(
         conn,
-        "SELECT c.*, z.slug AS zone_slug FROM crew_claims c JOIN crew_zones z ON z.id = c.zone_id"
-        " WHERE c.mode = 'exclusive' AND c.state IN ('active','offered','reserved') AND c.zone_id IS NOT NULL",
+        "SELECT created_at, holder_session_id FROM crew_claims WHERE crew_id = ? AND zone_id = ? AND state = 'queued'",
+        (crew_id, zone_id),
     )
-    live_keys: set[tuple[str, str]] = set()
-    recent: dict[str, list[tuple[datetime | None, Any, dict[str, Any]]]] = {}
-    for claim in held:
-        crew_id, zone_id, slug = str(claim["crew_id"]), str(claim["zone_id"]), str(claim["zone_slug"])
-        holder = claim.get("holder_session_id")
-        waited: list[datetime] = []
-        for q in await fetchall(
-            conn,
-            "SELECT created_at, holder_session_id FROM crew_claims WHERE crew_id = ? AND zone_id = ? AND state = 'queued'",
-            (crew_id, zone_id),
-        ):
-            if q.get("holder_session_id") != holder and (t := _pts(q.get("created_at"))) is not None:
-                waited.append(t)
-        if crew_id not in recent:
-            recent[crew_id] = [
-                (_pts(b["ts"]), b["session_id"], json.loads(b["payload"] or "{}"))
-                for b in await fetchall(
-                    conn,
-                    "SELECT ts, session_id, payload FROM crew_events WHERE crew_id = ? AND type = 'guard.blocked' AND ts >= ?"
-                    " ORDER BY seq",
-                    (crew_id, since),
-                )
-            ]
-        blocks = [
-            (ts, sid) for ts, sid, p in recent[crew_id] if p.get("zone") == slug and p.get("decision") == "deny" and sid != holder
-        ]
-        blocked_for = 0.0
-        if blocks:
-            first, last = blocks[0][0], blocks[-1][0]
-            if first and last and (now - last).total_seconds() <= CONTESTED_AFTER_S:
-                blocked_for = (last - first).total_seconds()
-        queued_for = max(((now - t).total_seconds() for t in waited), default=0.0)
-        contested = max(blocked_for, queued_for) > CONTESTED_AFTER_S
-        key = f"contested:{zone_id}"
-        if contested:
-            live_keys.add((crew_id, key))
-            waiters = len({s for _, s in blocks} | ({"q"} if waited else set()))
-            async with log_.transaction() as tx:
-                existing = await fetchone(
-                    tx.conn,
-                    "SELECT id FROM crew_inbox_items WHERE crew_id = ? AND dedupe_key = ? AND state IN ('open','seen','claimed')",
-                    (crew_id, key),
-                )
-                if existing is None:
-                    await raise_inbox_item(
-                        tx,
-                        crew_id,
-                        audience="project",
-                        kind="zone_contested",
-                        title=f"zone {slug} contested for {int(max(blocked_for, queued_for) // 60)} min ({waiters} waiting)",
-                        dedupe_key=key,
-                        ref_type="zone",
-                        ref_id=zone_id,
-                        priority=1,
-                        primary_action="hand_baton",
-                        actor=Actor.system(),
-                    )
-                    out["contested"] += 1
-    # resolve contested items whose zone is no longer contested
-    for item in await fetchall(
+    recent = await fetchall(
         conn,
-        "SELECT crew_id, dedupe_key FROM crew_inbox_items WHERE kind = 'zone_contested' AND state IN ('open','seen','claimed')",
-    ):
-        if (str(item["crew_id"]), str(item["dedupe_key"])) in live_keys:
-            continue
-        async with log_.transaction() as tx:
-            await resolve_inbox_items(
-                tx, str(item["crew_id"]), dedupe_keys=[str(item["dedupe_key"])], resolved_by="system", actor=Actor.system()
+        _RECENT_BLOCKS,
+        (crew_id, since),
+    )
+    for claim in held:
+        if (facts := _contest_facts(claim, queued, recent, now)) is not None:
+            return claim, *facts
+    return None
+
+
+async def _contested(log_: Any, now: datetime, out: dict[str, int]) -> None:
+    since = format_ts(now - timedelta(seconds=2 * CONTESTED_AFTER_S))
+    # Unchanged zones do not wait behind every claim/release writer. All
+    # preflight reads see one committed snapshot; no writer lock is held here.
+    async with log_.db.read_snapshot() as conn:
+        held = await fetchall(conn, _HELD_ZONES)
+        queued = await fetchall(
+            conn,
+            "SELECT crew_id, zone_id, created_at, holder_session_id FROM crew_claims"
+            " WHERE state = 'queued' AND zone_id IS NOT NULL",
+        )
+        items = await fetchall(conn, _OPEN_CONTESTED)
+        recent = {
+            crew_id: await fetchall(
+                conn,
+                _RECENT_BLOCKS,
+                (crew_id, since),
             )
+            for crew_id in {str(claim["crew_id"]) for claim in held}
+        }
+    queues: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in queued:
+        queues.setdefault((str(row["crew_id"]), str(row["zone_id"])), []).append(row)
+    existing_keys = {(str(item["crew_id"]), str(item["dedupe_key"])) for item in items}
+    live_keys: set[tuple[str, str]] = set()
+    candidates: set[tuple[str, str]] = set()
+    for claim in held:
+        crew_id, zone_id = str(claim["crew_id"]), str(claim["zone_id"])
+        if _contest_facts(claim, queues.get((crew_id, zone_id), []), recent[crew_id], now) is None:
+            continue
+        live_key = (crew_id, f"contested:{zone_id}")
+        live_keys.add(live_key)
+        if live_key not in existing_keys:
+            candidates.add((crew_id, zone_id))
+    for crew_id, zone_id in candidates:
+        key = f"contested:{zone_id}"
+        async with log_.transaction() as tx:
+            current = await _current_contest(tx.conn, crew_id, zone_id, now, since)
+            if current is None:
+                continue
+            existing = await fetchone(
+                tx.conn,
+                _OPEN_ITEM,
+                (crew_id, key),
+            )
+            if existing is not None:
+                continue
+            claim, duration, waiters = current
+            await raise_inbox_item(
+                tx,
+                crew_id,
+                audience="project",
+                kind="zone_contested",
+                title=f"zone {claim['zone_slug']} contested for {int(duration // 60)} min ({waiters} waiting)",
+                dedupe_key=key,
+                ref_type="zone",
+                ref_id=zone_id,
+                priority=1,
+                primary_action="hand_baton",
+                actor=Actor.system(),
+            )
+            out["contested"] += 1
+    for item in items:
+        crew_id, key = str(item["crew_id"]), str(item["dedupe_key"])
+        if (crew_id, key) in live_keys:
+            continue
+        zone_id = str(item["ref_id"] or key.removeprefix("contested:"))
+        async with log_.transaction() as tx:
+            if await _current_contest(tx.conn, crew_id, zone_id, now, since) is not None:
+                continue
+            existing = await fetchone(
+                tx.conn,
+                _OPEN_ITEM,
+                (crew_id, key),
+            )
+            if existing is None:
+                continue
+            await resolve_inbox_items(tx, crew_id, dedupe_keys=[key], resolved_by="system", actor=Actor.system())
             out["uncontested"] += 1
 
 
