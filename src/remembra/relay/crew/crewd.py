@@ -2190,7 +2190,7 @@ class Crewd:
             }
 
     async def end(self, peer: Peer | None, args: Mapping[str, Any], *, grace: bool = True) -> dict[str, Any]:
-        """SessionEnd (§8.2): relay close, baton ref if dirty, ``leave`` (reserve or release), mark ended."""
+        """SessionEnd: preserve dirty/unpublished work, close, leave and mark ended."""
         key = str(args.get("key") or "")
         sess = self.sessions.get(key) if peer is None else self.resolve_peer(peer, key)
         if sess is None:
@@ -2203,12 +2203,10 @@ class Crewd:
                 return {"ok": True, "already": True}
             fast = self._spool_fast("leave", sess, {"reason": reason})
             top = str(sess["toplevel"])
-            try:
-                dirty = not await asyncio.to_thread(B.is_clean, top)
-            except B.GitError:
-                dirty = False
             baton = self._baton_from_args(sess, args)
-            if baton is None and (dirty or reason == "clear"):
+            # Capture decides whether dirty files or unpublished history need
+            # preserving. A clean tree alone does not mean the work is portable.
+            if baton is None:
                 baton = await self.make_baton(sess)
                 if baton is not None:  # a replay of this SessionEnd reuses the same baton ref
                     fast = self._spool_fast("leave", sess, {"reason": reason, "baton": baton.as_dict()})
@@ -2307,8 +2305,7 @@ class Crewd:
                 self.arbiter.mark_dead(str(sess["crew_id"]), str(sess["session_id"]))
                 baton = None
                 try:
-                    if not await asyncio.to_thread(B.is_clean, str(sess["toplevel"])):
-                        baton = await self.make_baton(sess)
+                    baton = await self.make_baton(sess)
                 except B.GitError:
                     pass
                 await self.relay_close(sess, "orphaned", sess.get("transcript_path"))

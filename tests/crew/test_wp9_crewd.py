@@ -372,3 +372,31 @@ async def test_a_stall_replayed_from_the_outbox_reuses_its_baton_ref(tmp_path):
         assert B.list_batons(repo) == [res["baton_ref"]]  # no second ref on replay
         rows = await srv.rows("SELECT state FROM crew_sessions WHERE id = ?", (a["session_id"],))
         assert rows[0]["state"] == "quota_blocked"
+
+
+@pytest.mark.parametrize("finish", ["end", "orphan"])
+async def test_clean_unpushed_session_finish_preserves_a_portable_baton(tmp_path, finish):
+    remote = tmp_path / "remote.git"
+    repo = make_repo(tmp_path / "repo", remote=remote)
+    layout = Layout(tmp_path / "home")
+    alive = {A_PID}
+    async with crew_server(tmp_path) as srv:
+        d = new_crewd(layout, srv, alive=alive)
+        joined = await d.join(peer(A_PID), _join_args("sess-a", repo, A_PID))
+        (repo / "src/app/pos/split.ts").write_text("unpublished session work\n")
+        git(repo, "commit", "-qam", "session work")
+        head = git(repo, "rev-parse", "HEAD")
+        assert B.is_clean(repo)
+        if finish == "end":
+            result = await d.end(peer(A_PID), {"key": joined["key"], "reason": "logout"}, grace=False)
+            assert result["ok"], result
+        else:
+            alive.clear()
+            assert await d.liveness() == [joined["key"]]
+        refs = B.list_batons(repo)
+        assert len(refs) == 1
+        assert git(repo, "rev-parse", f"{refs[0]}^") == head
+        assert refs[0] in git(remote, "for-each-ref", "--format=%(refname)").splitlines()
+        assert B.is_clean(repo)
+        assert joined["key"] not in d.sessions
+        assert read_json(layout.session_file(joined["key"]))["ended"] is True
