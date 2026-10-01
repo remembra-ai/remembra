@@ -87,14 +87,14 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
     try:
         assert {"project_id", "crew_id", "kind", "trust_score"} <= _columns(conn, "agent_inbox")
         applied = sorted(r[0] for r in conn.execute("SELECT version FROM schema_version"))
-        assert applied == sorted({5} | {v for v, _, _ in VERSIONED_MIGRATIONS}) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        assert applied == sorted({5} | {v for v, _, _ in VERSIONED_MIGRATIONS}) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     finally:
         conn.close()
 
 
 def test_versions_are_unique_and_5_is_crews():
     versions = [v for v, _, _ in VERSIONED_MIGRATIONS]
-    assert versions == sorted(set(versions)) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    assert versions == sorted(set(versions)) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     # Crew mode's 5 merged after the releases shipped 6-10 (0.16.1 added 10); w2/account's migration was
     # renumbered from 6 to 8 when the wave-2 lanes merged. Names and statements of shipped versions never change.
     names = {v: n for v, n, _ in VERSIONED_MIGRATIONS}
@@ -148,7 +148,7 @@ async def test_production_schema_10_preserves_releases_and_adds_crew_and_erasure
     conn = await _migrate(path)
     try:
         applied = dict(conn.execute("SELECT version, applied_at FROM schema_version"))
-        assert sorted(applied) == list(range(1, 13))
+        assert sorted(applied) == list(range(1, 14))
         assert {v: applied[v] for v in stamps} == stamps  # 1-4 and 6-10 were not re-applied
         assert {"project_id", "crew_id", "kind", "sender_kind", "sender_verified", "trust_score"} <= _columns(conn, "agent_inbox")
         got = {

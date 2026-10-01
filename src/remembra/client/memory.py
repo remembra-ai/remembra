@@ -909,6 +909,46 @@ class Memory:
             params["head_commit"] = head_commit
         return self._request("GET", "/api/v1/session/brief", params=params)
 
+    def open_work(self, project_id: str | None = None, limit: int = 50, after: str = "") -> dict[str, Any]:
+        """Persistent explicit TODOs/failures, with next_after pagination.
+
+        Results are agent-declared. Proposed resolutions stay open until an
+        authenticated account holder accepts them through the REST API.
+        """
+        return self._request(
+            "GET", "/api/v1/session/open-work", params={"project_id": self._project(project_id), "limit": limit, "after": after}
+        )
+
+    def propose_work_resolution(
+        self, item_id: str, version: int, evidence_memory_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Record an evidence-backed proposal; this does not close the item."""
+        self._check_open_work_id(item_id)
+        return self._request(
+            "POST",
+            f"/api/v1/session/open-work/{item_id}",
+            json={
+                "action": "propose_resolution",
+                "version": version,
+                "evidence_memory_id": evidence_memory_id,
+                "project_id": self._project(project_id),
+            },
+        )
+
+    def reopen_work(self, item_id: str, version: int, project_id: str | None = None) -> dict[str, Any]:
+        """Reopen an item explicitly, preserving its resolution history."""
+        self._check_open_work_id(item_id)
+        return self._request(
+            "POST",
+            f"/api/v1/session/open-work/{item_id}",
+            json={"action": "reopen", "version": version, "project_id": self._project(project_id)},
+        )
+
+    @staticmethod
+    def _check_open_work_id(item_id: str) -> None:
+        if not re.fullmatch(r"[a-f0-9]{40}", item_id):
+            raise ValueError("Use an opaque item id returned by open_work")
+
     def resolve_project(
         self,
         git_remote: str | None = None,

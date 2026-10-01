@@ -187,3 +187,16 @@ def test_server_scrubs_before_truncating_oversized_fields(api):  # noqa: F811
     stored = row(api, res.json()["handoff_id"])
     blob = json.dumps(stored, default=str) + json.dumps(api["http"].get("/api/v1/trail", params={"project": "trunc"}).json())
     assert _leaks(blob, {"token": token, "pw": pw}) == []
+
+
+@pytest.mark.parametrize("field,limit", [("errors", 1000), ("todos_open", 1000), ("notes", 6000), ("next_step", 1000)])
+def test_full_secret_is_scrubbed_before_facts_length_caps(field, limit):
+    from remembra.api.v1.relay import FactsIn
+
+    token = "gh" + "p_" + _rand(36)
+    value = "ordinary-text " * (limit // 14)
+    value = value[: limit - 10].ljust(limit - 10, " ") + token
+    data = {field: [value] if field in ("errors", "todos_open") else value}
+    facts = FactsIn.model_validate(data).model_dump()
+    assert _leaks(json.dumps(facts), {"token": token}) == []
+    assert "[REDACTED:" in json.dumps(facts)

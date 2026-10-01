@@ -123,7 +123,7 @@ Cascade: Let me check the project context...
 ## Good to Know
 
 !!! warning "100-tool limit"
-    Windsurf has a limit of 100 total MCP tools across all servers. Remembra's MCP server has 32 tools, so check the total if you run many other MCP servers.
+    Windsurf has a limit of 100 total MCP tools across all servers. Remembra's MCP server has 33 tools, so check the total if you run many other MCP servers.
 
 ## Troubleshooting
 
@@ -164,6 +164,6 @@ Create it manually:
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 32 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 33 tools and 2 resources
 - [JavaScript SDK](../guides/javascript-sdk.md) — Use Remembra in your Node.js code
 - [REST API](../guides/rest-api.md) — Direct HTTP access

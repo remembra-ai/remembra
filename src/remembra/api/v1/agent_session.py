@@ -12,9 +12,9 @@ key may access (``resolve_project_access``).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from remembra.auth.middleware import (
@@ -28,8 +28,10 @@ from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.models.memory import checked_ttl
+from remembra.relay.handoff import police_brief
 from remembra.security.secrets import scrub
 from remembra.services.agent_session import AgentSessionService
+from remembra.services.continuity import ContinuityConflict, ContinuityService
 from remembra.services.relay import strip_reserved_metadata
 
 router = APIRouter(tags=["agent-session"])
@@ -91,6 +93,69 @@ def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[st
 # ---------------------------------------------------------------------------
 # Status upsert
 # ---------------------------------------------------------------------------
+
+
+@router.get("/session/open-work", summary="Persistent unresolved work for a project")
+@limiter.limit("60/minute")
+async def list_open_work(
+    request: Request,
+    current_user: CurrentUser,
+    project_id: Annotated[str | None, Query(max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    after: Annotated[str, Query(pattern=r"^(?:[a-f0-9]{40})?$")] = "",
+) -> dict[str, Any]:
+    """Explicit TODOs/failures from all captured handoffs, not just recent ones.
+
+    Values are agent reports, not verified facts. A proposed resolution remains
+    in this list until the account holder confirms it. The cursor is returned
+    as next_after; repeat this call to retrieve remaining items.
+    """
+    _require(current_user, "memory:recall")
+    project = resolve_project_access(current_user, project_id) or "default"
+    page = await ContinuityService(request.app.state.db).open_work(current_user.user_id, project, limit=limit, after=after)
+    police_brief({"open_work": page})
+    return {"project_id": project, **page}
+
+
+class OpenWorkTransition(BaseModel):
+    model_config = {"extra": "forbid"}
+    action: Literal["propose_resolution", "confirm_resolution", "reopen"]
+    version: int = Field(ge=1)
+    project_id: str | None = Field(default=None, max_length=128)
+    evidence_memory_id: str | None = Field(default=None, max_length=128)
+
+
+@router.post(
+    "/session/open-work/{item_id}", summary="Propose, confirm or reopen an open-work item", dependencies=[require_memory_store()]
+)
+@limiter.limit("60/minute")
+async def transition_open_work(
+    request: Request,
+    item_id: Annotated[str, Path(pattern=r"^[a-f0-9]{40}$")],
+    body: OpenWorkTransition,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    project = resolve_project_access(current_user, body.project_id) or "default"
+    human = current_user.api_key_id == "jwt_auth"
+    agent = enforce_agent_scope_header(request, current_user, (None, "request"))
+    if body.action == "confirm_resolution" and not human:
+        raise HTTPException(403, "Resolution confirmation requires the account holder's authenticated login")
+    try:
+        result = await ContinuityService(request.app.state.db).transition(
+            user_id=current_user.user_id,
+            project_id=project,
+            item_id=item_id,
+            version=body.version,
+            action=body.action,
+            actor_id=current_user.user_id if human else (agent or "self-declared-agent"),
+            human=human,
+            evidence_memory_id=body.evidence_memory_id,
+        )
+    except KeyError as error:
+        raise HTTPException(404, "Open-work item not found") from error
+    except ContinuityConflict as error:
+        raise HTTPException(409, str(error)) from error
+    return {"project_id": project, **result, "facts_source": "human-confirmed" if human else "agent-declared"}
 
 
 class StatusUpsertRequest(BaseModel):

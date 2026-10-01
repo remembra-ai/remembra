@@ -143,6 +143,6 @@ same `REMEMBRA_PROJECT`. Claude also has to call the memory tools: ask it to rec
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 32 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 33 tools and 2 resources
 - [Python SDK](../guides/python-sdk.md) — Programmatic access from Python
 - [Security Guide](../guides/security.md) — Encryption at rest, PII detection, RBAC

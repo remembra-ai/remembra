@@ -557,7 +557,7 @@ async def test_migration_10_is_additive_and_reapplies_on_a_schema_9_database(tmp
         assert await db.get_schema_version() == 9
         assert await account_review.get_review(db, "u1") is None  # tolerated before the upgrade
         await db.init_schema()
-        assert await db.get_schema_version() == 12
+        assert await db.get_schema_version() == 13
         cursor = await db.conn.execute("SELECT name FROM schema_version WHERE version = 10")
         assert (await cursor.fetchone())[0] == "account_reviews"
         review = await account_review.open_review(

@@ -106,8 +106,8 @@ def test_readme_names_every_mcp_tool_and_the_real_count() -> None:
             registered.append(name.group(1))
     assert "_register_marshal()" in MCP_SERVER
     registered += re.findall(r'@mcp\.tool\(\s*name="(\w+)"', MARSHAL_TOOLS)
-    # 21 memory/relay tools and 8 Crew mode tools in server.py, 3 from Marshal (remembra_doctor, remembra_setup, remembra_help)
-    assert len(registered) == 32
+    # 22 memory/relay tools and 8 Crew mode tools in server.py, 3 from Marshal (remembra_doctor, remembra_setup, remembra_help)
+    assert len(registered) == 33
     assert f"**Available tools ({len(registered)}):**" in README
     for tool in registered:
         assert f"`{tool}`" in README, tool

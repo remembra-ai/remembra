@@ -16,6 +16,7 @@ from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
 from remembra.storage.backup import pre_migration_backup
+from remembra.storage.continuity_schema import CONTINUITY_DDL, backfill_open_work
 from remembra.storage.sqlite_tx import AfterCommit, GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
@@ -448,6 +449,7 @@ VERSIONED_MIGRATIONS: list[Migration] = [
             END""",
         ],
     ),
+    (13, "persistent_open_work", [*CONTINUITY_DDL, backfill_open_work]),
 ]
 
 
@@ -1915,6 +1917,8 @@ class Database:
         Properly handles FK constraints by deleting relationships first.
         """
         async with self.transaction():
+            await self.conn.execute("DELETE FROM continuity_items WHERE user_id = ?", (user_id,))
+            await self.conn.execute("DELETE FROM continuity_events WHERE user_id = ?", (user_id,))
             # First, get all memory IDs for this user
             cursor = await self.conn.execute("SELECT id FROM memories WHERE user_id = ?", (user_id,))
             memory_ids = [row[0] for row in await cursor.fetchall()]
@@ -1949,6 +1953,8 @@ class Database:
         Properly handles FK constraints by deleting relationships first.
         """
         async with self.transaction():
+            await self.conn.execute("DELETE FROM continuity_items WHERE user_id = ? AND project_id = ?", (user_id, project_id))
+            await self.conn.execute("DELETE FROM continuity_events WHERE user_id = ? AND project_id = ?", (user_id, project_id))
             # First, get all memory IDs for this user/project
             cursor = await self.conn.execute(
                 "SELECT id FROM memories WHERE user_id = ? AND project_id = ?",
