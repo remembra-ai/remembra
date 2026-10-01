@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import structlog
 
@@ -54,6 +55,7 @@ class PendingEmbedding:
     last_error_kind: str | None
     created_at: str
     updated_at: str
+    claim_token: str | None = None
 
     @classmethod
     def from_row(cls, row: Any) -> PendingEmbedding:
@@ -71,6 +73,7 @@ class PendingEmbedding:
             last_error_kind=d.get("last_error_kind"),
             created_at=d["created_at"],
             updated_at=d["updated_at"],
+            claim_token=d.get("claim_token"),
         )
 
 
@@ -142,6 +145,7 @@ class PendingEmbeddingQueue:
         """Atomically claim up to ``limit`` due rows (and rows with an expired lease)."""
         now = self._now()
         lease_cutoff = (now - timedelta(seconds=self.lease_seconds)).isoformat()
+        token = uuid4().hex
         async with self.db.transaction():
             cursor = await self.db.conn.execute(
                 """
@@ -157,18 +161,22 @@ class PendingEmbeddingQueue:
             if rows:
                 placeholders = ",".join("?" for _ in rows)
                 await self.db.conn.execute(
-                    f"UPDATE pending_embeddings SET status = 'in_progress', claimed_at = ?, updated_at = ?"
+                    f"UPDATE pending_embeddings SET status = 'in_progress', claimed_at = ?, updated_at = ?, claim_token = ?"
                     f" WHERE memory_id IN ({placeholders})",
-                    (now.isoformat(), now.isoformat(), *[r.memory_id for r in rows]),
+                    (now.isoformat(), now.isoformat(), token, *[r.memory_id for r in rows]),
                 )
         for r in rows:
             r.status = STATUS_IN_PROGRESS
             r.claimed_at = now.isoformat()
+            r.claim_token = token
         return rows
 
-    async def mark_done(self, memory_id: str) -> None:
-        """The memory now has its vector: drop it from the queue."""
-        await self.db.conn.execute("DELETE FROM pending_embeddings WHERE memory_id = ?", (memory_id,))
+    async def mark_done(self, memory_id: str, *, claim_token: str | None = None) -> None:
+        """Drop a completed claim; an expired worker cannot acknowledge its successor."""
+        await self.db.conn.execute(
+            "DELETE FROM pending_embeddings WHERE memory_id = ? AND (? IS NULL OR claim_token = ?)",
+            (memory_id, claim_token, claim_token),
+        )
         await self.db.conn.commit()
 
     async def mark_failed(
@@ -178,11 +186,15 @@ class PendingEmbeddingQueue:
         kind: str | None = None,
         *,
         retryable: bool = True,
+        claim_token: str | None = None,
     ) -> str:
         """Record a failed attempt. Returns the new status (pending or failed)."""
         now = self._now()
         async with self.db.transaction():
-            cursor = await self.db.conn.execute("SELECT attempts FROM pending_embeddings WHERE memory_id = ?", (memory_id,))
+            cursor = await self.db.conn.execute(
+                "SELECT attempts FROM pending_embeddings WHERE memory_id = ? AND (? IS NULL OR claim_token = ?)",
+                (memory_id, claim_token, claim_token),
+            )
             row = await cursor.fetchone()
             if row is None:
                 return "missing"
@@ -197,7 +209,7 @@ class PendingEmbeddingQueue:
                 """
                 UPDATE pending_embeddings
                 SET status = ?, attempts = ?, next_attempt_at = ?, claimed_at = NULL,
-                    last_error = ?, last_error_kind = ?, updated_at = ?
+                    last_error = ?, last_error_kind = ?, updated_at = ?, claim_token = NULL
                 WHERE memory_id = ?
                 """,
                 (status, attempts, due, error[:500], kind, now.isoformat(), memory_id),
@@ -206,7 +218,9 @@ class PendingEmbeddingQueue:
             log.error("pending_embedding_dead_lettered", memory_id=memory_id, attempts=attempts, kind=kind)
         return status
 
-    async def release(self, memory_id: str, delay_seconds: float, kind: str | None = None) -> None:
+    async def release(
+        self, memory_id: str, delay_seconds: float, kind: str | None = None, *, claim_token: str | None = None
+    ) -> None:
         """Put a claimed row back without counting an attempt (provider circuit open)."""
         now = self._now()
         due = (now + timedelta(seconds=max(0.0, delay_seconds))).isoformat()
@@ -214,10 +228,10 @@ class PendingEmbeddingQueue:
             """
             UPDATE pending_embeddings
             SET status = 'pending', next_attempt_at = ?, claimed_at = NULL,
-                last_error_kind = COALESCE(?, last_error_kind), updated_at = ?
-            WHERE memory_id = ?
+                last_error_kind = COALESCE(?, last_error_kind), updated_at = ?, claim_token = NULL
+            WHERE memory_id = ? AND (? IS NULL OR claim_token = ?)
             """,
-            (due, kind, now.isoformat(), memory_id),
+            (due, kind, now.isoformat(), memory_id, claim_token, claim_token),
         )
         await self.db.conn.commit()
 
@@ -316,7 +330,7 @@ class PendingEmbeddingWorker:
             if outcome == "deferred":
                 # Provider is down: hand the rest of the batch back untouched.
                 for rest in items[index + 1 :]:
-                    await self.queue.release(rest.memory_id, self.provider_down_delay_seconds)
+                    await self.queue.release(rest.memory_id, self.provider_down_delay_seconds, claim_token=rest.claim_token)
                     result["deferred"] += 1
                 break
         for outcome, n in result.items():
@@ -334,7 +348,7 @@ class PendingEmbeddingWorker:
         row = await self.db.get_memory(item.memory_id)
         if row is None or is_source_row(row):
             # Deleted/archived since it was queued, or a source record (SQLite-only by design).
-            await self.queue.mark_done(item.memory_id)
+            await self.queue.mark_done(item.memory_id, claim_token=item.claim_token)
             return "dropped"
 
         memory = memory_from_row(row, await self.db.get_memory_entities(item.memory_id))
@@ -344,22 +358,29 @@ class PendingEmbeddingWorker:
             kind = e.kind.value
             if e.circuit_open or kind in _PROVIDER_DOWN_KINDS:
                 delay = max(self.provider_down_delay_seconds, float(e.retry_after or 0.0))
-                await self.queue.release(item.memory_id, delay, kind=kind)
+                await self.queue.release(item.memory_id, delay, kind=kind, claim_token=item.claim_token)
                 return "deferred"
-            status = await self.queue.mark_failed(item.memory_id, str(e), kind, retryable=False)
+            status = await self.queue.mark_failed(item.memory_id, str(e), kind, retryable=False, claim_token=item.claim_token)
             return "dead" if status == STATUS_FAILED else "retry"
         except Exception as e:
-            status = await self.queue.mark_failed(item.memory_id, f"{type(e).__name__}: {e}", "internal")
+            status = await self.queue.mark_failed(
+                item.memory_id, f"{type(e).__name__}: {e}", "internal", claim_token=item.claim_token
+            )
             return "dead" if status == STATUS_FAILED else "retry"
 
         try:
+            current = await self.queue.get(item.memory_id)
+            if current is None or current.claim_token != item.claim_token:
+                return "skipped"
             await self.qdrant.upsert(memory)
             await self.db.index_memory_fts(memory.id, memory.user_id, memory.project_id, memory.content)
         except Exception as e:
-            status = await self.queue.mark_failed(item.memory_id, f"{type(e).__name__}: {e}", "vector_store")
+            status = await self.queue.mark_failed(
+                item.memory_id, f"{type(e).__name__}: {e}", "vector_store", claim_token=item.claim_token
+            )
             return "dead" if status == STATUS_FAILED else "retry"
 
-        await self.queue.mark_done(item.memory_id)
+        await self.queue.mark_done(item.memory_id, claim_token=item.claim_token)
         return "done"
 
     async def run_forever(self) -> None:

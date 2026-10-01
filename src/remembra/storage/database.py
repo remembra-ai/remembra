@@ -424,6 +424,7 @@ VERSIONED_MIGRATIONS: list[Migration] = [
             ACCOUNT_REVIEWS_DDL,
         ],
     ),
+    (11, "pending_embedding_claim_tokens", ["ALTER TABLE pending_embeddings ADD COLUMN claim_token TEXT"]),
 ]
 
 
