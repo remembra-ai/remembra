@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMemories, useSearch } from '../hooks/useMemories';
 import { SearchBar } from '../components/SearchBar';
@@ -125,12 +125,19 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
     apiCalls: 0,
   });
   const [statsLoading, setStatsLoading] = useState(true);
+  const [statsUnavailable, setStatsUnavailable] = useState(true);
+  const statsRequest = useRef(0);
+  const [statsProjectId, setStatsProjectId] = useState(currentProjectId);
 
   // Fetch real stats from API
   const fetchStats = useCallback(async () => {
+    const requestId = ++statsRequest.current;
     try {
       setStatsLoading(true);
       const analytics = await api.getAnalytics(currentProjectId);
+      if (requestId !== statsRequest.current) return;
+      setStatsUnavailable(false);
+      setStatsProjectId(currentProjectId);
       
       // Estimate storage based on memory count (avg ~2KB per memory)
       const estimatedKB = analytics.total_memories * 2;
@@ -146,26 +153,16 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
       });
     } catch (err) {
       console.error('Failed to fetch stats:', err);
-      // Fallback to local calculation if API fails
-      if (memories.length > 0) {
-        const uniqueEntities = new Set<string>();
-        memories.forEach(m => m.entities?.forEach(e => uniqueEntities.add(e)));
-        setStats({
-          memoryCount: memories.length + (hasMore ? 100 : 0),
-          entityCount: uniqueEntities.size,
-          storageUsed: `${(memories.length * 0.5).toFixed(1)} KB`,
-          apiCalls: 0,
-        });
-      }
+      if (requestId === statsRequest.current) setStatsUnavailable(true);
     } finally {
-      setStatsLoading(false);
+      if (requestId === statsRequest.current) setStatsLoading(false);
     }
-  }, [currentProjectId, memories, hasMore]);
+  }, [currentProjectId]);
 
   // Fetch stats on mount and when memories refresh
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+  }, [fetchStats, memories]);
 
   useEffect(() => {
     setSelectedMemory(null);
@@ -241,6 +238,7 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
               storageUsed={stats.storageUsed}
               apiCalls={stats.apiCalls}
               loading={statsLoading}
+              unavailable={statsUnavailable || statsProjectId !== currentProjectId}
               wsConnected={wsConnected}
               currentProjectId={currentProjectId}
               onNewMemory={() => setShowNewMemory(true)}
@@ -256,6 +254,7 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
               storageUsed={stats.storageUsed}
               apiCalls={stats.apiCalls}
               loading={statsLoading}
+              unavailable={statsUnavailable || statsProjectId !== currentProjectId}
             />
 
             {/* Search & Actions Bar */}

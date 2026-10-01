@@ -163,27 +163,21 @@ export function EmptyState({ type, searchQuery, onAction, actionLabel }: EmptySt
   );
 }
 
-// Simple syntax highlighting for Python
+// Tokenize the original text once. React escapes each text token; generated
+// markup is never fed back through the keyword/string highlighter.
 function highlightCode(line: string): React.ReactNode {
-  // Keywords
-  const keywords = ['from', 'import', 'def', 'class', 'return', 'if', 'else', 'for', 'in', 'while', 'try', 'except'];
-  
-  let result = line;
-  
-  // Highlight strings
-  result = result.replace(/"([^"]*)"/g, '<span class="text-green-400">"$1"</span>');
-  
-  // Highlight function calls
-  result = result.replace(/(\w+)\(/g, '<span class="text-blue-400">$1</span>(');
-  
-  // Highlight keywords
-  keywords.forEach(kw => {
-    const regex = new RegExp(`\\b${kw}\\b`, 'g');
-    result = result.replace(regex, `<span class="text-pink-400">${kw}</span>`);
-  });
-  
-  // Highlight comments
-  result = result.replace(/(#.*)$/g, '<span class="text-gray-500">$1</span>');
-
-  return <span dangerouslySetInnerHTML={{ __html: result }} />;
+  const tokenPattern = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|#.*|\b(?:from|import|def|class|return|if|else|for|in|while|try|except)\b|\b\w+(?=\())/g;
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of line.matchAll(tokenPattern)) {
+    if (match.index > cursor) parts.push(line.slice(cursor, match.index));
+    const token = match[0];
+    const color = token.startsWith('#') ? 'text-gray-500'
+      : token.startsWith('"') || token.startsWith("'") ? 'text-green-400'
+      : line[match.index + token.length] === '(' ? 'text-blue-400' : 'text-pink-400';
+    parts.push(<span key={match.index} className={color}>{token}</span>);
+    cursor = match.index + token.length;
+  }
+  if (cursor < line.length) parts.push(line.slice(cursor));
+  return <span>{parts}</span>;
 }
