@@ -460,7 +460,16 @@ def test_openapi_file_is_generated_from_the_route_table() -> None:
 
 def test_mcp_tool_signatures() -> None:
     names = [t.name for t in S.MCP_TOOLS]
-    assert names == ["crew_status", "crew_claim", "crew_guard", "crew_task", "crew_say", "crew_checkpoint", "crew_report"]
+    assert names == [
+        "crew_status",
+        "crew_claim",
+        "crew_guard",
+        "crew_collision",
+        "crew_task",
+        "crew_say",
+        "crew_checkpoint",
+        "crew_report",
+    ]
     claim = next(t for t in S.MCP_TOOLS if t.name == "crew_claim")
     assert next(p for p in claim.params if p.name == "wait_s").max_value == 300
     say = next(t for t in S.MCP_TOOLS if t.name == "crew_say")

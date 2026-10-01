@@ -113,7 +113,7 @@ Based on their arxiv paper (2504.19413) and production system:
 | Entity resolution + bitemporal graph | `extraction/`, `retrieval/graph.py` | ✅ Shipped |
 | Brain layer (GraphRAG communities, dependency-free Louvain) | `brain/` | ✅ Shipped |
 | Temporal: TTL, Ebbinghaus decay, archive, as-of queries | `temporal/` | ✅ Shipped |
-| MCP server: stdio, SSE and streamable HTTP, 31 tools (the hosted remote endpoint is not live yet) | `mcp/server.py` | ✅ Shipped |
+| MCP server: stdio, SSE and streamable HTTP, 32 tools (the hosted remote endpoint is not live yet) | `mcp/server.py` | ✅ Shipped |
 | Auth: API keys (O(1) lookup), JWT + 2FA, RBAC scopes | `auth/` | ✅ Shipped |
 | Tenancy: users, teams, spaces, projects | `teams/`, `spaces/` | ✅ Shipped |
 | Cloud: Paddle billing, plan limits, metering | `cloud/` | ✅ Shipped |
