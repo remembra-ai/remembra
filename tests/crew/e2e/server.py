@@ -33,6 +33,7 @@ import argparse
 import asyncio
 import contextlib
 import contextvars
+import cProfile
 import hashlib
 import json
 import uuid
@@ -201,10 +202,18 @@ class LockedLog(logging.Handler):
 
 class Metrics:
     def __init__(self) -> None:
+        self.profile: cProfile.Profile | None = None
+        self.profile_mode = False
+        self.cpu_profile: list[dict[str, Any]] = []
         self.reset()
         self.locked = LockedLog()
 
     def reset(self) -> None:
+        if self.profile is not None:
+            self.profile.disable()
+        self.profile = None
+        self.profile_mode = False
+        self.cpu_profile = []
         self.durations: dict[str, list[float]] = defaultdict(list)
         self.statuses: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.sweeps: list[float] = []
@@ -215,6 +224,27 @@ class Metrics:
         self.statement_waits: dict[str, list[float]] = defaultdict(list)
         self.resource_baseline = self.process_resources()
         self.errors: list[str] = []
+
+    def start_profile(self) -> None:
+        """Opt-in diagnostic overhead must never certify a capacity pass."""
+        if os.environ.get("CREW_E2E_PROFILE") == "true":
+            self.profile_mode = True
+            self.profile = cProfile.Profile()
+            self.profile.enable()
+
+    def finish_profile(self) -> None:
+        if self.profile is None:
+            return
+        self.profile.disable()
+        rows = []
+        for entry in self.profile.getstats():
+            code = entry.code
+            name = code if isinstance(code, str) else f"{Path(code.co_filename).name}:{code.co_firstlineno}:{code.co_name}"
+            rows.append({"function": name, "calls": entry.callcount, "self_s": entry.inlinetime, "total_s": entry.totaltime})
+        # Function names/counts only. Never arguments, SQL, request bodies, env,
+        # stack locals, serialized profiler objects or provider/user content.
+        self.cpu_profile = sorted(rows, key=lambda row: row["self_s"], reverse=True)[:80]
+        self.profile = None
 
     @staticmethod
     def process_resources() -> dict[str, float]:
@@ -275,6 +305,8 @@ class Metrics:
                 for tag, v in self.statement_waits.items()
             },
             "process_resources": {k: v - self.resource_baseline.get(k, 0) for k, v in self.process_resources().items()},
+            "profiled": self.profile_mode,
+            "cpu_profile": self.cpu_profile,
             "database_locked": self.locked.count,
             "database_locked_samples": self.locked.samples,
             "errors": self.errors[:20],
@@ -469,6 +501,7 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_li
     @app.get("/__e2e/metrics")
     async def metrics() -> dict[str, Any]:
         instrument_reaper(app)
+        METRICS.finish_profile()
         return {
             **METRICS.summary(),
             "vector_backend": "isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
@@ -481,6 +514,7 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_li
     async def metrics_reset() -> dict[str, bool]:
         instrument_reaper(app)
         METRICS.reset()
+        METRICS.start_profile()
         return {"ok": True}
 
     @app.post("/__e2e/sweep")

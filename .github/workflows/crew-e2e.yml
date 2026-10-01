@@ -36,6 +36,10 @@ on:
       load_duration_s:
         description: "Full load: seconds of steady load (spec: 3600)"
         default: "3600"
+      profile_server:
+        description: "CPU diagnostic only (instrumented run cannot pass capacity acceptance)"
+        type: boolean
+        default: false
       soak_duration_s:
         description: "crewd kill -9 soak: total seconds (spec: 7200)"
         default: "7200"
@@ -133,6 +137,7 @@ jobs:
       - name: Load (spec §13.4 budgets)
         env:
           REMEMBRA_E2E_QDRANT_URL: http://127.0.0.1:6333
+          CREW_E2E_PROFILE: ${{ github.event.inputs.profile_server || 'false' }}
         run: >
           python -m tests.crew.load.loadgen --crews 50 --sessions 5
           --duration "${{ github.event.inputs.load_duration_s || '3600' }}"

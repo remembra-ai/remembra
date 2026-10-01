@@ -38,6 +38,15 @@ def test_healthy_load_can_pass():
     assert L.summarize(args, metrics, retention, stats)["ok"]
 
 
+def test_instrumented_cpu_profile_cannot_certify_capacity():
+    args, metrics, retention, stats = healthy_report()
+    metrics["profiled"] = True
+    report = L.summarize(args, metrics, retention, stats)
+    assert report["server"]["profiled"]
+    assert not report["checks"]["unprofiled_server"] and not report["ok"]
+    assert all(value for key, value in report["checks"].items() if key != "unprofiled_server")
+
+
 def test_local_report_cannot_satisfy_requested_server_backend():
     args, metrics, retention, stats = healthy_report()
     args.vector_backend = "isolated-server"

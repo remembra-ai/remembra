@@ -397,6 +397,8 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
             "sqlite_calls": metrics.get("sqlite_calls", {}),
             "statement_waits": metrics.get("statement_waits", {}),
             "process_resources": metrics.get("process_resources", {}),
+            "profiled": bool(metrics.get("profiled", False)),
+            "cpu_profile": metrics.get("cpu_profile", []),
             "sweep_steps": metrics.get("sweep_steps", {}),
             "database_locked": metrics.get("database_locked", 0),
             "database_locked_samples": metrics.get("database_locked_samples", []),
@@ -453,6 +455,7 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
             getattr(args, "expect_event_loop", None) is None
             or metrics.get("event_loop_backend") == args.expect_event_loop
         ),
+        "unprofiled_server": not report["server"]["profiled"],
         "no_client_errors": not stats.errors,
         "no_server_errors": not report["server"]["errors"],
         "expected_client_statuses": not unexpected_statuses,
