@@ -21,6 +21,7 @@ Now:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -137,7 +138,15 @@ def make_llm_client(
     inner_transport: httpx.AsyncBaseTransport | None = None,
 ) -> Any:
     """Build an ``AsyncOpenAI`` client wired to the shared LLM breaker."""
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, OpenAIError
+
+    # Match the SDK's explicit/ambient credential precedence before building
+    # our transport. Otherwise every missing-key fallback synchronously loads
+    # the TLS trust store and allocates a client the SDK will immediately reject.
+    # Leave ambient admin credentials to SDK versions that support them.
+    key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY")
+    if not key and not os.environ.get("OPENAI_ADMIN_KEY"):
+        raise OpenAIError("Missing credentials. Set an API key before creating an LLM client.")
 
     t = timeout if timeout is not None else float(_settings_value("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT))
     retries = max_retries if max_retries is not None else int(_settings_value("llm_max_retries", DEFAULT_LLM_MAX_RETRIES))
