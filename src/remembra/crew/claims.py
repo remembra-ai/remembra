@@ -631,20 +631,22 @@ async def request_claim(
         raise CrewOpError(422, "invalid_claim", "claims need a session or a human")
     if principal.is_human:
         source = "dashboard"
-    actor = principal.actor()
     async with ops.log.transaction() as tx:
         conn = tx.conn
         await ensure_policy_zone(tx, crew_id)
         settings = load_settings((await crew_row(conn, crew_id))["settings"])
         session = principal.session
         if session is not None:
-            session = await _session(conn, str(session["id"])) or session
+            session = await _session(conn, str(session["id"]))
+            if session is None:
+                raise CrewOpError(409, "session_not_live", "This session no longer exists; start a new session to claim.")
             principal = Principal.for_session(session, api_key_id=principal.api_key_id)
             _session_live(session)
             if source != "micro_lease":  # a serialize micro-lease orders writes; it is not a claim of work
                 await require_seat(conn, crew_id, session, ops.limits)
             if settings.get("require_verified_agents_for_claims") and not session.get("agent_verified"):
                 raise CrewOpError(403, "unverified_agent", "This crew only accepts claims from key-verified agents.")
+        actor = principal.actor()
         target = await _resolve_target(
             conn, crew_id, zone_id=zone_id, path_glob=path_glob, resource=resource, principal=principal, source=source
         )
