@@ -49,6 +49,36 @@ async def _insert_memory(db: Database, memory_id: str, user_id: str = "u1", proj
     )
 
 
+async def test_bulk_fetch_cannot_observe_another_requests_uncommitted_rows(db: Database) -> None:
+    started = asyncio.Event()
+    proceed = asyncio.Event()
+
+    async def writer() -> None:
+        async with db.transaction():
+            await db.conn.execute("INSERT INTO schema_version VALUES (1001, 'pending', 'now')")
+            owned = await db.conn.execute_fetchall("SELECT version FROM schema_version WHERE version = ?", (1001,))
+            assert owned[0][0] == 1001
+            started.set()
+            await proceed.wait()
+            raise RuntimeError("roll back pending data")
+
+    async def reader():
+        await started.wait()
+        return await db.conn.execute_fetchall("SELECT version FROM schema_version WHERE version = ?", (1001,))
+
+    writing = asyncio.create_task(writer())
+    reading = asyncio.create_task(reader())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        await asyncio.sleep(0.05)
+        assert not reading.done()
+    finally:
+        proceed.set()
+        outcomes = await asyncio.gather(writing, reading, return_exceptions=True)
+    assert isinstance(outcomes[0], RuntimeError)
+    assert outcomes[1] == []
+
+
 async def test_late_fts_writer_cannot_restore_deleted_content(db: Database) -> None:
     await _insert_memory(db, "deleted")
     await db.index_memory_fts("deleted", "u1", "default", "private content")

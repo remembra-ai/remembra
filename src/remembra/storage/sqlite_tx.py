@@ -216,6 +216,11 @@ class GuardedConnection:
         raw = self._raw
         return _GuardedResult(self._coord, lambda: raw.executemany(sql, parameters))
 
+    async def execute_fetchall(self, sql: str, parameters: Iterable[Any] | None = None) -> list[Any]:
+        """Execute and fetch in one worker call without bypassing isolation."""
+        rows = await self._coord.run(lambda: self._raw.execute_fetchall(sql, tuple(parameters or ())))
+        return list(rows)
+
     def executescript(self, sql_script: str) -> _GuardedResult:
         if self._coord.owns():
             # sqlite3.executescript() COMMITs any open transaction first, which

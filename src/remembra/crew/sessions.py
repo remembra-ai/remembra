@@ -484,6 +484,9 @@ def session_actor(row: Mapping[str, Any]) -> Actor:
 
 
 async def _one(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> dict[str, Any] | None:
+    if conn.row_factory is aiosqlite.Row:
+        rows = list(await conn.execute_fetchall(sql, tuple(params)))
+        return dict(rows[0]) if rows else None
     async with conn.execute(sql, tuple(params)) as cur:
         row = await cur.fetchone()
         if row is None:
@@ -493,6 +496,8 @@ async def _one(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ())
 
 
 async def _all(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    if conn.row_factory is aiosqlite.Row:
+        return [dict(row) for row in await conn.execute_fetchall(sql, tuple(params))]
     async with conn.execute(sql, tuple(params)) as cur:
         rows = await cur.fetchall()
         names = [d[0] for d in cur.description]
@@ -1728,26 +1733,19 @@ class CrewSessions:
         """
         now = self.now()
         now_s = format_ts(now)
-        per_session: dict[str, Any] = {}
-        etags: dict[str, str] = {}
-        # Rejoining the writer queue for every session multiplies latency.
-        # Process at most five sessions per transaction, so a maximum-sized
-        # (100-session) request still yields to unrelated crews between chunks.
-        # Invalid tokens/ended sessions are checked before any mutations.
         async with self.log.transaction() as tx:
             previous = await mark_seen(tx.conn, host["id"], now_s)
             if previous == "unreachable":
                 await self._host_recovered(tx, host, now)
-        items = body.get("sessions") or []
-        for offset in range(0, len(items), 5):
-            async with self.log.transaction():
-                for item in items[offset : offset + 5]:
-                    sid = item["session_id"]
-                    try:
-                        per_session[sid] = await self._heartbeat_session(host, item, now)
-                        etags[per_session[sid]["crew_id"]] = f'"{per_session[sid]["crew_last_seq"]}"'
-                    except SessionError as e:
-                        per_session[sid] = {"error": e.code, "message": e.message}
+        per_session: dict[str, Any] = {}
+        etags: dict[str, str] = {}
+        for item in body.get("sessions") or []:
+            sid = item["session_id"]
+            try:
+                per_session[sid] = await self._heartbeat_session(host, item, now)
+                etags[per_session[sid]["crew_id"]] = f'"{per_session[sid]["crew_last_seq"]}"'
+            except SessionError as e:
+                per_session[sid] = {"error": e.code, "message": e.message}
         return {
             "per_session": per_session,
             "snapshot_etag": etags,
