@@ -646,6 +646,9 @@ async def request_claim(
         target = await _resolve_target(
             conn, crew_id, zone_id=zone_id, path_glob=path_glob, resource=resource, principal=principal, source=source
         )
+        # The validated target is already loaded in this writer transaction.
+        # Re-reading its zone for each event summary adds a SQLite worker hop.
+        target_label = f"zone {target.zone['slug']}" if target.zone is not None else target.resource or "a file claim"
         await _check_task(conn, crew_id, task_id)
         _zone_rules(target, principal, settings, task_id, source)
         now = utcnow()
@@ -687,23 +690,22 @@ async def request_claim(
                 return ClaimOutcome("denied", None, [], "claim_cap", res.seq)
         if blockers:
             views = [await blocker_view(conn, b) for b in blockers[:10]]
-            target_label = await _target_label(conn, {"zone_id": target.zone_id, "resource": target.resource})
             if wait:
                 row = await _insert_claim(tx, crew_id, target, mode, principal, task_id, "queued", source, reason, settings, now)
-                seq = await _emit_claim(
-                    tx, crew_id, "claim.queued", row, actor, f"{principal.name} queued for {await _target_label(conn, row)}"
-                )
+                seq = await _emit_claim(tx, crew_id, "claim.queued", row, actor, f"{principal.name} queued for {target_label}")
                 return ClaimOutcome("queued", row, views, seq=seq)
+            first = blockers[0]
+            # blocker_view already read this holder under the same transaction.
+            # Keep human/unknown-holder wording without two duplicate lookups.
+            holder = "a human" if first["holder_kind"] == "human" else str(views[0]["holder_callsign"] or "another session")
             res = await tx.emit(
                 crew_id=crew_id,
                 type="claim.denied",
                 actor=actor,
                 payload={"claim": None, "blockers": views},
-                summary=f"{principal.name} refused {target_label}: held by {await _holder_name(conn, blockers[0])}",
+                summary=f"{principal.name} refused {target_label}: held by {holder}",
                 refs={"zone_id": target.zone_id, "session_id": principal.session_id},
             )
-            first = blockers[0]
-            holder = await _holder_name(conn, first)
             extra = {
                 "holder": holder,
                 "claim": claim_view(first),
@@ -731,9 +733,7 @@ async def request_claim(
                 refs={"zone_id": target.zone_id},
             )
             return ClaimOutcome("denied", None, [], "conflict", res.seq)
-        seq = await _emit_claim(
-            tx, crew_id, "claim.granted", row, actor, f"{principal.name} claimed {await _target_label(conn, row)} ({mode})"
-        )
+        seq = await _emit_claim(tx, crew_id, "claim.granted", row, actor, f"{principal.name} claimed {target_label} ({mode})")
         if session is not None:
             await _hoarding_check(tx, crew_id, session, actor)
         return ClaimOutcome("granted", row, seq=seq)
