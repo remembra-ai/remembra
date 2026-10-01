@@ -575,15 +575,19 @@ def _activity(ctx: HookContext, session: Mapping[str, Any], phase: str, extra: M
     if not key:
         return
     body = {"key": key, "phase": phase, "at": ctx.local_now, **extra}
-    if rpc_send(ctx.layout, "activity", body):
-        return
     from remembra.relay.crew import outbox
 
+    # Persist before waking the daemon: a sent socket request is not proof
+    # that ancestry was captured before this short-lived hook process exits.
+    # Deliver only from this record, so a late acknowledgement cannot apply
+    # the activity once via RPC and again through the retry path.
     try:
         outbox.spool(ctx.layout.outbox, "activity", body, session_key=key, crew_id=str(session.get("crew_id") or ""))
     except (OSError, ValueError):
-        pass
-    respawn_crewd(ctx.layout)
+        _err("could not retain Crew activity for delivery")
+        return
+    if not rpc_send(ctx.layout, "flush"):
+        respawn_crewd(ctx.layout)
 
 
 def _tool_op(tool: str) -> str:

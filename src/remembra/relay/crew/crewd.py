@@ -609,6 +609,7 @@ class Crewd:
         self.hosts: dict[str, dict[str, Any]] = {}
         self.apis: dict[tuple[str, str, str], Api] = {}
         self.locks: dict[str, asyncio.Lock] = {}
+        self._outbox_flush_lock = asyncio.Lock()
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.etags: dict[str, str] = {}
         self.crew_settings: dict[str, tuple[float, int, dict[str, Any]]] = {}
@@ -1990,7 +1991,8 @@ class Crewd:
 
     # -- outbox ------------------------------------------------------------------------------
     async def flush_outbox(self) -> O.FlushResult:
-        return await O.flush(self.layout.outbox, self._send_entry, now=self.clock())
+        async with self._outbox_flush_lock:
+            return await O.flush(self.layout.outbox, self._send_entry, now=self.clock())
 
     async def _send_entry(self, entry: O.Entry) -> str:
         sess = self.sessions.get(entry.session_key or "")
@@ -3061,6 +3063,9 @@ class Crewd:
 
     # -- socket server -------------------------------------------------------------------------------
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self.background.add(task)
         sock = writer.get_extra_info("socket")
         try:
             peer = peer_credentials(sock) if sock is not None else Peer(None, None)
@@ -3092,6 +3097,8 @@ class Crewd:
         except Exception as e:  # never let one client take the daemon down
             log.exception("socket client error: %s", e)
         finally:
+            if task is not None:
+                self.background.discard(task)
             with contextlib.suppress(Exception):
                 writer.close()
 
