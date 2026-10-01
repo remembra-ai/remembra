@@ -211,6 +211,7 @@ class Metrics:
         self.tx_holds: dict[str, list[float]] = defaultdict(list)
         self.tx_waits: dict[str, list[float]] = defaultdict(list)
         self.sweep_steps: dict[str, list[float]] = defaultdict(list)
+        self.sqlite_calls: dict[str, dict[str, float]] = {}
         self.errors: list[str] = []
 
     def summary(self) -> dict[str, Any]:
@@ -234,12 +235,21 @@ class Metrics:
         return {
             "routes": routes,
             "sweeps_ms": [round(s * 1000, 2) for s in self.sweeps],
-            "tx_holds": {tag: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for tag, v in self.tx_holds.items()},
+            "tx_holds": {
+                tag: {
+                    "count": len(v),
+                    "total_ms": round(sum(v) * 1000, 2),
+                    "mean_ms": round(sum(v) / len(v) * 1000, 2),
+                    "max_ms": round(max(v) * 1000, 2),
+                }
+                for tag, v in self.tx_holds.items()
+            },
             "tx_waits": {
                 tag: {"count": len(v), "p95_ms": round(pct(v, 0.95) * 1000, 2), "max_ms": round(max(v) * 1000, 2)}
                 for tag, v in self.tx_waits.items()
             },
             "sweep_steps": {step: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for step, v in self.sweep_steps.items()},
+            "sqlite_calls": self.sqlite_calls,
             "database_locked": self.locked.count,
             "database_locked_samples": self.locked.samples,
             "errors": self.errors[:20],
@@ -258,6 +268,7 @@ class TimingMiddleware:
             await self.app(scope, receive, send)
             return
         started = time.perf_counter()
+        tag_token = _TAG.set(route_key(scope))
         status = {"code": 0}
 
         async def wrapped_send(message: dict[str, Any]) -> None:
@@ -274,6 +285,7 @@ class TimingMiddleware:
                 METRICS.locked.count += 1
             raise
         finally:
+            _TAG.reset(tag_token)
             key = route_key(scope)
             METRICS.durations[key].append(time.perf_counter() - started)
             METRICS.statuses[key][status["code"]] += 1
@@ -295,6 +307,32 @@ def instrument_transactions(crew_db: Any) -> None:
                 METRICS.tx_holds[_TAG.get() or "all"].append(time.perf_counter() - started)
 
     crew_db.transaction = timed
+    # Test-only diagnostics: distinguish SQLite execution from worker scheduling
+    # and coroutine overhead. No parameters, tokens or SQL text are retained.
+    raw = crew_db.conn.raw
+    original_execute = raw._execute
+
+    async def measured_execute(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        elapsed = [0.0]
+
+        def measured() -> Any:
+            started = time.perf_counter()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                elapsed[0] = (time.perf_counter() - started) * 1000
+
+        started = time.perf_counter()
+        try:
+            return await original_execute(measured)
+        finally:
+            key = f"{_TAG.get() or 'background'}:{getattr(fn, '__name__', type(fn).__name__)}"
+            stat = METRICS.sqlite_calls.setdefault(key, {"count": 0, "worker_ms": 0, "wall_ms": 0})
+            stat["count"] += 1
+            stat["worker_ms"] += elapsed[0]
+            stat["wall_ms"] += (time.perf_counter() - started) * 1000
+
+    raw._execute = measured_execute
 
 
 def instrument_reaper(app: FastAPI) -> None:

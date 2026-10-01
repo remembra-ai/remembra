@@ -394,6 +394,7 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
             "sweeps": {"count": len(sweeps), "max_ms": max(sweeps) if sweeps else 0.0},
             "tx_holds": metrics.get("tx_holds", {}),
             "tx_waits": metrics.get("tx_waits", {}),
+            "sqlite_calls": metrics.get("sqlite_calls", {}),
             "sweep_steps": metrics.get("sweep_steps", {}),
             "database_locked": metrics.get("database_locked", 0),
             "database_locked_samples": metrics.get("database_locked_samples", []),
