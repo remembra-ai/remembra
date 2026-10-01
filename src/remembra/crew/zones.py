@@ -561,9 +561,13 @@ async def _restructure(tx: EventTx, crew_id: str) -> set[str]:
     return changed
 
 
-async def related_zone_ids(conn: aiosqlite.Connection, crew_id: str, zone_id: str) -> set[str]:
+async def related_zone_ids(
+    conn: aiosqlite.Connection, crew_id: str, zone_id: str, *, zone_rows: Sequence[Mapping[str, Any]] | None = None
+) -> set[str]:
     """The zone, its ancestors, its descendants and every zone whose globs overlap it (claim conflicts, §5.1)."""
-    rows = await load_zone_rows(conn, crew_id)
+    # A conflict scan may already hold this writer transaction's zone snapshot.
+    # Archived zones must still be excluded from the hierarchy, as on a fresh read.
+    rows = await load_zone_rows(conn, crew_id) if zone_rows is None else [r for r in zone_rows if r["archived_at"] is None]
     by_id = {str(r["id"]): r for r in rows}
     out = {zone_id, *ancestors_of(zone_id, by_id)}
     for zid in by_id:

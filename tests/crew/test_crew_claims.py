@@ -62,6 +62,33 @@ async def test_multi_blocker_scan_reads_one_transaction_zone_snapshot(env, monke
     assert read_zones.await_count == 1
 
 
+async def test_parent_conflict_reuses_snapshot_for_hierarchy(env, monkeypatch):
+    db, ops, _, a, b = env
+    assert (await _claim(ops, a, db, "pos")).status == "granted"
+    assert (await _claim(ops, a, db, "reports")).status == "granted"
+    await seed_task(db, "tsk_parent", 1)
+    read_zones = AsyncMock(wraps=Z.load_zone_rows)
+    monkeypatch.setattr(C, "load_zone_rows", read_zones)
+    monkeypatch.setattr(Z, "load_zone_rows", read_zones)
+    denied = await _claim(ops, b, db, "app", task_id="tsk_parent")
+    assert denied.status == "denied"
+    assert {row["zone_id"] for row in denied.blockers} == {await zone_id(db, "pos"), await zone_id(db, "reports")}
+    assert read_zones.await_count == 1
+
+
+async def test_related_zone_snapshot_preserves_archived_hierarchy_behavior(env):
+    db, _, _, _, _ = env
+    async with db.transaction():
+        await db.conn.execute("UPDATE crew_zones SET archived_at=? WHERE id=?", (now_iso(), await zone_id(db, "pos")))
+        rows = await Z.load_zone_rows(db.conn, CREW, include_archived=True)
+        parent = await zone_id(db, "app")
+        fresh = await Z.related_zone_ids(db.conn, CREW, parent)
+        cached = await Z.related_zone_ids(db.conn, CREW, parent, zone_rows=rows)
+        assert cached == fresh
+        assert await zone_id(db, "reports") in cached
+        assert await zone_id(db, "pos") not in cached
+
+
 async def test_grant_deny_queue_and_fifo_promotion(env):
     db, ops, _, a, b = env
     got = await _claim(ops, a, db, "pos")

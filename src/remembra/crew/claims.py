@@ -296,7 +296,7 @@ async def _overlaps(
         if other.get("zone_id"):
             key = f"rel:{target.zone_id}"
             if key not in cache:
-                cache[key] = await related_zone_ids(conn, crew_id, str(target.zone_id))
+                cache[key] = await related_zone_ids(conn, crew_id, str(target.zone_id), zone_rows=list(zones.values()))
             return str(other["zone_id"]) in cache[key]
         if other.get("path_glob"):
             return P.any_overlap(_globs(target.zone), [str(other["path_glob"])])
