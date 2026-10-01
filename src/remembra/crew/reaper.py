@@ -160,15 +160,22 @@ class CrewReaper:
     def boot_at(self) -> datetime:
         return self.sessions.boot_at
 
+    async def _read_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        async with self.sessions.db.read_snapshot() as conn:
+            return await _all(conn, sql, params)
+
     async def _settings(self, crew_id: str) -> dict[str, Any]:
         cached = self._settings_cache.get(crew_id)
         if cached is None:
-            row = await _one(self.sessions.conn, "SELECT settings FROM crews WHERE id = ?", (crew_id,))
+            rows = await self._read_all("SELECT settings FROM crews WHERE id = ?", (crew_id,))
+            row = rows[0] if rows else None
             cached = self._settings_cache[crew_id] = load_settings(row["settings"] if row else None)
         return cached
 
     async def sweep(self) -> SweepReport:
-        self._settings_cache = {}
+        self._settings_cache = {
+            row["id"]: load_settings(row["settings"]) for row in await self._read_all("SELECT id, settings FROM crews")
+        }
         now = self.sessions.now()
         report = SweepReport()
         for step in (
@@ -204,8 +211,7 @@ class CrewReaper:
         cutoff = format_ts(now - timedelta(seconds=HOST_SILENT_AFTER_S))
         if self.boot_at > now - timedelta(seconds=HOST_SILENT_AFTER_S):
             return  # boot grace: nobody could heartbeat while the server was down
-        hosts = await _all(
-            self.sessions.conn,
+        hosts = await self._read_all(
             "SELECT * FROM crew_hosts WHERE state = 'online' AND last_seen_at IS NOT NULL AND last_seen_at < ?",
             (cutoff,),
         )
@@ -244,18 +250,18 @@ class CrewReaper:
 
     async def _presence(self, now: datetime, report: SweepReport) -> None:
         marks = ", ".join("?" for _ in SWEPT_STATES)
-        rows = await _all(
-            self.sessions.conn, f"SELECT * FROM crew_sessions WHERE state IN ({marks}) ORDER BY crew_id, id", SWEPT_STATES
-        )
-        hosts: dict[str, dict[str, Any] | None] = {}
+        async with self.sessions.db.read_snapshot() as conn:
+            rows = await _all(conn, f"SELECT * FROM crew_sessions WHERE state IN ({marks}) ORDER BY crew_id, id", SWEPT_STATES)
+            hosts = {
+                host["id"]: host
+                for host in await _all(
+                    conn,
+                    f"SELECT * FROM crew_hosts WHERE id IN (SELECT host_id FROM crew_sessions WHERE state IN ({marks}))",
+                    SWEPT_STATES,
+                )
+            }
         for row in rows:
-            host = None
-            if row.get("host_id"):
-                if row["host_id"] not in hosts:
-                    hosts[row["host_id"]] = await _one(
-                        self.sessions.conn, "SELECT * FROM crew_hosts WHERE id = ?", (row["host_id"],)
-                    )
-                host = hosts[row["host_id"]]
+            host = hosts.get(row.get("host_id"))
             target = presence_target(row, host, await self._settings(row["crew_id"]), now=now, boot_at=self.boot_at)
             if target.state == row["state"] and target.quiet_reason == (
                 row.get("quiet_reason") if row["state"] == "quiet" else None
@@ -265,6 +271,17 @@ class CrewReaper:
                 fresh = await get_session(tx.conn, row["id"])
                 if fresh is None or fresh["state"] != row["state"]:
                     continue  # moved since the read (heartbeat, leave): the next sweep re-evaluates
+                fresh_host = (
+                    await _one(tx.conn, "SELECT * FROM crew_hosts WHERE id = ?", (fresh["host_id"],))
+                    if fresh.get("host_id")
+                    else None
+                )
+                # A heartbeat can refresh liveness without changing state.
+                # Re-evaluate after acquiring the writer lock; never apply a
+                # stale snapshot's lost/quiet decision to a recovered session.
+                target = presence_target(
+                    fresh, fresh_host, await self.sessions.settings(fresh["crew_id"]), now=now, boot_at=self.boot_at
+                )
                 if target.lost_reason:
                     if await self.sessions.mark_lost(tx, fresh, target.lost_reason, now):
                         report.lost += 1
@@ -274,8 +291,7 @@ class CrewReaper:
     # -- leases and fencing (D31) -------------------------------------------------------------
 
     async def _leases(self, now: datetime, report: SweepReport) -> None:
-        claims = await _all(
-            self.sessions.conn,
+        claims = await self._read_all(
             "SELECT * FROM crew_claims WHERE state = 'active' AND holder_kind = 'session' AND lease_expires_at IS NOT NULL"
             " ORDER BY lease_expires_at",
         )
@@ -341,7 +357,7 @@ class CrewReaper:
     # -- idle park (§10.2) --------------------------------------------------------------------------
 
     async def _idle_park(self, now: datetime, report: SweepReport) -> None:
-        rows = await _all(self.sessions.conn, "SELECT * FROM crew_sessions WHERE state = 'idle' ORDER BY crew_id, id")
+        rows = await self._read_all("SELECT * FROM crew_sessions WHERE state = 'idle' ORDER BY crew_id, id")
         for row in rows:
             settings = await self._settings(row["crew_id"])
             age = _age_s(now, row.get("last_activity_at") or row.get("joined_at"), self.boot_at) or 0
@@ -381,8 +397,7 @@ class CrewReaper:
 
     async def _reservations(self, now: datetime, report: SweepReport) -> None:
         now_s = format_ts(now)
-        for claim in await _all(
-            self.sessions.conn,
+        for claim in await self._read_all(
             "SELECT * FROM crew_claims WHERE state = 'reserved' AND reserve_expires_at IS NOT NULL AND reserve_expires_at < ?",
             (now_s,),
         ):
@@ -411,8 +426,8 @@ class CrewReaper:
                 )
                 # a non-task reservation that ends frees its target: queued claims move up (§10.2, §5.1)
                 await self.sessions._promote_queue(tx, claim["crew_id"])
-        for claim in await _all(
-            self.sessions.conn, "SELECT * FROM crew_claims WHERE state = 'reserved' AND task_id IS NOT NULL ORDER BY updated_at"
+        for claim in await self._read_all(
+            "SELECT * FROM crew_claims WHERE state = 'reserved' AND task_id IS NOT NULL ORDER BY updated_at"
         ):
             waited = _age_s(now, claim["updated_at"]) or 0
             level = None
@@ -454,8 +469,7 @@ class CrewReaper:
 
     async def _close_lost(self, now: datetime, report: SweepReport) -> None:
         cutoff = format_ts(now - timedelta(seconds=LOST_SESSION_CLOSE_AFTER_S))
-        rows = await _all(
-            self.sessions.conn,
+        rows = await self._read_all(
             "SELECT * FROM crew_sessions WHERE state = 'lost' AND COALESCE(last_heartbeat_at, last_seen_at, joined_at) < ?",
             (cutoff,),
         )

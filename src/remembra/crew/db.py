@@ -464,6 +464,32 @@ class CrewDatabase:
     def in_transaction(self) -> bool:
         return self._tx.in_transaction
 
+    @asynccontextmanager
+    async def read_snapshot(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Read committed WAL state without joining the writer queue.
+
+        Timer scans use short read-only snapshots. Decisions to mutate must
+        re-read their subjects inside the normal serialized write transaction.
+        In-memory databases and callers already owning a transaction retain
+        the existing connection so uncommitted state is never lost.
+        """
+        if not self.is_connected:
+            raise RuntimeError("crew database not connected; call connect() first")
+        if self.db_path == ":memory:" or self._tx.owns():
+            async with self.transaction():
+                yield self.conn
+            return
+        uri = Path(self.db_path).resolve().as_uri() + "?mode=ro"
+        async with aiosqlite.connect(uri, uri=True) as reader:
+            reader.row_factory = aiosqlite.Row
+            await reader.execute(f"PRAGMA busy_timeout = {CREW_BUSY_TIMEOUT_MS}")
+            await reader.execute("PRAGMA query_only = ON")
+            await reader.execute("BEGIN")
+            try:
+                yield reader
+            finally:
+                await reader.rollback()
+
     def after_commit(self, callback: AfterCommit) -> bool:
         """Run ``callback`` after the crew transaction the caller owns commits (see ``TxCoordinator.after_commit``)."""
         return self._tx.after_commit(callback)

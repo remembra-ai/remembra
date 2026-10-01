@@ -6,6 +6,10 @@ and recovery, idempotent sweeps, and the startup hook. Real crew.db, real event 
 from __future__ import annotations
 
 import json
+import asyncio
+import sqlite3
+from contextlib import asynccontextmanager
+from contextvars import Context
 from datetime import timedelta
 
 import pytest
@@ -14,7 +18,7 @@ from fastapi import FastAPI
 from remembra.core.tasks import TaskRegistry
 from remembra.crew import startup
 from remembra.crew.events import format_ts
-from remembra.crew.reaper import CrewReaper, presence_target
+from remembra.crew.reaper import CrewReaper, SweepReport, presence_target
 from remembra.crew.sessions import get_session
 from remembra.crew.settings import default_settings
 from remembra.crew.store import crew_id_for
@@ -48,6 +52,55 @@ def _ts(seconds_ago: float) -> str:
 
 
 BOOT_LONG_AGO = T0 - timedelta(days=1)
+
+
+async def test_timer_reader_sees_committed_snapshot_without_waiting_for_writer(mk):
+    env = await mk()
+    await _join(env, "reader-test")
+    before = await env.one("SELECT name FROM crews WHERE id = ?", (CREW,))
+
+    async def read_committed():
+        async with env.db.read_snapshot() as conn:
+            row = await (await conn.execute("SELECT name FROM crews WHERE id = ?", (CREW,))).fetchone()
+            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+                await conn.execute("UPDATE crews SET name = 'must not write'")
+            return row["name"]
+
+    async with env.db.transaction():
+        await env.conn.execute("UPDATE crews SET name = 'pending' WHERE id = ?", (CREW,))
+        # An independent timer/request has not inherited the writer's
+        # deliberately nestable transaction context.
+        observed = await asyncio.wait_for(asyncio.create_task(read_committed(), context=Context()), timeout=1)
+        assert observed == before["name"]
+    assert await read_committed() == "pending"
+
+
+async def test_presence_does_not_mark_lost_after_same_state_heartbeat_refresh(mk, monkeypatch):
+    env = await mk()
+    joined = await _join(env, "refresh-race")
+    env.clock.advance(3700)
+    original = env.svc.log.transaction
+    refreshed = False
+
+    @asynccontextmanager
+    async def racing_transaction():
+        nonlocal refreshed
+        if not refreshed:
+            refreshed = True
+            async with env.db.transaction():
+                await env.conn.execute(
+                    "UPDATE crew_sessions SET last_seen_at = ?, last_activity_at = ? WHERE id = ?",
+                    (format_ts(env.clock.now), format_ts(env.clock.now), joined.session["id"]),
+                )
+        async with original() as tx:
+            yield tx
+
+    monkeypatch.setattr(env.svc.log, "transaction", racing_transaction)
+    report = SweepReport()
+    await CrewReaper(env.svc)._presence(env.clock.now, report)
+    assert refreshed and report.lost == 0
+    assert (await get_session(env.conn, joined.session["id"]))["state"] == "active"
+    assert await env.events(CREW, types=("session.lost",)) == []
 
 
 @pytest.mark.parametrize(
