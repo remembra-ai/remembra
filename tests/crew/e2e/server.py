@@ -209,6 +209,8 @@ class Metrics:
         self.statuses: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.sweeps: list[float] = []
         self.tx_holds: dict[str, list[float]] = defaultdict(list)
+        self.tx_waits: dict[str, list[float]] = defaultdict(list)
+        self.sweep_steps: dict[str, list[float]] = defaultdict(list)
         self.errors: list[str] = []
 
     def summary(self) -> dict[str, Any]:
@@ -233,6 +235,11 @@ class Metrics:
             "routes": routes,
             "sweeps_ms": [round(s * 1000, 2) for s in self.sweeps],
             "tx_holds": {tag: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for tag, v in self.tx_holds.items()},
+            "tx_waits": {
+                tag: {"count": len(v), "p95_ms": round(pct(v, 0.95) * 1000, 2), "max_ms": round(max(v) * 1000, 2)}
+                for tag, v in self.tx_waits.items()
+            },
+            "sweep_steps": {step: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for step, v in self.sweep_steps.items()},
             "database_locked": self.locked.count,
             "database_locked_samples": self.locked.samples,
             "errors": self.errors[:20],
@@ -278,8 +285,10 @@ def instrument_transactions(crew_db: Any) -> None:
 
     @asynccontextmanager
     async def timed() -> AsyncIterator[None]:
+        waiting = time.perf_counter()
         async with original():
             started = time.perf_counter()
+            METRICS.tx_waits[_TAG.get() or "all"].append(started - waiting)
             try:
                 yield
             finally:
@@ -302,6 +311,19 @@ def instrument_reaper(app: FastAPI) -> None:
             METRICS.sweeps.append(time.perf_counter() - started)
 
     reaper.sweep = timed
+
+    def time_step(name: str, original_step: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            started = time.perf_counter()
+            try:
+                return await original_step(*args, **kwargs)
+            finally:
+                METRICS.sweep_steps[name].append(time.perf_counter() - started)
+
+        return wrapped
+
+    for name in ("_hosts", "_presence", "_leases", "_idle_park", "_reservations", "_close_lost", "_alarms"):
+        setattr(reaper, name, time_step(name, getattr(reaper, name)))
     reaper._e2e_timed = True
 
 
