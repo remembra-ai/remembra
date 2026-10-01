@@ -190,6 +190,57 @@ async def test_a_late_payment_after_a_full_refund_leaves_the_account_on_free(tmp
         assert (await _state(c, uid))[0] == "free"
 
 
+@pytest.mark.parametrize("interval", [BillingInterval.MONTH, BillingInterval.YEAR])
+async def test_a_partial_refund_keeps_the_plan_bank_and_renewal_and_records_revenue_once(
+    tmp_path, monkeypatch, alerts, interval
+) -> None:
+    paddle = _paddle_mock.install(monkeypatch)
+    paddle.add_subscription("sub_partial", "ctm_partial")
+    async with cost_app(tmp_path) as c:
+        await _app(c, alerts)
+        uid = await c.h.create_user("partial@example.com")
+        await c.meter.apply_subscription(
+            uid,
+            PlanTier.PRO,
+            interval=interval,
+            customer_id="ctm_partial",
+            subscription_id="sub_partial",
+        )
+        await c.set_credits_used(uid, 10)
+        before = await c.meter.get_account(uid)
+        balance = await c.meter.get_credit_balance(before)
+        refund = {
+            "id": "adj_partial",
+            "action": "refund",
+            "type": "partial",
+            "status": "approved",
+            "transaction_id": "txn_partial",
+            "subscription_id": "sub_partial",
+            "customer_id": "ctm_partial",
+            "totals": {"currency_code": "USD", "total": "1200", "earnings": "1000"},
+        }
+        event = _envelope("adjustment.updated", refund, "evt_partial", 60)
+        result = await _post(c, event)
+        assert (result["action"], result["applied"]) == ("refund_partial", "no_change")
+        assert await _state(c, uid) == ("pro", "sub_partial", None)
+        after = await c.meter.get_account(uid)
+        assert (after.interval, after.period, after.credit_limit) == (before.interval, before.period, before.credit_limit)
+        assert await c.meter.get_credit_balance(after) == balance
+        assert paddle.subscriptions["sub_partial"]["status"] == "active"
+        assert paddle.requests("POST", "/subscriptions/sub_partial/cancel") == []
+
+        # Duplicate notification and replay with another event id must not
+        # deduct the same adjustment twice from the revenue ledger.
+        assert (await _post(c, event))["applied"] == "duplicate"
+        replay = _envelope("adjustment.updated", refund, "evt_partial_replay", 61)
+        assert (await _post(c, replay))["applied"] == "no_change"
+        cursor = await c.h.app.state.db.conn.execute(
+            "SELECT net_usd FROM cloud_revenue_events WHERE transaction_id = ?", ("adj:adj_partial",)
+        )
+        assert [tuple(row) for row in await cursor.fetchall()] == [(-10.0,)]
+        assert alerts.sent == []
+
+
 async def test_an_older_update_never_overwrites_a_newer_one(tmp_path, alerts) -> None:
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
