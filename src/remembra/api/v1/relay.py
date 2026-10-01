@@ -61,6 +61,7 @@ from remembra.core.limiter import limiter
 from remembra.marshal.diagnosis import SLIP_AGENT_LIMIT, SLIP_TRAIL_LIMIT, diagnose_agent
 from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
 from remembra.security.audit import AuditAction
+from remembra.security.secrets import scrub as scrub_secrets
 from remembra.services import relay_split
 from remembra.services.marshal_diagnosis import evidence as diagnosis_evidence
 from remembra.services.marshal_diagnosis import gather_diagnosis_input, utc_z
@@ -242,7 +243,11 @@ def _check_project(user: AuthenticatedUser, project_id: str) -> str:
 
 
 def _clip(value: Any, limit: int) -> Any:
-    return value[:limit] if isinstance(value, str) else value
+    # A cut through a credential can leave a prefix too short for the later
+    # service scrubber to recognize. Scrub the complete oversized value first.
+    if isinstance(value, str) and len(value) > limit:
+        return scrub_secrets(value)[:limit]
+    return value
 
 
 class LocatorIn(BaseModel):
