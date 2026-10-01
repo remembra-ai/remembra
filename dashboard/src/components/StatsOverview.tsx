@@ -138,6 +138,7 @@ interface StatsOverviewProps {
   storageUsed: string;
   apiCalls: number;
   loading?: boolean;
+  unavailable?: boolean;
 }
 
 export function StatsOverview({ 
@@ -145,7 +146,8 @@ export function StatsOverview({
   entityCount, 
   storageUsed, 
   apiCalls,
-  loading 
+  loading,
+  unavailable = false
 }: StatsOverviewProps) {
   if (loading) {
     return (
@@ -168,34 +170,32 @@ export function StatsOverview({
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
       <StatCard
         label="Total Memories"
-        value={memoryCount}
+        value={unavailable ? 'Unavailable' : memoryCount}
         icon={Database}
-        trend={{ value: 12, label: 'this week' }}
         color="purple"
         delay={0.1}
       />
       <StatCard
         label="Entities Count"
-        value={entityCount}
-        subtext={`${Math.round(memoryCount / Math.max(entityCount, 1))} memories/entity avg`}
+        value={unavailable ? 'Unavailable' : entityCount}
+        subtext={unavailable ? undefined : `${Math.round(memoryCount / Math.max(entityCount, 1))} memories/entity avg`}
         icon={Users}
         color="blue"
         delay={0.2}
       />
       <StatCard
-        label="Storage Used"
-        value={storageUsed}
-        subtext="of 500 MB capacity"
+        label="Estimated Storage"
+        value={unavailable ? 'Unavailable' : storageUsed}
+        subtext="Estimated from memory count"
         icon={HardDrive}
         color="green"
         delay={0.3}
       />
       <StatCard
         label="API Operations"
-        value={apiCalls}
-        subtext="past 30 days"
+        value={unavailable ? 'Unavailable' : apiCalls}
+        subtext="stores and recalls today"
         icon={Activity}
-        trend={{ value: 8, label: 'vs last month' }}
         color="amber"
         delay={0.4}
       />

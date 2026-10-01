@@ -317,7 +317,9 @@ async def test_failed_store_charges_only_real_spend(tmp_path) -> None:
         assert await c.ledger(uid) == {"used": 0, "reserved": 0, "remaining": 500, "usd": 0}
 
 
-async def test_stale_reservation_expires_and_late_settle_charges_difference(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("start", [datetime(2026, 9, 15, 12, tzinfo=UTC), datetime(2026, 9, 30, 23, 45, tzinfo=UTC)])
+async def test_stale_reservation_expires_and_late_settle_charges_difference(tmp_path, monkeypatch, start) -> None:
+    _move_clock(monkeypatch, start)
     async with cost_app(tmp_path) as c:
         uid, _ = await c.account("stale@example.com")
         account = await c.meter.get_account(uid)
@@ -325,14 +327,25 @@ async def test_stale_reservation_expires_and_late_settle_charges_difference(tmp_
         assert rid is not None
         assert (await c.ledger(uid))["reserved"] == 32
 
-        _move_clock(monkeypatch, datetime.now(UTC) + timedelta(minutes=30))
+        _move_clock(monkeypatch, start + timedelta(minutes=30))
         assert await c.meter.expire_stale_reservations() == 1
-        assert (await c.ledger(uid))["used"] == 2 and (await c.ledger(uid))["reserved"] == 0
+
+        async def reserved_period():
+            cursor = await c.h.db.conn.execute(
+                "SELECT credits_used, credits_reserved FROM cloud_credit_periods WHERE user_id = ? AND period_key = ?",
+                (uid, account.period.key),
+            )
+            return tuple(await cursor.fetchone())
+
+        assert await reserved_period() == (2, 0)
 
         # The work finished after all: $0.02 = 8 credits; 2 already charged.
         assert await c.meter.settle_reservation(rid, 0.02) == 8
+        assert await reserved_period() == (8, 0)
+        current = await c.meter.get_account(uid)
         ledger = await c.ledger(uid)
-        assert ledger["used"] == 8 and ledger["reserved"] == 0
+        assert ledger["used"] == (8 if current.period.key == account.period.key else 0)
+        assert ledger["reserved"] == 0
         assert await c.meter.settle_reservation(rid, 0.02) == 0  # idempotent
 
 

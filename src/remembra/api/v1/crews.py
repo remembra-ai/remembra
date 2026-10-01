@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -191,6 +191,14 @@ class CrewResolveRequest(BaseModel):
     repo_name: str | None = Field(default=None, max_length=200)
     host: str | None = Field(default=None, max_length=255)
     hint_project: str | None = Field(default=None, max_length=128)
+    hint_scope: Literal["all", "folders"] | None = Field(
+        default=None,
+        description=(
+            "As on POST /projects/resolve: 'folders' (crewd, 0.16.1+ relay rule) names only a location that is "
+            "not a git repository with hint_project; 'all' or none names any new location"
+        ),
+    )
+    git_repo: bool | None = Field(default=None, description="Whether root_path is inside a git repository, as the client saw it")
 
 
 @router.post("/crews/resolve", summary="Resolve a crew by project id or location (read-only; never creates)")
@@ -225,6 +233,8 @@ async def resolve_crew(request: Request, body: CrewResolveRequest, current_user:
                 bind=False,
                 create=False,
                 allowed_projects=current_user.project_ids,
+                hint_scope=body.hint_scope,
+                git_repo=body.git_repo,
             )
         except (ProjectAccessDenied, BindingNotAllowed):
             raise not_found() from None

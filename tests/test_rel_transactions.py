@@ -49,6 +49,84 @@ async def _insert_memory(db: Database, memory_id: str, user_id: str = "u1", proj
     )
 
 
+async def test_late_fts_writer_cannot_restore_deleted_content(db: Database) -> None:
+    await _insert_memory(db, "deleted")
+    await db.index_memory_fts("deleted", "u1", "default", "private content")
+    async with db.transaction():
+        await db.conn.execute("DELETE FROM memories_fts WHERE id = ?", ("deleted",))
+        await db.conn.execute("DELETE FROM memories WHERE id = ?", ("deleted",))
+
+    # A queued worker resumed after embedding, with a stale copy of the row.
+    await db.index_memory_fts("deleted", "u1", "default", "private content")
+    assert await _observer_count(db.db_path, "SELECT COUNT(*) FROM memories_fts WHERE id = ?", ("deleted",)) == 0
+
+
+@pytest.mark.parametrize("user_id,project_id", [("other-user", "default"), ("u1", "other-project")])
+async def test_fts_writer_cannot_replace_another_scope(db: Database, user_id: str, project_id: str) -> None:
+    await _insert_memory(db, "scoped")
+    await db.index_memory_fts("scoped", "u1", "default", "original private content")
+    await db.index_memory_fts("scoped", user_id, project_id, "wrong scope")
+    assert (
+        await _observer_count(
+            db.db_path,
+            "SELECT COUNT(*) FROM memories_fts WHERE id = ? AND user_id = ? AND project_id = ? AND content = ?",
+            ("scoped", "u1", "default", "original private content"),
+        )
+        == 1
+    )
+    assert await _observer_count(db.db_path, "SELECT COUNT(*) FROM memories_fts WHERE id = ?", ("scoped",)) == 1
+
+
+async def test_existing_schema_upgrade_preserves_queue_and_erasure_fence(tmp_path, monkeypatch) -> None:
+    from remembra.account.erasure import erasure_digest
+    from remembra.storage.pending_embeddings import PendingEmbeddingQueue
+
+    migrations = database_module.VERSIONED_MIGRATIONS
+    monkeypatch.setattr(database_module, "VERSIONED_MIGRATIONS", [m for m in migrations if m[0] < 11])
+    legacy = Database(str(tmp_path / "legacy.db"))
+    await legacy.connect()
+    try:
+        await legacy.init_schema()
+        stamp = utcnow().isoformat()
+        mid = "00000000-0000-0000-0000-0000000000aa"
+        await legacy.conn.execute(
+            "INSERT INTO memories (id, user_id, project_id, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (mid, "u1", "default", "preserved queued content", stamp, stamp),
+        )
+        await legacy.conn.execute(
+            "INSERT INTO pending_embeddings (memory_id, user_id, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (mid, "u1", stamp, stamp, stamp),
+        )
+        await legacy.conn.execute(
+            "INSERT INTO audit_log (id, timestamp, user_id, action, resource_id, success) VALUES (?, ?, ?, ?, ?, 1)",
+            ("old-erasure", stamp, "erased:synthetic", "account_erased", "sha256:" + erasure_digest("already-erased")),
+        )
+        await legacy.conn.commit()
+    finally:
+        await legacy.close()
+
+    monkeypatch.setattr(database_module, "VERSIONED_MIGRATIONS", migrations)
+    current = Database(str(tmp_path / "legacy.db"))
+    await current.connect()
+    try:
+        await current.init_schema()
+        assert (await current.get_memory(mid))["content"] == "preserved queued content"
+        claim = (await PendingEmbeddingQueue(current).claim())[0]
+        assert claim.memory_id == mid and claim.claim_token
+        with pytest.raises(ValueError, match="Account has been erased"):
+            await _insert_memory(current, "recreated", user_id="already-erased")
+        with pytest.raises(RuntimeError, match="rollback"):
+            async with current.transaction():
+                await current.delete_memory(mid)
+                raise RuntimeError("rollback")
+        assert await current.get_memory(mid) is not None
+        assert await _observer_count(current.db_path, "SELECT COUNT(*) FROM vector_erasure_markers") == 0
+        await current.delete_memory(mid)
+        assert await _observer_count(current.db_path, "SELECT COUNT(*) FROM vector_erasure_markers") == 1
+    finally:
+        await current.close()
+
+
 # ---------------------------------------------------------------------------
 # Transaction primitive
 # ---------------------------------------------------------------------------

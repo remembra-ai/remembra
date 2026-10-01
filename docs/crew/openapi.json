@@ -4428,6 +4428,19 @@
             "minimum": 0,
             "type": "integer"
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "description": "ISO-8601 UTC, server-stamped",
+                "maxLength": 40,
+                "pattern": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "passed": {
             "minimum": 0,
             "type": "integer"

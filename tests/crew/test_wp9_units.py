@@ -527,3 +527,30 @@ def test_githook_state_plain_husky_and_lefthook(tmp_path):
         f"pre-commit:\n  commands:\n    crew:\n      run: crew-gate precommit {S.CREW_HOOK_MARKER}\n"
     )
     assert githook_state(str(repo))[0] == "chained"
+
+
+def test_clean_unpushed_baton_restores_committed_work_on_another_clone(tmp_path):
+    remote = tmp_path / "remote.git"
+    repo = make_repo(tmp_path / "repo", remote=remote)
+    original_head = git(repo, "rev-parse", "HEAD")
+    assert B.create_baton_ref(repo, "T-5") is None  # fully published and clean
+    (repo / "src/app/pos/split.ts").write_text("committed but unpushed\n")
+    git(repo, "commit", "-qam", "local work")
+    saved_head = git(repo, "rev-parse", "HEAD")
+    assert B.is_clean(repo)
+    index_before = (repo / ".git" / "index").read_bytes()
+    baton = B.create_baton_ref(repo, "T-5")
+    assert baton is not None
+    assert baton.parent == saved_head and baton.unpushed == [saved_head]
+    assert baton.dirty_files == []
+    assert (repo / ".git" / "index").read_bytes() == index_before
+    assert B.is_clean(repo) and git(repo, "rev-parse", "HEAD") == saved_head
+    assert B.push_baton(repo, baton, "origin")
+    assert git(remote, "rev-parse", "refs/heads/main") == original_head
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "main", str(remote), str(other)], check=True, capture_output=True)
+    result = B.restore_baton(other, baton.ref, remote="origin")
+    assert result.restored, result
+    assert git(other, "rev-parse", "HEAD") == saved_head
+    assert (other / "src/app/pos/split.ts").read_text() == "committed but unpushed\n"
+    assert B.is_clean(other)

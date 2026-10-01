@@ -126,7 +126,13 @@ def test_cloud_dockerfile_installs_from_lock_with_rerank_and_checks_litestream()
     assert "sha256sum -c -" in text
     assert "ADD https://github.com/benbjohnson/litestream" not in text
     assert "ARG SOURCE_COMMIT" in text and "ENV REMEMBRA_BUILD_SHA=${REMEMBRA_BUILD_SHA}" in text
-    assert "CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')" in text
+    assert "COPY scripts/ci/check-reranker-runtime.py /tmp/check-reranker-runtime.py" in text
+    assert "RUN python /tmp/check-reranker-runtime.py" in text
+    checker = (ROOT / "scripts" / "ci" / "check-reranker-runtime.py").read_text()
+    assert 'CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=False)' in checker
+    assert 'import_module_class("modeling_probe.Probe", str(root), trust_remote_code=False)' in checker
+    assert 'if (root / "executed").exists():' in checker
+    assert "model.predict(" in checker and "math.isfinite(float(scores[0]))" in checker
 
 
 def _litestream_run_block(text: str) -> str:

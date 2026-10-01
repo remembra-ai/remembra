@@ -25,16 +25,16 @@ from remembra.connector.policy import (
 
 
 def test_parse_scope_defaults_orders_and_rejects_unknown():
-    assert parse_scope(None) == ["session:brief", "memory:recall", "memory:store"]
-    assert parse_scope("offline_access") == ["session:brief", "memory:recall", "memory:store"]
+    assert parse_scope(None) == ["session:brief", "memory:recall", "memory:store", "session:close"]
+    assert parse_scope("offline_access") == ["session:brief", "memory:recall", "memory:store", "session:close"]
     assert parse_scope("memory:store memory:recall memory:recall offline_access") == ["memory:recall", "memory:store"]
     with pytest.raises(ScopeError):
         parse_scope("memory:recall memory:delete")
 
 
 def test_parse_requested_scope_keeps_supported_subset():
-    assert parse_requested_scope(None) == (["session:brief", "memory:recall", "memory:store"], [])
-    assert parse_requested_scope("offline_access") == (["session:brief", "memory:recall", "memory:store"], [])
+    assert parse_requested_scope(None) == (["session:brief", "memory:recall", "memory:store", "session:close"], [])
+    assert parse_requested_scope("offline_access") == (["session:brief", "memory:recall", "memory:store", "session:close"], [])
     assert parse_requested_scope("claudeai memory:store session:brief") == (
         ["session:brief", "memory:store"],
         ["claudeai"],

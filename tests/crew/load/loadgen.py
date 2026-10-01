@@ -77,6 +77,7 @@ class Crew:
 
 @dataclass
 class Stats:
+    attempted: dict[str, int] = field(default_factory=dict)
     client_ms: dict[str, list[float]] = field(default_factory=dict)
     statuses: dict[str, dict[int, int]] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
@@ -89,11 +90,16 @@ class Stats:
 
 async def timed(stats: Stats, name: str, api: Api, method: str, path: str, **kw: Any) -> Any:
     started = time.perf_counter()
+    stats.attempted[name] = stats.attempted.get(name, 0) + 1
     try:
         resp = await api.call(method, path, timeout=30.0, **kw)
     except Unreachable as e:
         stats.add(name, (time.perf_counter() - started) * 1000, 0)
         stats.errors.append(f"{name}: {e}")
+        return None
+    except Exception as e:
+        stats.add(name, (time.perf_counter() - started) * 1000, 0)
+        stats.errors.append(f"{name}: {type(e).__name__}")
         return None
     stats.add(name, (time.perf_counter() - started) * 1000, resp.status)
     if resp.status >= 500:
@@ -226,16 +232,43 @@ async def ingest_loop(crews: list[Crew], stats: Stats, stop: asyncio.Event, rate
         "wholesale",
     ]
     n = 0
-    while not stop.is_set():
-        crew = crews[n % len(crews)]
-        n += 1
-        content = f"Load memory {n}: " + " ".join(random.choice(words) for _ in range(12))
-        asyncio.ensure_future(
-            timed(
-                stats, "memory_store", crew.api, "POST", "/memories", json_body={"content": content, "project_id": crew.project}
+    pending: set[asyncio.Task[Any]] = set()
+    try:
+        while not stop.is_set():
+            crew = crews[n % len(crews)]
+            n += 1
+            content = f"Load memory {n}: " + " ".join(random.choice(words) for _ in range(12))
+            child = asyncio.create_task(
+                timed(
+                    stats,
+                    "memory_store",
+                    crew.api,
+                    "POST",
+                    "/memories",
+                    json_body={"content": content, "project_id": crew.project},
+                )
             )
-        )
-        await asyncio.sleep(1.0 / rate)
+            pending.add(child)
+            child.add_done_callback(pending.discard)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=1.0 / rate)
+            except TimeoutError:
+                pass
+    finally:
+        # Observe every child before metrics/HTTP clients/server are closed.
+        # Each request has a 30-second timeout; allow a bounded drain beyond it.
+        remaining = list(pending)
+        if remaining:
+            try:
+                outcomes = await asyncio.wait_for(asyncio.gather(*remaining, return_exceptions=True), timeout=35.0)
+                for outcome in outcomes:
+                    if isinstance(outcome, BaseException):
+                        stats.errors.append(f"memory_store worker: {type(outcome).__name__}")
+            except TimeoutError:
+                stats.errors.append("memory_store: drain timeout")
+                for child in remaining:
+                    child.cancel()
+                await asyncio.gather(*remaining, return_exceptions=True)
 
 
 async def sweep_loop(admin: Api, stats: Stats, stop: asyncio.Event) -> None:
@@ -249,9 +282,19 @@ async def sweep_loop(admin: Api, stats: Stats, stop: asyncio.Event) -> None:
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     random.seed(args.seed)
     workdir = Path(args.workdir or tempfile.mkdtemp(prefix="crew-load-"))
-    server = ServerProc(workdir / "server", seed_users=args.crews).start()
+    server = ServerProc(workdir / "server", seed_users=args.crews)
     stats = Stats()
+    stop = asyncio.Event()
+    tasks: list[asyncio.Task[Any]] = []
+    crews: list[Crew] = []
+    admin: Api | None = None
+    phase = "startup"
+    failure: dict[str, str] | None = None
+    metrics: dict[str, Any] = {}
+    retention: dict[str, Any] | None = None
     try:
+        server.start()
+        phase = "setup"
         keys: list[str] = list(server.info["keys"])
         crews = [
             Crew(
@@ -262,29 +305,53 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             for i in range(args.crews)
         ]
         admin = Api(RelayConfig(url=server.url, api_key=server.key, agent_id=None, source="load"), agent_id=None)
-        await asyncio.gather(*(setup_crew(c, args.sessions, stats) for c in crews))
-        await admin.call("POST", "/__e2e/metrics/reset", root=True)
-        stop = asyncio.Event()
+        tasks = [asyncio.create_task(setup_crew(c, args.sessions, stats)) for c in crews]
+        await asyncio.gather(*tasks)
+        reset = await admin.call("POST", "/__e2e/metrics/reset", root=True)
+        if not reset.ok:
+            raise RuntimeError(f"metrics reset failed: HTTP {reset.status}")
+        phase = "workload"
         tasks = [asyncio.ensure_future(heartbeat_loop(c, stats, stop, args.heartbeat_s)) for c in crews]
         tasks += [asyncio.ensure_future(session_loop(c, s, stats, stop, args.claim_s)) for c in crews for s in c.sessions]
         tasks.append(asyncio.ensure_future(ingest_loop(crews, stats, stop, args.ingest_rate)))
         tasks.append(asyncio.ensure_future(sweep_loop(admin, stats, stop)))
         started = time.monotonic()
-        retention: dict[str, Any] | None = None
         while time.monotonic() - started < args.duration:
             await asyncio.sleep(1.0)
             if retention is None and time.monotonic() - started >= args.duration * 0.8:
                 resp = await admin.call("POST", "/__e2e/retention", root=True, params={"days": 400}, timeout=600)
                 retention = resp.body if resp.ok else {"error": resp.status, "body": resp.body}
         stop.set()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                stats.errors.append(f"load worker: {type(outcome).__name__}")
         metrics = (await admin.call("GET", "/__e2e/metrics", root=True)).body
-        for c in crews:
-            await c.api.close()
-        await admin.close()
+    except Exception as exc:
+        # Preserve partial counts and transport errors even when setup never
+        # reaches the workload. Do not retry or turn an aborted run into a pass.
+        failure = {"phase": phase, "exception": type(exc).__name__}
+        stats.errors.append(f"{phase}: {type(exc).__name__}")
     finally:
-        server.stop()
-    return summarize(args, metrics, retention or {}, stats)
+        stop.set()
+        try:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for c in crews:
+                await c.api.close()
+            if admin is not None:
+                await admin.close()
+        finally:
+            server.stop()
+    report = summarize(args, metrics, retention or {}, stats)
+    report["phase"] = phase if failure else "complete"
+    if failure:
+        report["failure"] = failure
+        report["checks"]["run_completed"] = False
+        report["ok"] = False
+    return report
 
 
 def _p(values: list[float], q: float) -> float:
@@ -319,7 +386,30 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
         "client": {name: {"count": len(v), "p95_ms": _p(v, 0.95), "max_ms": _p(v, 1.0)} for name, v in stats.client_ms.items()},
         "client_statuses": stats.statuses,
         "client_errors": stats.errors[:20],
+        "requests": {
+            "attempted": dict(stats.attempted),
+            "completed": {name: len(values) for name, values in stats.client_ms.items()},
+        },
     }
+    completed = report["requests"]["completed"]
+    allowed_statuses = {
+        "host_register": {200, 201},
+        "join": {200, 201},
+        "zones_file": {200, 201},
+        "heartbeat": {200},
+        "claim": {200, 201, 202, 409, 423},
+        "events": {200, 201},
+        "release": {200, 204},
+        "sweep": {200},
+        "memory_store": {201},
+    }
+    unexpected_statuses = {
+        name: {str(status): count for status, count in statuses.items() if status not in allowed_statuses.get(name, set())}
+        for name, statuses in stats.statuses.items()
+    }
+    unexpected_statuses = {name: statuses for name, statuses in unexpected_statuses.items() if statuses}
+    report["unexpected_client_statuses"] = unexpected_statuses
+    memory = report["server"]["memory_store"]
     checks = {
         "heartbeat_p95": bool(hb) and hb["p95_ms"] < BUDGETS["heartbeat_p95_ms"],
         "claim_p95": bool(claim) and claim["p95_ms"] < BUDGETS["claim_p95_ms"],
@@ -328,7 +418,19 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
         "sweep_max": bool(sweeps) and max(sweeps) < BUDGETS["sweep_max_ms"],
         "retention_tx_max": bool(retention) and not retention.get("error")
         and float(retention.get("max_tx_ms") or 0) <= BUDGETS["retention_tx_max_ms"],
-        "memory_ingested": (routes.get("POST /memories") or {}).get("count", 0) > 0 or args.ingest_rate <= 0,
+        "memory_ingested": args.ingest_rate <= 0 or (
+            memory.get("count", 0) >= max(1, args.duration * args.ingest_rate * 0.8)
+            and memory.get("statuses") == {"201": memory.get("count")}
+            and memory.get("count") == completed.get("memory_store", 0)
+        ),
+        "heartbeat_workload": hb.get("count", 0) >= args.crews * (args.duration / args.heartbeat_s) * 0.8,
+        "claim_workload": claim.get("count", 0) > args.crews * args.sessions,
+        "requests_completed": bool(stats.attempted) and stats.attempted == completed,
+        "no_client_errors": not stats.errors,
+        "no_server_errors": not report["server"]["errors"],
+        "expected_client_statuses": not unexpected_statuses,
+        "retention_complete": retention.get("transactions", 0) > 0
+            and retention.get("events_pruned", 0) > 0 and retention.get("chain_errors") == {},
     }  # fmt: skip
     report["checks"] = checks
     report["ok"] = all(checks.values())

@@ -66,8 +66,8 @@ def test_runner_rejects_bad_version_lists() -> None:
 
 def test_main_and_crew_lists_are_versioned_append_only() -> None:
     # 6-10 shipped before crew merged (10 is 0.16.1's account_reviews)
-    assert [v for v, _, _ in VERSIONED_MIGRATIONS] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    assert main_migrations().latest_version == 10
+    assert [v for v, _, _ in VERSIONED_MIGRATIONS] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    assert main_migrations().latest_version == 12
     assert [v for v, _, _ in CREW_MIGRATIONS] == [1]
     assert CREW_MIGRATION_RUNNER.latest_version == 1
     # One runner class serves both files.
@@ -321,7 +321,7 @@ async def test_full_init_schema_is_idempotent_across_restarts(tmp_path: Path) ->
         finally:
             await db.close()
     versions = sync_rows(tmp_path / "boot.db", "SELECT version FROM schema_version ORDER BY version")
-    assert versions == [(v,) for v in range(1, 11)]
+    assert versions == [(v,) for v in range(1, 13)]
 
 
 # ---------------------------------------------------------------------------

@@ -4,11 +4,13 @@ import asyncio
 import re
 from collections.abc import Iterable
 from typing import Any
+from uuid import UUID
 
+import httpx
 import structlog
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from remembra.config import Settings
 from remembra.models.memory import Memory
@@ -18,6 +20,11 @@ log = structlog.get_logger(__name__)
 
 QDRANT_WRITE_RETRIES = 3
 QDRANT_WRITE_BACKOFF_BASE = 0.5  # seconds; doubles each retry
+
+
+class VectorStoreUnavailable(RuntimeError):
+    """A transient vector-search failure; callers may use scoped keyword recall."""
+
 
 # Payload field names
 FIELD_USER_ID = "user_id"
@@ -485,16 +492,25 @@ class QdrantStore:
         """
         client = await self._get_client()
 
-        results = await client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=self.build_filter(
-                user_id, project_id, active_at=active_at, must_match=must_match, metadata_match=metadata_match
-            ),
-            limit=limit,
-            offset=offset or None,
-            score_threshold=score_threshold,
+        query_filter = self.build_filter(
+            user_id, project_id, active_at=active_at, must_match=must_match, metadata_match=metadata_match
         )
+        try:
+            results = await client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                offset=offset or None,
+                score_threshold=score_threshold,
+            )
+        except UnexpectedResponse as exc:
+            code = exc.status_code or 0
+            if code not in (408, 429) and code < 500:
+                raise  # Invalid requests/auth/configuration are not an outage.
+            raise VectorStoreUnavailable("vector search temporarily unavailable") from exc
+        except (ResponseHandlingException, httpx.RequestError, ConnectionError, TimeoutError) as exc:
+            raise VectorStoreUnavailable("vector search temporarily unavailable") from exc
 
         return [(str(r.id), r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
 
@@ -598,6 +614,34 @@ class QdrantStore:
         """
         bases = {rebuild_base(self.settings.qdrant_collection), rebuild_base(self.collection_name)}
         return tuple(sorted(bases))
+
+    async def delete_ids_everywhere(self, memory_ids: list[str]) -> None:
+        """Reconcile deleted canonical IDs in this application's collection family.
+
+        SQLite-only IDs cannot have Qdrant points. No other application's
+        collections or unaffected IDs are selected. Retained erasure markers
+        permit repeated cleanup after interrupted or late remote writes.
+        """
+        ids: list[str] = []
+        for mid in memory_ids:
+            try:
+                UUID(mid)
+            except ValueError:
+                continue
+            ids.append(mid)
+        if not ids:
+            return
+        client = await self._get_client()
+        bases = self.collection_family()
+        names = [
+            c.name
+            for c in (await client.get_collections()).collections
+            if any(c.name == base or c.name.startswith(base + REBUILD_MARKER) for base in bases)
+        ]
+        for name in names:
+            result = await client.delete(collection_name=name, points_selector=qmodels.PointIdsList(points=ids), wait=True)
+            if result.status != qmodels.UpdateStatus.COMPLETED:
+                raise RuntimeError("Vector erasure was not acknowledged")
 
     async def delete_by_user_everywhere(self, user_id: str, also: Iterable[str] = ()) -> int:
         """Delete a user's points from the active collection AND every rollback copy (account erasure).

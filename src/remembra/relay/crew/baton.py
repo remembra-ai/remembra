@@ -12,7 +12,8 @@ working tree or the real index::
 
 Ignored files are never captured (``git status`` does not list them); files over 5 MB and
 ``.env*`` files are listed as skipped but never captured. The unpushed commits
-(``@{upstream}..HEAD``) are recorded too.
+(``@{upstream}..HEAD``) are recorded too. A clean checkout with a configured remote
+and unpublished commits gets a same-tree baton so a successor clone can fetch its HEAD.
 
 ``restore`` (adopt) refuses on a dirty tree and prints the command to run once it is clean; it
 never runs a destructive git command on its own. In a clean tree it moves to the baton's parent
@@ -241,14 +242,18 @@ def _skip(path: str, toplevel: str) -> bool:
 
 
 def create_baton_ref(toplevel: str | Path, label: str, *, seq: int | None = None) -> BatonRef | None:
-    """Save the uncommitted work of ``toplevel`` as ``refs/remembra/baton/<label>/<seq>``; ``None`` when clean."""
+    """Save dirty work or unpublished history; None when neither needs a recovery ref."""
     check_label(label)
     top = os.path.realpath(str(toplevel))
     head = try_out(["rev-parse", "--verify", "--quiet", "HEAD"], top)
     if not head:
         return None  # an unborn branch has no parent to hang the baton on
     entries = dirty_entries(top)
-    if not entries:
+    unpublished = unpushed_commits(top)
+    # With no configured remote, a clean local repository has no publication
+    # boundary to recover. Dirty work still gets the existing local baton.
+    preserve_head = bool(unpublished and try_out(["remote"], top))
+    if not entries and not preserve_head:
         return None
     paths = sorted({p for _xy, p in entries})
     capture = [p for p in paths if not _skip(p, top)]
@@ -272,7 +277,7 @@ def create_baton_ref(toplevel: str | Path, label: str, *, seq: int | None = None
         except OSError:
             pass
     head_tree = out(["rev-parse", f"{head}^{{tree}}"], top)
-    if tree == head_tree:
+    if tree == head_tree and not preserve_head:
         return None
     branch = try_out(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
     n = seq if seq is not None else next_seq(top, label)
@@ -293,7 +298,7 @@ def create_baton_ref(toplevel: str | Path, label: str, *, seq: int | None = None
         seq=n,
         dirty_files=[p for p in changed.split("\0") if p],
         skipped=skipped,
-        unpushed=unpushed_commits(top),
+        unpushed=unpublished,
     )
 
 

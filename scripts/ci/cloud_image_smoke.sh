@@ -19,6 +19,7 @@ NET="$TAG-net"
 APP="$TAG-app"
 QDRANT="$TAG-qdrant"
 BASE="http://127.0.0.1:$PORT"
+SMOKE_METRICS_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
 cleanup() {
     docker rm -f "$APP" "$QDRANT" >/dev/null 2>&1 || true
@@ -53,6 +54,7 @@ docker run -d --name "$QDRANT" --network "$NET" --network-alias qdrant "$QDRANT_
 docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:8787" \
     -e REMEMBRA_QDRANT_URL=http://qdrant:6333 \
     -e REMEMBRA_OPENAI_API_KEY=ci-placeholder-not-a-key \
+    -e REMEMBRA_METRICS_TOKEN="$SMOKE_METRICS_TOKEN" \
     -e REMEMBRA_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')" \
     "$IMAGE" >/dev/null
 
@@ -69,8 +71,16 @@ if expect:
     assert body.get("build_sha") == expect, body
 PY
 
-READY=$(curl -fsS "$BASE/health/ready")
-python3 - "$READY" <<'PY' || fail "/health/ready"
+PUBLIC_READY=$(curl -fsS "$BASE/health/ready")
+python3 - "$PUBLIC_READY" <<'PY' || fail "/health/ready exposes diagnostics"
+import json, sys
+body = json.loads(sys.argv[1])
+assert set(body) == {"status"}, body
+assert body["status"] in ("ok", "degraded"), body
+PY
+
+READY=$(curl -fsS -H "Authorization: Bearer $SMOKE_METRICS_TOKEN" "$BASE/health/ready")
+python3 - "$READY" <<'PY' || fail "authenticated /health/ready"
 import json, sys
 body = json.loads(sys.argv[1])
 sqlite = body["components"]["sqlite"]

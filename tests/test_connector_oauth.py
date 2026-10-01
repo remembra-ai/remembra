@@ -65,7 +65,7 @@ async def test_protected_resource_metadata(h, path):
     meta = resp.json()
     assert meta["resource"] == RESOURCE
     assert meta["authorization_servers"] == [PUBLIC]
-    assert set(meta["scopes_supported"]) == {"session:brief", "memory:recall", "memory:store"}
+    assert set(meta["scopes_supported"]) == {"session:brief", "memory:recall", "memory:store", "session:close"}
 
 
 async def test_mcp_without_token_is_401_with_resource_metadata(h):
@@ -74,7 +74,7 @@ async def test_mcp_without_token_is_401_with_resource_metadata(h):
     challenge = resp.headers["www-authenticate"]
     assert challenge.startswith("Bearer ")
     assert f'resource_metadata="{PUBLIC}/.well-known/oauth-protected-resource/mcp"' in challenge
-    assert 'scope="session:brief memory:recall memory:store"' in challenge
+    assert 'scope="session:brief memory:recall memory:store session:close"' in challenge
 
 
 async def test_connector_off_by_default(tmp_path):
@@ -129,7 +129,15 @@ async def test_full_flow_with_real_mcp_client_refresh_and_revoke(h):
         init = await session.initialize()
         assert init.serverInfo.name == "remembra"
         tools = {t.name: t for t in (await session.list_tools()).tools}
-        assert set(tools) == {"session_brief", "trail", "recall_memories", "send_to_inbox", "store_memory", "list_projects"}
+        assert set(tools) == {
+            "session_brief",
+            "trail",
+            "recall_memories",
+            "send_to_inbox",
+            "store_memory",
+            "close_session",
+            "list_projects",
+        }
         # Nothing destructive is exposed over the connector.
         assert all(t.annotations is not None and t.annotations.destructiveHint is False for t in tools.values())
 
@@ -970,7 +978,7 @@ async def test_registration_ignores_unknown_scopes(h):
     for scope in ("claudeai", "memory:delete session:brief", "offline_access"):
         resp = await h.register(scope=scope)
         assert resp.status_code == 201, resp.text
-        assert resp.json()["scope"] == "session:brief memory:recall memory:store"
+        assert resp.json()["scope"] == "session:brief memory:recall memory:store session:close"
 
 
 async def test_authorize_keeps_the_supported_subset_of_scopes(h):

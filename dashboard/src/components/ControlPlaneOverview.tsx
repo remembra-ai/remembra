@@ -27,6 +27,7 @@ interface ControlPlaneOverviewProps {
   storageUsed: string;
   apiCalls: number;
   loading?: boolean;
+  unavailable?: boolean;
   wsConnected: boolean;
   currentProjectId: string;
   onNewMemory: () => void;
@@ -65,6 +66,7 @@ function MetricCard({
   icon: Icon,
   accent,
   loading,
+  unavailable,
 }: {
   label: string;
   value: string;
@@ -72,6 +74,7 @@ function MetricCard({
   icon: ElementType;
   accent: string;
   loading?: boolean;
+  unavailable?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))/0.72] bg-[hsl(var(--card))/0.72] p-4 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.04)]">
@@ -80,11 +83,11 @@ function MetricCard({
           <Icon className="h-4 w-4" />
         </div>
         <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[hsl(var(--muted-foreground))]">
-          Live
+          {unavailable ? 'Unavailable' : loading ? 'Loading' : 'Current'}
         </span>
       </div>
       <div className="text-2xl font-semibold tracking-tight text-[hsl(var(--foreground))]">
-        {loading ? '...' : value}
+        {loading ? '...' : unavailable ? 'Unavailable' : value}
       </div>
       <div className="mt-1 text-xs font-medium text-[hsl(var(--muted-foreground))]">{label}</div>
       <p className="mt-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{detail}</p>
@@ -98,6 +101,7 @@ export function ControlPlaneOverview({
   storageUsed,
   apiCalls,
   loading = false,
+  unavailable = false,
   wsConnected,
   currentProjectId,
   onNewMemory,
@@ -171,6 +175,7 @@ export function ControlPlaneOverview({
               icon={Database}
               accent="border-violet-300/25 bg-violet-300/10 text-violet-200"
               loading={loading}
+              unavailable={unavailable}
             />
             <MetricCard
               label="Resolved entities"
@@ -179,22 +184,25 @@ export function ControlPlaneOverview({
               icon={Users}
               accent="border-emerald-300/25 bg-emerald-300/10 text-emerald-300"
               loading={loading}
+              unavailable={unavailable}
             />
             <MetricCard
-              label="Recall traffic today"
+              label="Stores and recalls today"
               value={formatCount(apiCalls)}
               detail="Store and recall activity moving through this workspace."
               icon={Workflow}
               accent="border-cyan-300/25 bg-cyan-300/10 text-cyan-300"
               loading={loading}
+              unavailable={unavailable}
             />
             <MetricCard
               label="Estimated storage"
               value={storageUsed}
-              detail="Lightweight context now, compounding leverage over time."
+              detail="Estimate based on memory count; vectors and indexes are not included."
               icon={KeyRound}
               accent="border-rose-300/25 bg-rose-300/10 text-rose-200"
               loading={loading}
+              unavailable={unavailable}
             />
           </div>
         </div>

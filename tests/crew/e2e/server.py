@@ -292,11 +292,18 @@ def instrument_reaper(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_app(workdir: Path, *, webhook_forward: str | None = None) -> FastAPI:
+def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_limits: bool = False) -> FastAPI:
+    """``crew_rate_limits`` turns on the crew rate limiter as production runs it (e.g. one snapshot read
+    per 10 s per key, agent and crew); off by default so scenarios are not paced by it."""
     workdir.mkdir(parents=True, exist_ok=True)
     os.environ["REMEMBRA_CREW_DB_PATH"] = str(workdir / "crew" / "crew.db")
     os.environ.pop(startup.TAILER_ENV, None)
-    settings = make_settings(auth_enabled=True, embedding_dimensions=EMBED_DIM, enable_entity_resolution=False)
+    settings = make_settings(
+        auth_enabled=True,
+        embedding_dimensions=EMBED_DIM,
+        enable_entity_resolution=False,
+        rate_limit_enabled=crew_rate_limits,
+    )
     config_module._settings = settings
 
     @asynccontextmanager
@@ -409,8 +416,8 @@ async def seed_users(app: FastAPI, count: int) -> list[str]:
     return keys
 
 
-async def serve(workdir: Path, port: int, webhook_forward: str | None, users: int = 0) -> None:
-    app = build_app(workdir, webhook_forward=webhook_forward)
+async def serve(workdir: Path, port: int, webhook_forward: str | None, users: int = 0, crew_rate_limits: bool = False) -> None:
+    app = build_app(workdir, webhook_forward=webhook_forward, crew_rate_limits=crew_rate_limits)
     logging.getLogger().addHandler(METRICS.locked)
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="on", ws_ping_interval=None)
     server = uvicorn.Server(config)
@@ -435,8 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, required=True)
     p.add_argument("--webhook-forward")
     p.add_argument("--seed-users", type=int, default=0, help="extra owners with one admin key each (load tests)")
+    p.add_argument("--crew-rate-limits", action="store_true", help="the crew rate limiter on, as in production")
     args = p.parse_args(argv)
-    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users))
+    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users, args.crew_rate_limits))
     return 0
 
 

@@ -163,8 +163,9 @@ follow-up; until then volume-level encryption is the control for SQLite data.
 ### Encryption in Transit
 
 - TLS is handled by the reverse proxy in front of the API, not by the server
-  itself. On Remembra Cloud that is Cloudflare, and api.remembra.dev still
-  accepts TLS 1.0 and 1.1 today: a TLS 1.2 minimum is not enforced yet.
+  itself. On Remembra Cloud that is Cloudflare. The remembra.dev zone requires
+  TLS 1.2 or newer; external checks on September 30, 2026 verified that the API,
+  dashboard, main site, www redirect, and docs reject TLS 1.0 and 1.1.
 - On Remembra Cloud, HTTP redirects to HTTPS. The API sends HSTS (1 year,
   `includeSubDomains`) whenever debug mode is off.
 - Webhook deliveries carry an HMAC-SHA256 signature (`X-Remembra-Signature`)
@@ -428,6 +429,16 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (when debug is o
 - 10-second timeout and up to 3 attempts; redirects are never followed
 
 ---
+
+## Operational Diagnostics
+
+In production, `/health/ready` returns only the aggregate status to public callers.
+Component, model, queue, and error details require
+`Authorization: Bearer $REMEMBRA_METRICS_TOKEN`, using the same operator token as
+`/metrics`. With no token configured, those details remain unavailable remotely.
+Explicit debug mode retains detailed local diagnostics; it must stay disabled in
+production. Readiness responses use `Cache-Control: no-store` and vary by
+`Authorization`.
 
 ## Docker Security
 

@@ -120,6 +120,52 @@ async def _save(db: Database, memory_id: str, content: str = "Mani prefers dark 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("stale_action", ["done", "failed", "release"])
+async def test_expired_worker_cannot_acknowledge_new_claim(stack, stale_action) -> None:
+    db = stack["db"]
+    other = Database(db.db_path)
+    await other.connect()
+    try:
+        now = [utcnow()]
+        first = PendingEmbeddingQueue(db, lease_seconds=1, clock=lambda: now[0])
+        second = PendingEmbeddingQueue(other, lease_seconds=1, clock=lambda: now[0])
+        await first.enqueue("m1", "u1")
+        old = (await first.claim())[0]
+        now[0] += timedelta(seconds=2)
+        new = (await second.claim())[0]
+        assert old.claim_token and new.claim_token and old.claim_token != new.claim_token
+        if stale_action == "done":
+            await first.mark_done("m1", claim_token=old.claim_token)
+        elif stale_action == "failed":
+            assert await first.mark_failed("m1", "stale failure", claim_token=old.claim_token) == "missing"
+        else:
+            await first.release("m1", 300, claim_token=old.claim_token)
+        current = await second.get("m1")
+        assert current and current.claim_token == new.claim_token and current.status == "in_progress"
+        assert current.attempts == 0 and current.last_error is None
+        await second.mark_done("m1", claim_token=new.claim_token)
+        assert await first.get("m1") is None
+    finally:
+        await other.close()
+
+
+async def test_reclaimed_worker_skips_vector_dispatch(stack) -> None:
+    db = stack["db"]
+    now = [utcnow()]
+    queue = PendingEmbeddingQueue(db, lease_seconds=1, clock=lambda: now[0])
+    mid = str(__import__("uuid").uuid4())
+    await _save(db, mid)
+    await queue.enqueue(mid, "u1")
+    old = (await queue.claim())[0]
+    now[0] += timedelta(seconds=2)
+    new = (await queue.claim())[0]
+    vector = AsyncMock()
+    worker = PendingEmbeddingWorker(queue, db, vector, stack["embeddings"])
+    assert await worker._process(old) == "skipped"
+    vector.upsert.assert_not_awaited()
+    assert (await queue.get(mid)).claim_token == new.claim_token
+
+
 async def test_queue_lifecycle_backoff_and_dead_letter(stack) -> None:
     db = stack["db"]
     now = [utcnow()]
@@ -623,6 +669,7 @@ async def test_lifespan_boots_background_work_and_shuts_down(tmp_path, monkeypat
         embedder._client = httpx.AsyncClient(transport=provider.transport())
         names = app.state.tasks.names()
         assert "pending-embedding-worker" in names
+        assert "vector_erasure_reconciliation" in names
         assert "temporal-cleanup-loop" in names
 
         # queue drains in the running app

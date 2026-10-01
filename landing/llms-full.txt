@@ -366,7 +366,7 @@ Questions
 - What happens when my credits run out?:
   Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), on Free, 300 unenriched saves a day, and past the request limit of 30 saves a minute per account.
 - What changes on a yearly plan?:
-  You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.
+  You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A full refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.
 - Can I get a refund?:
   Yes. The first payment on any paid plan, Founding 100 included, has a 14-day money-back guarantee: ask within 14 days and Paddle refunds it in full. Renewals and part periods are not refunded, and you can cancel any time. [Refund policy](https://remembra.dev/refunds).
 - Is a card required for Free?:
@@ -646,7 +646,7 @@ Remembra has not had a SOC 2 audit or an outside penetration test. The [security
 
 - Your account and what you store are kept while your account is open. Handoffs and structured checkpoints do not expire: they stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.
 - Deleting your account: Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet.
-- After an erasure we keep one audit entry that says an account was erased, identified only by a one-way hash of its id, with no email and no content.
+- Erasure records: We keep a content-free audit entry and a one-way hash of the erased account's id so requests already in progress cannot recreate its memories. We also retain erased-memory UUIDs and cleanup timestamps so delayed vector writes can be removed. These technical records contain no memory text, email or plain account id. Vector cleanup retries if storage is unavailable; backups follow the schedule above.
 - Security log entries are kept while your account is open and deleted when it is erased. Request logs are kept only as long as we need them to run and protect the service.
 - Billing records stay with Paddle, our Merchant of Record, under its own retention rules (for as long as tax law requires). We keep each Paddle transaction id with its month and net amount, and each Paddle subscription id with when it last changed and when and why it ended. The ids of Paddle notices we processed are kept for 30 days. None of these is linked to your account in our database.
 
@@ -694,7 +694,9 @@ Last updated: September 27, 2026. If Remembra isn't right for you, ask within 14
 
 Every paid plan (Solo, Pro, Team and the Founding 100 offer, monthly or yearly) comes with a 14-day money-back guarantee on its first payment. Ask within 14 days of that payment and we refund it in full. You don't need to give a reason.
 
-A refund ends the plan at once. We cancel the subscription with Paddle at the same time, so it does not renew and you are not charged again. The account goes back to Free, and any credits left from the paid plan, including a yearly credit bank, go with it. Your notes, handoffs and trail stay in the account, within the Free plan's limits.
+An approved full refund ends the plan at once. We cancel the subscription with Paddle at the same time, so it does not renew and you are not charged again. The account goes back to Free, and any credits left from the paid plan, including a yearly credit bank, go with it. Your notes, handoffs and trail stay in the account, within the Free plan's limits.
+
+If a partial refund is approved for an individual case, the paid plan and its remaining credits stay active. A partial refund does not cancel renewal; you can cancel separately from Billing in the dashboard.
 
 ### Renewals and cancelling
 
@@ -719,7 +721,7 @@ If you are a consumer in the EU, EEA, UK or Switzerland, the law may give you a 
 
 ### Chargebacks
 
-Please ask us before you dispute a charge with your bank; a refund is usually faster. A chargeback ends the paid plan and cancels the subscription, the same way a refund does.
+Please ask us before you dispute a charge with your bank; a refund is usually faster. An approved chargeback ends the paid plan and cancels the subscription, the same way a full refund does.
 
 ### Contact
 

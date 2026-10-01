@@ -265,6 +265,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Durable re-embedding queue + worker (REL-4/REL-10 primitive). Drains rows
     # whose vector is missing once the embedding breaker lets traffic through.
     from remembra.storage.pending_embeddings import PendingEmbeddingQueue, PendingEmbeddingWorker
+    from remembra.storage.vector_mutations import VectorErasureReconciler
+
+    # A late remote write can outlive a killed process. Keep reconciliation
+    # independent of the embedding breaker and pending-worker feature flag.
+    app.state.vector_erasure = VectorErasureReconciler(app.state.db, app.state.qdrant)
+    app.state.tasks.spawn(app.state.vector_erasure.run_forever(), name="vector_erasure_reconciliation")
 
     app.state.pending_embeddings = PendingEmbeddingQueue(
         app.state.db,
@@ -848,16 +854,30 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready", tags=["ops"], include_in_schema=False)
     async def health_ready(request: Request) -> JSONResponse:
-        """Readiness: can this instance store and recall right now? Always 200."""
+        """Readiness stays public; detailed diagnostics require the operator token or debug mode."""
+        import hmac
+
+        cfg = get_settings()
         checker = getattr(request.app.state, "readiness", None)
         if checker is None:
             body: dict[str, Any] = {"status": "degraded", "degraded_components": ["app"], "components": {}}
         else:
             body = await checker.check()
-        body["version"] = __version__
-        if get_settings().build_sha:
-            body["build_sha"] = get_settings().build_sha
-        return JSONResponse(content=body, status_code=200)
+        supplied = request.headers.get("authorization", "")
+        diagnostics_allowed = cfg.debug or (
+            bool(cfg.metrics_token) and hmac.compare_digest(supplied.encode(), f"Bearer {cfg.metrics_token}".encode())
+        )
+        if diagnostics_allowed:
+            body["version"] = __version__
+            if cfg.build_sha:
+                body["build_sha"] = cfg.build_sha
+        else:
+            body = {"status": body["status"]}
+        return JSONResponse(
+            content=body,
+            status_code=200,
+            headers={"Cache-Control": "no-store", "Vary": "Authorization"},
+        )
 
     @app.get("/metrics", tags=["ops"], include_in_schema=False)
     async def metrics(request: Request) -> Response:

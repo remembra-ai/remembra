@@ -1,6 +1,6 @@
 # Crew mode spike S0: results (WP-0b)
 
-**Date:** 2026-09-25. **Target:** the installed Claude Code **2.1.168** (`/Users/dolphy/.npm-global/bin/claude`).
+**Date:** 2026-09-25. **Target:** the installed Claude Code **2.1.168** (`<HOME>/.npm-global/bin/claude`).
 **Scope:** spec §8.2 "Verification status and spike S0", decisions D13 and D14 (§14 Wave 0, WP-0b).
 **Evidence:** `tests/crew/fixtures/captures/claude-code-2.1.168/<mode>/<scenario>/` holds the raw hook stdin payloads
 (`NN-<Event>.json`, in firing order) and a `summary.json` per run (verdict, what the model received, hook events).

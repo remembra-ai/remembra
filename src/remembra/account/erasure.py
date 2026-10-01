@@ -277,6 +277,8 @@ EXEMPT_TABLES: dict[str, str] = {
     "cloud_migrations": "one-time data migration markers",
     "schema_version": "applied schema migrations",
     "vector_store_state": "which Qdrant collection is active",
+    "vector_erasure_markers": "opaque deleted memory IDs and maintenance times; retained to reconcile late remote writes",
+    "erased_account_fences": "content-free account digest and erase time; prevents in-flight requests recreating erased rows",
     "oauth_clients": "public OAuth client registrations (RFC 7591), not tied to an account",
     "sqlite_sequence": "SQLite internal",
     "sqlite_stat1": "SQLite internal",
@@ -583,6 +585,12 @@ class AccountEraser:
         return None
 
     async def erase(self, user_id: str) -> ErasureReceipt:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self._db):
+            return await self._erase_locked(user_id)
+
+    async def _erase_locked(self, user_id: str) -> ErasureReceipt:
         """Erase ``user_id`` now.
 
         Order: vectors, then extra databases, then the main database (last, in
@@ -605,6 +613,10 @@ class AccountEraser:
             receipt.rows.update(rows)
             receipt.unregistered_tables.extend(unregistered)
             now = datetime.now(UTC)
+            await self._db.conn.execute(
+                "INSERT OR IGNORE INTO erased_account_fences (owner_digest, erased_at) VALUES (?, ?)",
+                (receipt.digest, now.isoformat()),
+            )
             await self._db.conn.execute(
                 "INSERT INTO audit_log (id, timestamp, user_id, api_key_id, action, resource_id, ip_address, success,"
                 " error_message) VALUES (?, ?, ?, NULL, ?, ?, NULL, 1, ?)",

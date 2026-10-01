@@ -96,7 +96,7 @@ def test_yearly_bank_rule_is_the_same_on_pricing_terms_and_dashboard() -> None:
     expected = f"A new yearly plan unlocks its full credit bank {days} days after purchase; "
     assert f"{expected}until then one month's credits are available." == UNLOCK
     pricing = _text(LANDING / "pricing.html")
-    faq = re.search(r"What changes on a yearly plan\?(.*?)A refund or chargeback", pricing)
+    faq = re.search(r"What changes on a yearly plan\?(.*?)A full refund or chargeback", pricing)
     assert faq and UNLOCK in faq.group(1)
     assert UNLOCK in _text(LANDING / "terms.html")
     assert "{BANK_UNLOCK_RULE}" in (DASHBOARD / "components" / "Billing.tsx").read_text()

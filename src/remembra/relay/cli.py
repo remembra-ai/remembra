@@ -85,13 +85,13 @@ from typing import Any
 import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
-from remembra.relay import background, hosts, outbox, projects
+from remembra.relay import background, hints, hosts, outbox, projects
 from remembra.relay import facts as factlib
 from remembra.relay.adapters import REGISTRY, Adapter, Change, agents_md, backup_and_write, get_adapter, relay_command
 from remembra.relay.adapters.base import OUTPUT_MODES, AdapterSpec, RefusedEdit
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 from remembra.relay.handoff import build_sections, sections_have_substance
-from remembra.relay.identity import HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS
+from remembra.relay.identity import HINT_SCOPE_ALL
 from remembra.security.untrusted import neutralize_encoded, strip_controls
 
 TOTAL_BUDGET_SECONDS = 9.5
@@ -411,41 +411,22 @@ class Context:
     def single_namespace(self) -> str | None:
         """``REMEMBRA_RELAY_PROJECT``, when set: the explicit opt-in to keep every location,
         git repositories included, in that one project (the 0.16.0 behaviour)."""
-        return self.normalize_project(os.environ.get("REMEMBRA_RELAY_PROJECT"))
+        return self.normalize_project(os.environ.get(hints.RELAY_PROJECT_ENV))
 
     def normalize_project(self, value: str | None) -> str | None:
         """``value`` as a project id (aliases applied); None when empty or ``default``."""
-        if not value or not value.strip():
-            return None
-        project = normalize_project_id(value, parse_project_aliases(self.config.project_aliases))
-        return project if project and project != "default" else None
+        return hints.normalize_project(value, self.config)
 
     def hint_fields(self) -> dict[str, Any]:
         """How the server may name this location when it has not seen it (see "Which project a repository uses").
 
-        A git repository always gets its own project: the configured project is
-        sent as ``hint_project`` with ``hint_scope=folders``, so the server
-        applies it only to a folder that is not a repository (and, for a key
-        restricted to projects, to a repository it may not otherwise use).
-        ``REMEMBRA_RELAY_PROJECT`` opts into one namespace for everything
-        (``hint_scope=all``). ``git_repo`` tells the server whether this is a
-        repository (a new one may have no commit or remote yet). When git did
-        not answer in time, neither is sent: whether this is a repository is
-        unknown, and the configured project must not name a repository.
+        The one rule :mod:`remembra.relay.hints` keeps for the relay and crewd: a git
+        repository always gets its own project (the configured project goes with
+        ``hint_scope=folders``), ``REMEMBRA_RELAY_PROJECT`` keeps one namespace for
+        everything (``hint_scope=all``), and when git did not answer in time neither
+        ``git_repo`` nor the configured project is sent.
         """
-        fields: dict[str, Any] = {}
-        git_repo = self.repo.git_repo
-        if git_repo is not None:
-            fields["git_repo"] = git_repo
-        single = self.single_namespace()
-        if single:
-            fields.update(hint_project=single, hint_scope=HINT_SCOPE_ALL)
-            return fields
-        fields["hint_scope"] = HINT_SCOPE_FOLDERS
-        configured = self.configured_project()
-        if configured and git_repo is not None:
-            fields["hint_project"] = configured
-        return fields
+        return hints.hint_fields(self.config, self.repo.git_repo, os.environ.get(hints.RELAY_PROJECT_ENV))
 
     def project_params(self) -> dict[str, Any]:
         """Either ``project_id`` or a location to resolve server-side (see :meth:`hint_fields`)."""

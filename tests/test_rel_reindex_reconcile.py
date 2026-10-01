@@ -258,7 +258,12 @@ async def test_reconcile_reports_and_repairs_drift(env) -> None:
     )
     ghost.embedding = await embedder.embed(ghost.content)
     await qdrant.upsert(ghost)
-    await db.index_memory_fts("fts-orphan", "u1", "default", "stale keyword row")
+    # Seed historical drift directly: normal indexing now requires a live row.
+    await db.conn.execute(
+        "INSERT INTO memories_fts (id, user_id, project_id, content) VALUES (?, ?, ?, ?)",
+        ("fts-orphan", "u1", "default", "stale keyword row"),
+    )
+    await db.conn.commit()
 
     report = await reconcile(db, qdrant)
     assert (report.missing_vectors, report.orphan_vectors, report.missing_fts, report.orphan_fts) == (1, 1, 1, 1)

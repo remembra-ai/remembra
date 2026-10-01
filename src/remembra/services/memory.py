@@ -70,9 +70,13 @@ from remembra.retrieval.reranker import CrossEncoderReranker
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingProviderError, EmbeddingService
 from remembra.storage.pending_embeddings import PendingEmbeddingQueue
-from remembra.storage.qdrant import QdrantStore
+from remembra.storage.qdrant import QdrantStore, VectorStoreUnavailable
 
 log = structlog.get_logger(__name__)
+
+
+class RecallBackendUnavailable(RuntimeError):
+    """Recall has no working search backend; an empty success would be misleading."""
 
 
 _USER_MEMORY_TYPES = {"observation", "fact", "inference", "task"}
@@ -2065,7 +2069,15 @@ class MemoryService:
 
         # Step 2: semantic
         if query_vector is not None:
-            candidates.update(await self._semantic_candidates(query_vector, ctx, want, request.threshold))
+            try:
+                candidates.update(await self._semantic_candidates(query_vector, ctx, want, request.threshold))
+            except VectorStoreUnavailable:
+                if not self.settings.recall_keyword_fallback:
+                    raise
+                degraded = "keyword_only"
+                query_vector = None  # Do not retry the unavailable vector store for ranking.
+                core_metrics.recall_degraded(degraded)
+                log.warning("recall_degraded_keyword_only", kind="vector_store_unavailable", user_id=request.user_id)
 
         # Step 3: keyword - always when hybrid is on, and always when degraded
         if use_hybrid or degraded:
@@ -2092,6 +2104,8 @@ class MemoryService:
                     cand.sources.add("keyword")
             except Exception as e:
                 log.warning("fts_search_failed", error=str(e))
+                if degraded:
+                    raise RecallBackendUnavailable("keyword recall temporarily unavailable") from e
 
         # Step 3b: recency-intent queries ("what was I just working on") also
         # consider the newest memories. Semantic/keyword search only surfaces
@@ -2865,6 +2879,19 @@ class MemoryService:
         project_id: str | None = None,
         all_memories: bool = False,
     ) -> ForgetResponse:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self.db):
+            return await self._forget_locked(memory_id, user_id, entity, project_id, all_memories)
+
+    async def _forget_locked(
+        self,
+        memory_id: str | None = None,
+        user_id: str | None = None,
+        entity: str | None = None,
+        project_id: str | None = None,
+        all_memories: bool = False,
+    ) -> ForgetResponse:
         """
         GDPR-compliant deletion of memories. The first target given decides:
 
@@ -3021,27 +3048,9 @@ class MemoryService:
         memory = await self.db.get_memory(memory_id)
         if memory is not None:
             return await self._serialize_memory_record(memory)
-        # Fallback to Qdrant. Qdrant point IDs must be a UUID or unsigned int,
-        # so a malformed id can't exist there — treat it as "not found" rather
-        # than letting Qdrant raise (which would surface as a 500 to the caller).
-        if not _is_qdrant_point_id(memory_id):
-            return None
-        qdrant_result = await self.qdrant.get_by_id(memory_id)
-        if qdrant_result:
-            # Ensure user_id is present from Qdrant payload
-            return {
-                "id": qdrant_result.get("id", memory_id),
-                "user_id": qdrant_result.get("user_id"),
-                "project_id": qdrant_result.get("project_id", "default"),
-                "content": qdrant_result.get("content", ""),
-                "created_at": qdrant_result.get("created_at"),
-                "updated_at": qdrant_result.get("updated_at"),
-                "accessed_at": qdrant_result.get("accessed_at"),
-                "access_count": qdrant_result.get("access_count", 0),
-                "memory_type": None,
-                "entities": [],
-                "metadata": qdrant_result.get("metadata", {}),
-            }
+        # SQLite is the authoritative record. A stale vector can survive a
+        # cross-store deletion race; returning its payload would resurrect
+        # deleted content. Vector-only legacy records need explicit recovery.
         return None
 
     # -----------------------------------------------------------------------
@@ -3109,6 +3118,16 @@ class MemoryService:
         return await self.recall(RecallRequest(query=query, user_id=user_id, project_id=project_id, limit=limit, as_of=as_of))
 
     async def cleanup_expired(
+        self,
+        user_id: str | None = None,
+        project_id: str | None = None,
+    ) -> int:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self.db):
+            return await self._cleanup_expired_locked(user_id, project_id)
+
+    async def _cleanup_expired_locked(
         self,
         user_id: str | None = None,
         project_id: str | None = None,

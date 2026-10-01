@@ -74,7 +74,7 @@ is planned for the next one. Until then, the push gate is also local.
 
 "Enforced" here means enforced **for an agent that cooperates**, in the sense above. Local
 enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on
-your machine; every bypass is recorded.
+your machine. Owner-issued bypass codes used through Crew are recorded; a write or skipped git hook outside Crew may leave no Crew audit event. Git-gate entries require the hooks to be installed and the session to be joined.
 
 ---
 
@@ -310,6 +310,24 @@ with the account's name removed. That crew's event log keeps its hash chain: eac
 account's id, sessions, messages, hosts or email keeps its sequence number, type, time and chain
 links, and loses its actor, references, summary and payload. The nightly chain check still passes.
 
+### Outbox workers
+
+Crew checkpoints and handoffs cross from `crew.db` into the main database through an outbox.
+Workers sharing the same local `crew.db` serialize each read, handler and acknowledgement batch
+with a nonblocking POSIX lock in `crew.db.outbox.lock` beside the database. A busy worker leaves
+the batch for a later poll. The lock does not hold a SQLite transaction during network work,
+does not expire during a slow handler, and is released if its process exits or is killed.
+
+Run this on macOS or Linux with a filesystem that supports shared POSIX file locks. All worker
+processes must use the same database file and lock-file directory. Do not delete the lock file
+while workers are running: replacing it can let two processes hold locks on different files.
+Failure to open or acquire the lock logs a worker error and leaves the effects pending.
+
+Delivery is still at least once. A replay checks for an already committed memory or handoff;
+serialization prevents concurrent workers from passing that check together. It does not make
+partially completed external storage or usage metering exactly once. Independent hosts with
+separate database copies are not coordinated by this lock.
+
 ### Backups
 
 Back up **both** files. They sit in the same directory by default.
@@ -351,7 +369,8 @@ python -m remembra.storage.snapshot restore /data/backups/remembra-snapshot-<sta
 The restore verifies the snapshot first, never deletes anything, and restores only the databases the
 snapshot contains (a snapshot from before Crew mode leaves `crew.db` alone). The two files may be
 restored from slightly different moments: effects that cross them (memory promotions, relay handoffs)
-go through an idempotent outbox, so a replay never duplicates them. Agents reconnect on their own; a
+go through the outbox described above. Replay checks use records in the restored main database;
+restore both files together and verify their consistency before resuming workers. Agents reconnect on their own; a
 session whose token is older than the restored state simply joins again.
 
 ### Rolling back
