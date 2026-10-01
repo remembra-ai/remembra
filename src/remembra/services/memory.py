@@ -70,9 +70,13 @@ from remembra.retrieval.reranker import CrossEncoderReranker
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingProviderError, EmbeddingService
 from remembra.storage.pending_embeddings import PendingEmbeddingQueue
-from remembra.storage.qdrant import QdrantStore
+from remembra.storage.qdrant import QdrantStore, VectorStoreUnavailable
 
 log = structlog.get_logger(__name__)
+
+
+class RecallBackendUnavailable(RuntimeError):
+    """Recall has no working search backend; an empty success would be misleading."""
 
 
 _USER_MEMORY_TYPES = {"observation", "fact", "inference", "task"}
@@ -2065,7 +2069,15 @@ class MemoryService:
 
         # Step 2: semantic
         if query_vector is not None:
-            candidates.update(await self._semantic_candidates(query_vector, ctx, want, request.threshold))
+            try:
+                candidates.update(await self._semantic_candidates(query_vector, ctx, want, request.threshold))
+            except VectorStoreUnavailable:
+                if not self.settings.recall_keyword_fallback:
+                    raise
+                degraded = "keyword_only"
+                query_vector = None  # Do not retry the unavailable vector store for ranking.
+                core_metrics.recall_degraded(degraded)
+                log.warning("recall_degraded_keyword_only", kind="vector_store_unavailable", user_id=request.user_id)
 
         # Step 3: keyword - always when hybrid is on, and always when degraded
         if use_hybrid or degraded:
@@ -2092,6 +2104,8 @@ class MemoryService:
                     cand.sources.add("keyword")
             except Exception as e:
                 log.warning("fts_search_failed", error=str(e))
+                if degraded:
+                    raise RecallBackendUnavailable("keyword recall temporarily unavailable") from e
 
         # Step 3b: recency-intent queries ("what was I just working on") also
         # consider the newest memories. Semantic/keyword search only surfaces

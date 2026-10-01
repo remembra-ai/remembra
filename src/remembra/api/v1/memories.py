@@ -58,9 +58,10 @@ from remembra.security.content_policy import prepare_content
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.agent_session import MemoryTypePolicyError, apply_memory_type_policy
-from remembra.services.memory import MemoryService
+from remembra.services.memory import MemoryService, RecallBackendUnavailable
 from remembra.services.relay import strip_reserved_metadata
 from remembra.storage.embeddings import EmbeddingProviderError
+from remembra.storage.qdrant import VectorStoreUnavailable
 from remembra.webhooks.events import (
     WebhookEvent,
     memory_deleted_event,
@@ -966,6 +967,20 @@ async def recall_memories(
 
         return result
 
+    except (VectorStoreUnavailable, RecallBackendUnavailable) as e:
+        _internal_log.warning("recall_backend_unavailable", user_id=current_user.user_id)
+        await audit_logger.log_memory_recall(
+            user_id=current_user.user_id,
+            api_key_id=current_user.api_key_id,
+            ip_address=get_client_ip(request),
+            success=False,
+            error="recall search backend unavailable",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Recall is temporarily unavailable. Please try again later.",
+            headers={"Retry-After": "5"},
+        ) from e
     except EmbeddingProviderError as e:
         # Query embedding failed upstream — return an honest status.
         _internal_log.error(

@@ -5,10 +5,11 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+import httpx
 import structlog
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from remembra.config import Settings
 from remembra.models.memory import Memory
@@ -18,6 +19,11 @@ log = structlog.get_logger(__name__)
 
 QDRANT_WRITE_RETRIES = 3
 QDRANT_WRITE_BACKOFF_BASE = 0.5  # seconds; doubles each retry
+
+
+class VectorStoreUnavailable(RuntimeError):
+    """A transient vector-search failure; callers may use scoped keyword recall."""
+
 
 # Payload field names
 FIELD_USER_ID = "user_id"
@@ -485,16 +491,25 @@ class QdrantStore:
         """
         client = await self._get_client()
 
-        results = await client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=self.build_filter(
-                user_id, project_id, active_at=active_at, must_match=must_match, metadata_match=metadata_match
-            ),
-            limit=limit,
-            offset=offset or None,
-            score_threshold=score_threshold,
+        query_filter = self.build_filter(
+            user_id, project_id, active_at=active_at, must_match=must_match, metadata_match=metadata_match
         )
+        try:
+            results = await client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                offset=offset or None,
+                score_threshold=score_threshold,
+            )
+        except UnexpectedResponse as exc:
+            code = exc.status_code or 0
+            if code not in (408, 429) and code < 500:
+                raise  # Invalid requests/auth/configuration are not an outage.
+            raise VectorStoreUnavailable("vector search temporarily unavailable") from exc
+        except (ResponseHandlingException, httpx.RequestError, ConnectionError, TimeoutError) as exc:
+            raise VectorStoreUnavailable("vector search temporarily unavailable") from exc
 
         return [(str(r.id), r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
 
