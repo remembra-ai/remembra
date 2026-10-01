@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -47,6 +48,18 @@ async def env(tmp_path):
 
 async def _claim(ops, who, db, slug, **kw):
     return await C.request_claim(ops, CREW, who, zone_id=await zone_id(db, slug), **kw)
+
+
+async def test_multi_blocker_scan_reads_one_transaction_zone_snapshot(env, monkeypatch):
+    db, ops, _, a, _ = env
+    assert (await _claim(ops, a, db, "pos")).status == "granted"
+    assert (await _claim(ops, a, db, "reports")).status == "granted"
+    read_zones = AsyncMock(wraps=C.load_zone_rows)
+    monkeypatch.setattr(C, "load_zone_rows", read_zones)
+    denied = await C.request_claim(ops, CREW, HUMAN, path_glob="src/app/**")
+    assert denied.status == "denied"
+    assert {row["zone_id"] for row in denied.blockers} == {await zone_id(db, "pos"), await zone_id(db, "reports")}
+    assert read_zones.await_count == 1
 
 
 async def test_grant_deny_queue_and_fifo_promotion(env):

@@ -286,9 +286,11 @@ def _services(zone: Mapping[str, Any]) -> list[str]:
 async def _overlaps(
     conn: aiosqlite.Connection, crew_id: str, target: Target, other: Mapping[str, Any], cache: dict[str, Any]
 ) -> bool:
-    zones: dict[str, Mapping[str, Any]] = cache.setdefault(
-        "zones", {str(z["id"]): z for z in await load_zone_rows(conn, crew_id, include_archived=True)}
-    )
+    # setdefault evaluates its default even on a cache hit. Keep one snapshot
+    # for this conflict scan, under the caller's writer transaction.
+    if "zones" not in cache:
+        cache["zones"] = {str(z["id"]): z for z in await load_zone_rows(conn, crew_id, include_archived=True)}
+    zones: dict[str, Mapping[str, Any]] = cache["zones"]
     ozone = zones.get(str(other.get("zone_id") or ""))
     if target.zone is not None:
         if other.get("zone_id"):
