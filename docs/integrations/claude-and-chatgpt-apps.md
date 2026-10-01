@@ -2,7 +2,7 @@
 
 !!! warning "Coming: not live on Remembra Cloud yet"
     The connector is built and tested against Remembra's own server, but it is switched off
-    at `api.remembra.dev`, so the steps below do not work against the hosted service yet. It has also not been verified inside the
+    at `api.remembra.dev`, where POST `/mcp` answers 405, so the steps below do not work against the hosted service yet. It has also not been verified inside the
     live Claude and ChatGPT apps. On a server you host yourself you can switch it on (see
     [For the server owner](#for-the-server-owner-production-setup)).
 
