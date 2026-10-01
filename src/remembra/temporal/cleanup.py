@@ -88,6 +88,17 @@ class TemporalCleanupJob:
         project_id: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self.db):
+            return await self._run_cleanup_locked(user_id, project_id, dry_run)
+
+    async def _run_cleanup_locked(
+        self,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
         """
         Run a single cleanup cycle.
 

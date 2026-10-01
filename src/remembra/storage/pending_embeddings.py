@@ -33,6 +33,7 @@ from remembra.core.metrics import PENDING_EMBEDDINGS, PENDING_EMBEDDINGS_PROCESS
 from remembra.core.provider_errors import ProviderErrorKind
 from remembra.core.time import utcnow
 from remembra.storage.memory_rows import is_source_row, memory_from_row
+from remembra.storage.vector_mutations import vector_mutation_lock
 
 log = structlog.get_logger(__name__)
 
@@ -369,11 +370,23 @@ class PendingEmbeddingWorker:
             return "dead" if status == STATUS_FAILED else "retry"
 
         try:
-            current = await self.queue.get(item.memory_id)
-            if current is None or current.claim_token != item.claim_token:
-                return "skipped"
-            await self.qdrant.upsert(memory)
-            await self.db.index_memory_fts(memory.id, memory.user_id, memory.project_id, memory.content)
+            async with vector_mutation_lock(self.db):
+                current = await self.queue.get(item.memory_id)
+                if current is None or current.claim_token != item.claim_token:
+                    return "skipped"
+                live = await self.db.get_memory(item.memory_id)
+                if live is None or is_source_row(live):
+                    await self.queue.mark_done(item.memory_id, claim_token=item.claim_token)
+                    return "dropped"
+                if (
+                    live["content"] != row["content"]
+                    or live["user_id"] != row["user_id"]
+                    or live["project_id"] != row["project_id"]
+                ):
+                    await self.queue.release(item.memory_id, 0, claim_token=item.claim_token)
+                    return "retry"
+                await self.qdrant.upsert(memory)
+                await self.db.index_memory_fts(memory.id, memory.user_id, memory.project_id, memory.content)
         except Exception as e:
             status = await self.queue.mark_failed(
                 item.memory_id, f"{type(e).__name__}: {e}", "vector_store", claim_token=item.claim_token

@@ -425,6 +425,29 @@ VERSIONED_MIGRATIONS: list[Migration] = [
         ],
     ),
     (11, "pending_embedding_claim_tokens", ["ALTER TABLE pending_embeddings ADD COLUMN claim_token TEXT"]),
+    (
+        12,
+        "durable_vector_erasure_markers",
+        [
+            "CREATE TABLE erased_account_fences (owner_digest TEXT PRIMARY KEY, erased_at TEXT NOT NULL)",
+            "INSERT OR IGNORE INTO erased_account_fences SELECT substr(resource_id, 8), timestamp FROM audit_log "
+            "WHERE action = 'account_erased' AND success = 1 AND resource_id LIKE 'sha256:%'",
+            "CREATE TABLE vector_erasure_markers (memory_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL, "
+            "last_swept_at TEXT NOT NULL DEFAULT '')",
+            "CREATE INDEX idx_vector_erasure_sweep ON vector_erasure_markers(last_swept_at)",
+            """CREATE TRIGGER memory_vector_erasure AFTER DELETE ON memories
+            WHEN length(OLD.id) = 36
+              AND substr(OLD.id, 9, 1) = '-' AND substr(OLD.id, 14, 1) = '-'
+              AND substr(OLD.id, 19, 1) = '-' AND substr(OLD.id, 24, 1) = '-'
+              AND length(replace(OLD.id, '-', '')) = 32
+              AND replace(OLD.id, '-', '') NOT GLOB '*[^0-9A-Fa-f]*'
+            BEGIN
+                INSERT INTO vector_erasure_markers (memory_id, deleted_at)
+                VALUES (OLD.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                ON CONFLICT(memory_id) DO UPDATE SET deleted_at = excluded.deleted_at, last_swept_at = '';
+            END""",
+        ],
+    ),
 ]
 
 
@@ -1257,14 +1280,17 @@ class Database:
         ``valid_from`` (UPG-1) defaults to ``created_at``; an existing row keeps
         its original ``valid_from`` and ``valid_to`` on upsert.
         """
-        await self.conn.execute(
+        from remembra.account.erasure import erasure_digest
+
+        cursor = await self.conn.execute(
             """
             INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
                                   source, trust_score, checksum, visibility, space_id, team_id,
                                   memory_type, scope, supersedes, contradicts, importance, pinned,
                                   valid_from)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM erased_account_fences WHERE owner_digest = ?)
             ON CONFLICT(id) DO UPDATE SET
                 valid_from = COALESCE(memories.valid_from, excluded.valid_from),
                 content = excluded.content,
@@ -1308,9 +1334,12 @@ class Database:
                 importance,
                 1 if pinned else 0,
                 (valid_from or created_at).isoformat(),
+                erasure_digest(user_id),
             ),
         )
         await self.conn.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("Account has been erased")
 
     async def set_memory_pin(self, memory_id: str, user_id: str, pinned: bool) -> bool:
         """Pin or unpin a memory (protect it from decay/TTL pruning).
@@ -1356,6 +1385,8 @@ class Database:
         if not memories:
             return 0
 
+        from remembra.account.erasure import erasure_digest
+
         values = []
         for m in memories:
             values.append(
@@ -1380,25 +1411,29 @@ class Database:
                     m.get("space_id"),
                     m.get("team_id"),
                     m["created_at"].isoformat() if hasattr(m["created_at"], "isoformat") else m["created_at"],
+                    erasure_digest(m["user_id"]),
                 )
             )
 
-        await self.conn.executemany(
-            """
+        async with self.transaction():
+            cursor = await self.conn.executemany(
+                """
             INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
                                   source, trust_score, checksum, visibility, space_id, team_id,
                                   valid_from)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM erased_account_fences WHERE owner_digest = ?)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at
             """,
-            values,
-        )
-        await self.conn.commit()
+                values,
+            )
+            if cursor.rowcount != len(memories):
+                raise ValueError("Account has been erased")
         return len(memories)
 
     async def get_memory(self, memory_id: str) -> dict[str, Any] | None:
@@ -2200,17 +2235,19 @@ class Database:
 
         archived = dict(row)
         now = utcnow().isoformat()
+        from remembra.account.erasure import erasure_digest
 
         try:
             async with self.transaction():
                 # Insert back into active memories
-                await self.conn.execute(
+                cursor = await self.conn.execute(
                     """
                     INSERT INTO memories (
                         id, user_id, project_id, content, extracted_facts, metadata,
                         created_at, updated_at, expires_at, access_count, last_accessed,
                         source, trust_score, checksum, visibility, space_id, team_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    WHERE NOT EXISTS (SELECT 1 FROM erased_account_fences WHERE owner_digest = ?)
                     """,
                     (
                         archived["id"],
@@ -2230,8 +2267,11 @@ class Database:
                         archived.get("visibility", "personal"),
                         archived.get("space_id"),
                         archived.get("team_id"),
+                        erasure_digest(archived["user_id"]),
                     ),
                 )
+                if cursor.rowcount == 0:
+                    raise ValueError("Account has been erased")
 
                 # Increment restore count and delete from archive
                 await self.conn.execute(

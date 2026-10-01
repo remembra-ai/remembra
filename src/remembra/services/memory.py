@@ -2879,6 +2879,19 @@ class MemoryService:
         project_id: str | None = None,
         all_memories: bool = False,
     ) -> ForgetResponse:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self.db):
+            return await self._forget_locked(memory_id, user_id, entity, project_id, all_memories)
+
+    async def _forget_locked(
+        self,
+        memory_id: str | None = None,
+        user_id: str | None = None,
+        entity: str | None = None,
+        project_id: str | None = None,
+        all_memories: bool = False,
+    ) -> ForgetResponse:
         """
         GDPR-compliant deletion of memories. The first target given decides:
 
@@ -3105,6 +3118,16 @@ class MemoryService:
         return await self.recall(RecallRequest(query=query, user_id=user_id, project_id=project_id, limit=limit, as_of=as_of))
 
     async def cleanup_expired(
+        self,
+        user_id: str | None = None,
+        project_id: str | None = None,
+    ) -> int:
+        from remembra.storage.vector_mutations import vector_mutation_lock
+
+        async with vector_mutation_lock(self.db):
+            return await self._cleanup_expired_locked(user_id, project_id)
+
+    async def _cleanup_expired_locked(
         self,
         user_id: str | None = None,
         project_id: str | None = None,

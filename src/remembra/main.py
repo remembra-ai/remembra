@@ -265,6 +265,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Durable re-embedding queue + worker (REL-4/REL-10 primitive). Drains rows
     # whose vector is missing once the embedding breaker lets traffic through.
     from remembra.storage.pending_embeddings import PendingEmbeddingQueue, PendingEmbeddingWorker
+    from remembra.storage.vector_mutations import VectorErasureReconciler
+
+    # A late remote write can outlive a killed process. Keep reconciliation
+    # independent of the embedding breaker and pending-worker feature flag.
+    app.state.vector_erasure = VectorErasureReconciler(app.state.db, app.state.qdrant)
+    app.state.tasks.spawn(app.state.vector_erasure.run_forever(), name="vector_erasure_reconciliation")
 
     app.state.pending_embeddings = PendingEmbeddingQueue(
         app.state.db,

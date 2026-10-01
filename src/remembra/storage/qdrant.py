@@ -4,6 +4,7 @@ import asyncio
 import re
 from collections.abc import Iterable
 from typing import Any
+from uuid import UUID
 
 import httpx
 import structlog
@@ -613,6 +614,34 @@ class QdrantStore:
         """
         bases = {rebuild_base(self.settings.qdrant_collection), rebuild_base(self.collection_name)}
         return tuple(sorted(bases))
+
+    async def delete_ids_everywhere(self, memory_ids: list[str]) -> None:
+        """Reconcile deleted canonical IDs in this application's collection family.
+
+        SQLite-only IDs cannot have Qdrant points. No other application's
+        collections or unaffected IDs are selected. Retained erasure markers
+        permit repeated cleanup after interrupted or late remote writes.
+        """
+        ids: list[str] = []
+        for mid in memory_ids:
+            try:
+                UUID(mid)
+            except ValueError:
+                continue
+            ids.append(mid)
+        if not ids:
+            return
+        client = await self._get_client()
+        bases = self.collection_family()
+        names = [
+            c.name
+            for c in (await client.get_collections()).collections
+            if any(c.name == base or c.name.startswith(base + REBUILD_MARKER) for base in bases)
+        ]
+        for name in names:
+            result = await client.delete(collection_name=name, points_selector=qmodels.PointIdsList(points=ids), wait=True)
+            if result.status != qmodels.UpdateStatus.COMPLETED:
+                raise RuntimeError("Vector erasure was not acknowledged")
 
     async def delete_by_user_everywhere(self, user_id: str, also: Iterable[str] = ()) -> int:
         """Delete a user's points from the active collection AND every rollback copy (account erasure).

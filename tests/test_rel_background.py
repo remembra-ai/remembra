@@ -669,6 +669,7 @@ async def test_lifespan_boots_background_work_and_shuts_down(tmp_path, monkeypat
         embedder._client = httpx.AsyncClient(transport=provider.transport())
         names = app.state.tasks.names()
         assert "pending-embedding-worker" in names
+        assert "vector_erasure_reconciliation" in names
         assert "temporal-cleanup-loop" in names
 
         # queue drains in the running app
