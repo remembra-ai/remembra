@@ -495,13 +495,11 @@ class CrewDatabase:
         return self._tx.after_commit(callback)
 
     async def fetchone(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
-        cursor = await self.conn.execute(sql, params)
-        row = await cursor.fetchone()
-        return dict(row) if row is not None else None
+        rows = list(await self.conn.execute_fetchall(sql, params))
+        return dict(rows[0]) if rows else None
 
     async def fetchall(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
-        cursor = await self.conn.execute(sql, params)
-        return [dict(r) for r in await cursor.fetchall()]
+        return [dict(row) for row in await self.conn.execute_fetchall(sql, params)]
 
 
 async def open_crew_db(main_db_path: str, override: str | None = None) -> CrewDatabase:
