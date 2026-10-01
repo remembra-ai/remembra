@@ -958,7 +958,12 @@ def test_crew_page_claims_only_what_the_code_does() -> None:
     home_section = _text((ROOT_DIR / "scripts" / "site-crew-section.html").read_text())
     assert "in the other agents' copies of the repo" not in crew
     assert "made read-only in that agent's own worktree" in crew and "not yet verified" in crew
-    assert "is stopped, for every agent" in crew and "where you install the git gates (connect --git-hooks)" in crew
+    assert "for every agent" not in crew
+    assert "Installed git gates check commits and pushes for joined Crew sessions." in crew
+    assert "MCP-only agents receive advisory checks" in crew
+    assert "Human, script and non-joined writes are not covered" in crew
+    assert "--no-verify" in crew and "attempts outside Crew may not be recorded" in crew
+    assert "A required check on the git host is planned and is not shipped." in crew
     for text in (crew, home_section):
         assert "once you have added a target" in text and "quiet hours" in text, text[:80]
 

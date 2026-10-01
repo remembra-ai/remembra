@@ -366,7 +366,7 @@ Questions
 - What happens when my credits run out?:
   Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), on Free, 300 unenriched saves a day, and past the request limit of 30 saves a minute per account.
 - What changes on a yearly plan?:
-  You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.
+  You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A full refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.
 - Can I get a refund?:
   Yes. The first payment on any paid plan, Founding 100 included, has a 14-day money-back guarantee: ask within 14 days and Paddle refunds it in full. Renewals and part periods are not refunded, and you can cancel any time. [Refund policy](https://remembra.dev/refunds).
 - Is a card required for Free?:
