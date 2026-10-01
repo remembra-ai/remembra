@@ -194,3 +194,26 @@ async def test_api_bad_vector_request_does_not_silently_fall_back(tmp_path, monk
         await background.drain(timeout=5.0)
         await qdrant.close()
         await ctx.__aexit__(None, None, None)
+
+
+async def test_api_get_does_not_resurrect_a_deleted_record_from_an_orphan_vector(tmp_path) -> None:
+    ctx, h, _service, qdrant, _emb, hdr = await _app(tmp_path)
+    try:
+        response = await h.client.post(
+            "/api/v1/memories",
+            json={"content": "Deleted project decision", "skip_extraction": True, "project_id": "p"},
+            headers=hdr,
+        )
+        assert response.status_code in (200, 201), response.text
+        memory_id = response.json()["id"]
+        assert await qdrant.existing_ids([memory_id]) == {memory_id}
+        # Simulate a late vector write or incomplete deletion across the two stores.
+        assert await h.db.delete_memory(memory_id, user_id="tenant-a")
+        response = await h.client.get(f"/api/v1/memories/{memory_id}", headers=hdr)
+        assert response.status_code == 404, response.text
+        assert "Deleted project decision" not in response.text
+        assert await qdrant.existing_ids([memory_id]) == {memory_id}
+    finally:
+        await background.drain(timeout=5.0)
+        await qdrant.close()
+        await ctx.__aexit__(None, None, None)
