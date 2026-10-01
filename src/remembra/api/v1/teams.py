@@ -10,7 +10,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser, require_memory_store
+from remembra.auth.middleware import CurrentUser, refuse_delegated_principal, require_memory_store
 from remembra.cloud.email import EmailService, email_service_or_none
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -18,7 +18,7 @@ from remembra.teams.manager import TeamManager
 
 # Every route that changes a team needs memory:store (like the spaces it shares),
 # so viewer keys can read teams but never change one.
-router = APIRouter(prefix="/teams", tags=["teams"])
+router = APIRouter(prefix="/teams", tags=["teams"], dependencies=[Depends(refuse_delegated_principal)])
 
 log = structlog.get_logger(__name__)
 

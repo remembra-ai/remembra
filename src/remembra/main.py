@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -25,6 +25,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from remembra import __version__
 from remembra.api.router import api_router
 from remembra.auth.keys import APIKeyManager
+from remembra.auth.middleware import refuse_delegated_writes
 from remembra.auth.rbac import RoleManager
 from remembra.cloud.metering import UsageMeter
 from remembra.config import get_settings
@@ -659,10 +660,15 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
         openapi_url="/openapi.json",
         lifespan=lifespan,
+        # A read-only delegated principal (the Marshal desk's in-process calls) can
+        # never write, on any route this app serves, crew routers included.
+        dependencies=[Depends(refuse_delegated_writes)],
     )
 
     # Add rate limiter to app state
     app.state.limiter = limiter
+    # The Marshal desk's OpenAI transport: None means the network (tests set a fake one).
+    app.state.marshal_llm_transport = None
 
     # Add rate limit exception handler. slowapi types the handler against
     # RateLimitExceeded specifically; Starlette expects the broader Exception

@@ -122,7 +122,7 @@ export function AgentRow({
     document.getElementById(whyId)?.focus();
   };
   return (
-    <li onKeyDown={onKeyDown} data-row-state={state}>
+    <li onKeyDown={onKeyDown} data-row-state={state} data-marshal-ref={`agent:${canonicalAgentId(agentId)}`}>
       <div className="flex items-center gap-3 py-2">
         <span
           className={clsx(

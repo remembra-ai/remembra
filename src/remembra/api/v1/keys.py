@@ -14,6 +14,7 @@ from remembra.auth.middleware import (
     JWTOrAPIKeyUser,
     get_client_ip,
     has_permission,
+    refuse_delegated_principal,
 )
 from remembra.auth.rbac import PERMISSION_ATTR, ROLE_LEVEL, Permission, Role, RoleManager
 from remembra.cloud import notify
@@ -23,7 +24,7 @@ from remembra.core.limiter import limiter
 from remembra.inbox.manager import is_reserved_sender
 from remembra.security.audit import AuditLogger
 
-router = APIRouter(prefix="/keys", tags=["api-keys"])
+router = APIRouter(prefix="/keys", tags=["api-keys"], dependencies=[Depends(refuse_delegated_principal)])
 
 log = structlog.get_logger(__name__)
 

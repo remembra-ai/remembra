@@ -320,6 +320,17 @@ def _record(usd: float) -> None:
         _totals["untracked_usd"] += usd
 
 
+def record_unanswered(usd: float) -> None:
+    """Record a paid call that reached the provider but returned no usage block, at ``usd`` (the caller's bound).
+
+    The client left, the call or its request timed out, or the reply didn't
+    parse: the provider may still bill such a call, so it is counted (and
+    counts as a call of the current job). Synchronous on purpose: it runs
+    while a cancellation unwinds the caller, where nothing may be awaited.
+    """
+    _record(usd)
+
+
 def hold_flat(usd: float) -> None:
     """Admit a flat-priced paid call (TypeSafe) under the current job's budget, or raise."""
     job = _current.get()

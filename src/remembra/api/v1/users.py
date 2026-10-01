@@ -7,12 +7,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, resolve_project_access
+from remembra.auth.middleware import CurrentUser, refuse_delegated_principal, resolve_project_access
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.storage.database import Database
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(refuse_delegated_principal)])
 
 
 def get_database(request: Request) -> Database:

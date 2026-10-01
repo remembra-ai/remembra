@@ -17,6 +17,7 @@ import type { DeletionMethod, OwnedTeam } from '../lib/accountDeletion';
 import { SignInMethods } from '../components/auth/SignInMethods';
 import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
 import { UNINSTALL_STEPS } from '../lib/agents';
+import { MarshalDeskSetting } from '../components/marshal/MarshalDeskSetting';
 import { hrefFor } from '../lib/nav';
 
 const SETTINGS_TABS: readonly SettingsTab[] = ['profile', 'password', 'security', 'workspace', 'retrieval', 'diagnostics', 'account'];
@@ -294,7 +295,10 @@ export function Settings({ onLogout }: SettingsProps) {
         <RetrievalSettings />
       )}
       {activeTab === 'diagnostics' && (
-        <DiagnosticsSettings />
+        <div className="space-y-6">
+          <MarshalDeskSetting />
+          <DiagnosticsSettings />
+        </div>
       )}
       {activeTab === 'account' && user && (
         <AccountSettings user={user} onLogout={onLogout} />
@@ -1938,7 +1942,8 @@ interface HealthStatus {
 
 interface CalibrationStatus {
   calibrated: boolean;
-  p99_latency_ms?: number;
+  /** null until the server has calibrated (GET /debug/calibration sends null, not a missing field). */
+  p99_latency_ms?: number | null;
   last_calibrated?: string;
   embedding_dimension?: number;
 }
@@ -2146,7 +2151,7 @@ function DiagnosticsSettings() {
                 {calibration.calibrated ? '✓ Calibrated' : '⚠ Not Calibrated'}
               </p>
             </div>
-            {calibration.p99_latency_ms !== undefined && (
+            {typeof calibration.p99_latency_ms === 'number' && (
               <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">p99 Latency</p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">

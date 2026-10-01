@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Literal
 
 from remembra.relay.adapters import REGISTRY
 from remembra.relay.config import DEFAULT_URL
@@ -144,6 +145,15 @@ def pipx_run_doctor(agent: str | None = None) -> str:
     return f"pipx run --spec 'remembra>={DOCTOR_MIN_VERSION}' remembra-relay doctor{tail}"
 
 
+# The Codex CLI command that lists the hooks to trust (typed into Codex, not a shell).
+CODEX_HOOKS = "/hooks"
+
+
+def ask_agent_doctor(agent: str | None = None) -> str:
+    """``askAgentDoctor`` in agents.ts: what to ask an agent that has the Remembra MCP server."""
+    return f"run remembra_doctor for {agent}" if agent else "run remembra_doctor"
+
+
 def remove_outbox_file(name: str) -> str:
     """Drop ONE named queued handoff (the path is fixed; only the file name varies)."""
     if not _OUTBOX_FILE_RE.match(name or "") or name.startswith("."):
@@ -172,3 +182,63 @@ ALLOWED: tuple[re.Pattern[str], ...] = (
 def is_allowed(command: str) -> bool:
     """True when ``command`` is exactly one of the templates above (never a key, never a pipe to a shell)."""
     return isinstance(command, str) and "\n" not in command and any(p.match(command) for p in ALLOWED)
+
+
+# ---------------------------------------------------------------------------
+# The Marshal desk: the only commands a model-written answer may carry
+# ---------------------------------------------------------------------------
+
+DeskCommandKind = Literal["terminal", "codex_ui", "agent"]
+_REGISTRY_AGENT = "(" + "|".join(re.escape(name) for name in REGISTRY) + ")"
+_DESK_TERMINAL: tuple[re.Pattern[str], ...] = (
+    re.compile(rf"^remembra-relay doctor(?: --agent {_REGISTRY_AGENT})?$"),
+    re.compile(
+        rf"^pipx run --spec 'remembra>={re.escape(DOCTOR_MIN_VERSION)}' remembra-relay doctor(?: --agent {_REGISTRY_AGENT})?$"
+    ),
+    re.compile(rf"^remembra-relay connect --apply(?: --agent {_REGISTRY_AGENT})*$"),
+    re.compile(rf"^remembra-relay close --agent {_REGISTRY_AGENT}$"),
+    re.compile(r"^remembra-relay status --format json$"),
+    re.compile("^" + re.escape(PROJECTS_SPLIT) + "$"),
+    re.compile("^" + re.escape(PIPX_INSTALL) + "$"),
+    re.compile("^" + re.escape(INSTALL_KEEP_SERVER) + "$"),
+)
+_DESK_AGENT = re.compile(rf"^run remembra_doctor(?: for {_REGISTRY_AGENT})?$")
+_DESK_RESOLVE = re.compile(r"^remembra-relay resolve --project ([A-Za-z0-9][A-Za-z0-9._-]{0,127}) --bind$")
+_DESK_INSTALL_URL = re.compile(r"^remembra-install --all --url (\S+)$")
+
+
+def desk_command_kind(command: str, *, server_urls: Iterable[str | None], projects: Iterable[str]) -> DeskCommandKind | None:
+    """Where a command from a Marshal desk answer runs, or None when the desk may not show it.
+
+    Stricter than :func:`is_allowed`: only the fixes and checks (doctor, connect,
+    close, status, resolve for a project a tool result named, the install and key
+    steps for this server), the Codex ``/hooks`` step and the question for the
+    user's own agent. Every agent is a relay adapter id; a URL must be one of
+    ``server_urls``. Nothing that deletes (the uninstall steps, ``rm``), nothing
+    with ``sudo`` (the pipx bootstrap lines) and no other URL is ever accepted.
+    """
+    if not isinstance(command, str) or command != command.strip() or "\n" in command or "rem_" in command:
+        return None
+    if command == CODEX_HOOKS:
+        return "codex_ui"
+    if _DESK_AGENT.match(command):
+        return "agent"
+    if command.startswith("remembra-relay connect"):
+        selected = re.findall(r"--agent ([A-Za-z0-9-]+)", command)
+        if any(agent not in REGISTRY or not REGISTRY[agent].spec.verified for agent in selected):
+            return None
+    if any(pattern.match(command) for pattern in _DESK_TERMINAL):
+        return "terminal"
+    urls = {url for url in server_urls if url}
+    match = _DESK_RESOLVE.match(command)
+    if match:
+        return "terminal" if match.group(1) in set(projects) else None
+    match = _DESK_INSTALL_URL.match(command)
+    if match:
+        return "terminal" if match.group(1) in urls else None
+    # The one-line first run (the dashboard's oneLineInstall) for this server, or for the server already set up.
+    if command in {one_line_install(url) for url in urls if _URL_RE.match(url)}:
+        return "terminal"
+    if command == f"{PIPX_INSTALL} && {INSTALL_KEEP_SERVER} && remembra-relay connect --apply":
+        return "terminal"
+    return None

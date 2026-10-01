@@ -52,6 +52,7 @@ class Blocker(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Blocker())
 
 from remembra.marshal import tools
+from remembra.marshal import diagnosis
 from remembra.relay import cli
 
 out = io.StringIO()
@@ -63,6 +64,17 @@ with contextlib.redirect_stdout(out):
     connect_code = cli.main(["connect", "--agent", "codex", "--relay-command", "/opt/bin/remembra-relay"])
 help_answer = tools.help_payload("Does Free cover 4 machines?")
 setup = tools.setup_payload(["codex"], os_id="macos", shell="zsh")
+fixture = json.load(open(%r))
+case = next(c for c in fixture["cases"] if c["expect"].get("code") == "CODEX_TRUST_MISSING")
+verdict = diagnosis.diagnose_agent(diagnosis.DiagnosisInput(
+    agent_id=case["input"]["agent_id"],
+    keys=[diagnosis.KeyEvidence.from_mapping(k) for k in case["input"]["keys"]],
+    trail=case["input"]["trail"],
+    agent_trail=case["input"]["agent_trail"],
+    summary_agent=None,
+    now=diagnosis.parse_server_time(fixture["now"]),
+    server_url=fixture["server_url"],
+))
 loaded = sorted({m.split(".")[0] for m in sys.modules} & BLOCKED)
 print(json.dumps({
     "doctor_exit": code,
@@ -74,8 +86,10 @@ print(json.dumps({
     "free_keys": [p["api_keys"] for p in help_answer["plan_facts"] if p["tier"] == "free"],
     "setup_steps": len(setup["steps"]),
     "loaded": loaded,
+    "verdict": verdict.as_dict(),
 }))
 """
+FIXTURE = str(Path(__file__).resolve().parent / "fixtures" / "marshal" / "diagnosis_cases.json")
 
 
 def test_the_client_side_runs_on_a_base_install(tmp_path: Path) -> None:
@@ -84,7 +98,7 @@ def test_the_client_side_runs_on_a_base_install(tmp_path: Path) -> None:
     fh.hooks("codex")
     fh.queue("codex", "s-429", error="HTTP 429: relay rate limit exceeded", status=429)
     proc = subprocess.run(
-        [sys.executable, "-c", PROBE % (NOT_IN_BASE,)],
+        [sys.executable, "-c", PROBE % (NOT_IN_BASE, FIXTURE)],
         capture_output=True,
         text=True,
         env={"PYTHONPATH": SRC, "HOME": str(fh.home), "PATH": str(fh.bin)},
@@ -100,3 +114,5 @@ def test_the_client_side_runs_on_a_base_install(tmp_path: Path) -> None:
     assert "You still need to:" in result["connect_out"] and "After --apply: Open Codex Settings > Hooks" in result["connect_out"]
     assert result["help_status"] == "answered" and result["free_keys"] == [3]
     assert result["setup_steps"] >= 5
+    # The server port of the "why?" verdict is client-safe too.
+    assert result["verdict"]["code"] == "CODEX_TRUST_MISSING" and result["verdict"]["commands"][0] == "/hooks"

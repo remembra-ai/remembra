@@ -5,12 +5,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, require_webhook_manage
+from remembra.auth.middleware import CurrentUser, refuse_delegated_principal, require_webhook_manage
 from remembra.core.limiter import limiter
 from remembra.webhooks.events import ALL_EVENT_TYPES
 from remembra.webhooks.manager import WebhookManager
 
-router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["webhooks"], dependencies=[Depends(refuse_delegated_principal)])
 
 
 # ---------------------------------------------------------------------------
