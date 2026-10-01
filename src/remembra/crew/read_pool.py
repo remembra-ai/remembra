@@ -56,16 +56,14 @@ class CrewReadPool:
         # Resolve the configured path once, rather than walking each parent
         # directory on every authorization lookup. Still detect replacement:
         # reusing an old connection after a file swap could mix auth databases.
-        stat = os.stat(path)
-        identity = (stat.st_dev, stat.st_ino)
-        if self._file_identity is not None and self._file_identity != identity:
-            raise RuntimeError("Crew reader database file changed; restart required")
+        if self._file_identity is None:
+            stat = os.stat(path)
+            self._file_identity = (stat.st_dev, stat.st_ino)
         if self._path != path:
             uri = Path(path).resolve().as_uri() + "?mode=ro"
             if self._uri is not None and self._uri != uri:
                 raise RuntimeError("A Crew reader pool cannot switch databases")
             self._uri, self._path = uri, path
-        self._file_identity = identity
         assert self._uri is not None
         uri = self._uri
         async with self._slots:
@@ -77,6 +75,11 @@ class CrewReadPool:
                 reader = await self._open(uri)
             try:
                 await reader.execute("BEGIN")
+                # A borrower may wait for a slot or connection creation. Check
+                # after those awaits, before exposing an authorization reader.
+                stat = os.stat(path)
+                if self._file_identity != (stat.st_dev, stat.st_ino):
+                    raise RuntimeError("Crew reader database file changed; restart required")
                 yield reader
             finally:
                 try:
