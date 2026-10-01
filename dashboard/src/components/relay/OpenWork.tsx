@@ -135,7 +135,7 @@ export function OpenWork({ projectId }: { projectId: string }) {
       } />
       <div className="px-4 pb-4 pt-2 sm:px-5">
         <p className="text-sm text-ink-2">Failures and tasks survive newer handoffs. A proposed fix stays open until you review and accept it.</p>
-        <p className="mt-1 text-xs text-ink-3">This list includes every agent in this project.</p>
+        <p className="mt-1 text-xs text-ink-3">Includes reports from your connected agents for this project.</p>
         {message && <p role="status" className="mt-3 text-sm text-ink">{message}</p>}
         {work.loading && <p className="mt-4 text-sm text-ink-3">Loading unresolved work…</p>}
         {!work.data && work.error != null && <ErrorNotice error={work.error} what="unresolved work" onRetry={work.refresh} />}
