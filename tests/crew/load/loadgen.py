@@ -371,6 +371,8 @@ def summarize(args: argparse.Namespace, metrics: dict[str, Any], retention: dict
     report = {
         "config": {k: getattr(args, k) for k in ("crews", "sessions", "duration", "heartbeat_s", "claim_s", "ingest_rate")},
         "server": {
+            "vector_backend": metrics.get("vector_backend", "unknown"),
+            "embedding_backend": metrics.get("embedding_backend", "unknown"),
             "heartbeat": hb,
             "claim": claim,
             "memory_store": routes.get("POST /memories") or {},

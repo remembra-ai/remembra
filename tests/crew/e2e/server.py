@@ -10,8 +10,10 @@ invariant job, notifications and retention. Auth is **on** (JWT and API keys, re
 
 What differs from production, and why:
 
-* the vector store is Qdrant's in-process local mode and the embedder is a deterministic hashed
-  bag of words (no network, no model): memory ingestion and ``recall_memories`` still run the real
+* the vector store defaults to Qdrant's in-process local mode. Capacity jobs set
+  REMEMBRA_E2E_QDRANT_URL to an isolated loopback server because local-mode async
+  calls execute their vector work in the API process. The embedder is a deterministic hashed
+  bag of words (no model): memory ingestion and ``recall_memories`` still run the real
   :class:`MemoryService` and SQLite paths;
 * webhook notifications go through the real :class:`~remembra.crew.notify.WebhookSender` (signing,
   SSRF resolution, pinned IP, no redirects). Hosts ending in ``.e2e.test`` resolve to a
@@ -33,6 +35,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import uuid
 import logging
 import os
 import re
@@ -106,8 +109,23 @@ async def memory_backend(settings: Any, db: Database) -> MemoryService:
 
     from remembra.storage.qdrant import QdrantStore
 
+    remote = os.environ.get("REMEMBRA_E2E_QDRANT_URL")
+    if remote:
+        parts = urlsplit(remote)
+        if (
+            parts.scheme != "http"
+            or parts.hostname not in {"127.0.0.1", "localhost"}
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in {"", "/"}
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError("E2E Qdrant must be an isolated credential-free HTTP loopback service")
+        settings.qdrant_url = remote
+        settings.qdrant_collection = "e2e_load_" + uuid.uuid4().hex
     store = QdrantStore(settings)
-    store._client = AsyncQdrantClient(location=":memory:")
+    store._client = AsyncQdrantClient(url=remote) if remote else AsyncQdrantClient(location=":memory:")
     await store.init_collection(EMBED_DIM)
     service = MemoryService(settings=settings, qdrant=store, db=db, embeddings=HashedEmbeddings())  # type: ignore[arg-type]
     service.extractor = OneFactExtractor()  # type: ignore[assignment]
@@ -346,7 +364,11 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_li
     @app.get("/__e2e/metrics")
     async def metrics() -> dict[str, Any]:
         instrument_reaper(app)
-        return METRICS.summary()
+        return {
+            **METRICS.summary(),
+            "vector_backend": "isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
+            "embedding_backend": "deterministic-hashed-64",
+        }
 
     @app.post("/__e2e/metrics/reset")
     async def metrics_reset() -> dict[str, bool]:
