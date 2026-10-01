@@ -8,8 +8,9 @@ Run it and point the desk at it::
 ``POST /v1/chat/completions`` answers like gpt-4o-mini would in the desk's
 loop, deterministically: a request with no read yet (besides a "why?" slip's
 pre-read) gets a ``trail_summary`` tool call; once a read is back it gets a
-JSON answer citing every successful read, with no figures and the Codex trust
-fix's two commands. ``--script FILE`` serves a JSON list of completions in
+JSON answer citing every successful read, with no figures and commands from
+a proven diagnosis, or the Codex trust example when it is inferred.
+``--script FILE`` serves a JSON list of completions in
 order instead. ``--delay SECONDS`` holds each completion that long (a slow model,
 so a live run can see the reads stream before the answer). ``GET /_stub/requests``
 returns every request body received.
@@ -28,6 +29,9 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from remembra.marshal.commands import CLOUD_URL, desk_command_kind
+from remembra.security.untrusted import unwrap_untrusted
 
 CONTEXT_CALL = "call_context_r1"
 ANSWER_TEXT = (
@@ -63,7 +67,22 @@ def auto_reply(body: dict[str, Any]) -> dict[str, Any]:
         call = {"id": "call_stub_1", "type": "function", "function": {"name": "trail_summary", "arguments": '{"days": 7}'}}
         return completion({"role": "assistant", "content": None, "tool_calls": [call]}, "tool_calls", (2400, 30, 0))
     evidence = [m.group(1) for t in tool_messages for m in _OK_READ.finditer(str(t.get("content") or ""))][:4]
-    content = json.dumps({"text": ANSWER_TEXT, "evidence": evidence, "commands": ANSWER_COMMANDS})
+    text, commands = ANSWER_TEXT, ANSWER_COMMANDS
+    for message in tool_messages:
+        try:
+            read = json.loads(unwrap_untrusted(str(message.get("content") or "")))
+        except (TypeError, ValueError):
+            continue
+        verdict = read.get("verdict") or {}
+        if read.get("status") == "ok" and verdict.get("proven"):
+            text = "The recorded diagnosis is proven. Use its listed commands to check the relay setup."
+            commands = [
+                command
+                for command in verdict.get("commands") or []
+                if desk_command_kind(command, server_urls=[CLOUD_URL], projects=[])
+            ][:1]
+            break
+    content = json.dumps({"text": text, "evidence": evidence, "commands": commands})
     return completion({"role": "assistant", "content": content}, "stop", (2600, 80, 1792))
 
 
