@@ -98,7 +98,7 @@ class _FairControlLock:
             self._locked = True
             self._control_grants = 0
             return True
-        future = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         queue = self._control if _control_lane.get() else self._normal
         queue.append(future)
         try:
