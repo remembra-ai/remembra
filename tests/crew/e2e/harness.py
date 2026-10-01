@@ -170,13 +170,20 @@ class Payloads:
 
 class ServerProc:
     def __init__(
-        self, workdir: Path, *, webhook_forward: str | None = None, seed_users: int = 0, crew_rate_limits: bool = False
+        self,
+        workdir: Path,
+        *,
+        webhook_forward: str | None = None,
+        seed_users: int = 0,
+        crew_rate_limits: bool = False,
+        qdrant_url: str | None = None,
     ) -> None:
         self.workdir = workdir
         self.port = free_port()
         self.webhook_forward = webhook_forward
         self.seed_users = seed_users
         self.crew_rate_limits = crew_rate_limits
+        self.qdrant_url = qdrant_url
         self.proc: subprocess.Popen[str] | None = None
         self.info: dict[str, Any] = {}
         self.log_path = workdir / "server.log"
@@ -189,6 +196,8 @@ class ServerProc:
         self.workdir.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("REMEMBRA_", "CLAUDE"))}
         env.update({"PYTHONPATH": f"{ROOT / 'src'}{os.pathsep}{ROOT}", "REMEMBRA_TYPESAFE_MODE": "off"})
+        if self.qdrant_url:
+            env["REMEMBRA_E2E_QDRANT_URL"] = self.qdrant_url
         env.pop("TYPESAFE_API_KEY", None)
         argv = [PY, "-m", "tests.crew.e2e.server", "--workdir", str(self.workdir), "--port", str(self.port)]
         if self.webhook_forward:

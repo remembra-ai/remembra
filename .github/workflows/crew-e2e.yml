@@ -117,6 +117,10 @@ jobs:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.full_gate != 'soak')
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.17.0@sha256:f1c7272cdac52b38c1a0e89313922d940ba50afd90d593a1605dbbc214e66ffb
+        ports: ["6333:6333"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -127,6 +131,8 @@ jobs:
       - name: Install Python dependencies
         run: pip install -e ".[server,cloud,dev,mcp,encryption]"
       - name: Load (spec §13.4 budgets)
+        env:
+          REMEMBRA_E2E_QDRANT_URL: http://127.0.0.1:6333
         run: >
           python -m tests.crew.load.loadgen --crews 50 --sessions 5
           --duration "${{ github.event.inputs.load_duration_s || '3600' }}"
