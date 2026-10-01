@@ -178,14 +178,19 @@ async def _record_pruned_runs(conn: aiosqlite.Connection, crew_id: str, runs: li
     stamp = format_ts(utc_now())
     for first, last, prev_hash, last_hash in runs:
         async with conn.execute(
-            "SELECT first_seq, prev_hash FROM crew_pruned_ranges WHERE crew_id = ? AND last_seq = ?", (crew_id, first - 1)
+            # Valid pruned ranges are disjoint. Seek the nearest predecessor
+            # through (crew_id, first_seq), then check its exact end; searching
+            # by unindexed last_seq scans every historical gap for each run.
+            "SELECT first_seq, prev_hash, last_seq FROM crew_pruned_ranges"
+            " WHERE crew_id = ? AND first_seq < ? ORDER BY first_seq DESC LIMIT 1",
+            (crew_id, first),
         ) as cur:
             before = await cur.fetchone()
         async with conn.execute(
             "SELECT last_seq, last_hash FROM crew_pruned_ranges WHERE crew_id = ? AND first_seq = ?", (crew_id, last + 1)
         ) as cur:
             after = await cur.fetchone()
-        if before is not None:
+        if before is not None and int(before[2]) == first - 1:
             first, prev_hash = int(before[0]), str(before[1])
             await conn.execute("DELETE FROM crew_pruned_ranges WHERE crew_id = ? AND first_seq = ?", (crew_id, first))
         if after is not None:
