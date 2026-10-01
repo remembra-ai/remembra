@@ -1685,7 +1685,11 @@ class Crewd:
                 "fingerprint": fp,
                 "passed": v.get("passed", 0),
                 "failed": v.get("failed", 0),
-                **({"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat()} if v.get("at") is not None else {}),
+                **(
+                    {"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat().replace("+00:00", "Z")}
+                    if v.get("at") is not None
+                    else {}
+                ),
             }
             for fp, v in (sess.get("tests") or {}).items()
         ]
@@ -2751,7 +2755,11 @@ class Crewd:
                 "command": fp,
                 "passed": int(v.get("passed") or 0),
                 "failed": int(v.get("failed") or 0),
-                **({"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat()} if v.get("at") is not None else {}),
+                **(
+                    {"observed_at": datetime.fromtimestamp(v["at"], UTC).isoformat().replace("+00:00", "Z")}
+                    if v.get("at") is not None
+                    else {}
+                ),
             }
             for fp, v in (sess.get("tests") or {}).items()
         ][:50]

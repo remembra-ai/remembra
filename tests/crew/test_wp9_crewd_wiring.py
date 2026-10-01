@@ -190,7 +190,15 @@ async def test_githook_missing_event_and_presence_frames_and_redaction(tmp_path)
         await d.checkpoint(sess, "test", force=True)
         ck = await srv.rows("SELECT facts FROM crew_checkpoints WHERE session_id = ?", (a["session_id"],))
         assert ck and "sk-ant-api03" not in ck[-1]["facts"]
-        observed = json.loads(ck[-1]["facts"])["tests"][0]["observed_at"]
+        emitted = json.loads(ck[-1]["facts"])["tests"][0]
+        observed = emitted["observed_at"]
+        wire_test = {
+            "command": emitted["fingerprint"],
+            "passed": emitted["passed"],
+            "failed": emitted["failed"],
+            "observed_at": observed,
+        }
+        assert S.validate(wire_test, S.MCP_TEST_RESULT) == []
         await d.checkpoint(sess, "turn", force=True)
         later = await srv.rows("SELECT facts FROM crew_checkpoints WHERE session_id = ?", (a["session_id"],))
         assert json.loads(later[-1]["facts"])["tests"][0]["observed_at"] == observed
@@ -211,3 +219,33 @@ async def test_baton_retention_sweep(tmp_path):
         assert d.sweep_batons() == [baton.ref]
         assert baton.ref not in B.list_batons(repo)
         assert "refs/remembra/baton/T-8/1" in d.batons
+
+
+async def test_cached_report_test_timestamp_satisfies_the_public_tool_schema(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    layout = Layout(tmp_path / "home")
+    async with crew_server(tmp_path) as srv:
+        d = new_crewd(layout, srv, alive={A_PID})
+        joined = await d.join(peer(A_PID), _join("sess-a", repo, A_PID))
+        sess = d.sessions[joined["key"]]
+        # Cache survives a later report; preserve the original run time exactly.
+        sess["tests"] = {"pytest -q": {"passed": 3, "failed": 0, "at": 1790812800.123456}}
+
+        async def task(*_args):
+            return {"id": "tsk-test", "started_head": None}
+
+        sent = []
+
+        async def op(_peer, args):
+            sent.append(args["json"])
+            return {"ok": True}
+
+        d.find_task = task
+        d.api_op = op
+        result = await d.report(peer(A_PID), {"key": joined["key"], "task": "T-1"})
+        assert result["ok"]
+        emitted = sent[0]["tests"][0]
+        assert S.validate(emitted, S.MCP_TEST_RESULT) == []
+        from datetime import datetime
+
+        assert datetime.fromisoformat(emitted["observed_at"].replace("Z", "+00:00")).timestamp() == 1790812800.123456
