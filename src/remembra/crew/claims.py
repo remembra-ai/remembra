@@ -363,19 +363,18 @@ async def next_epoch(conn: aiosqlite.Connection, crew_id: str, target: Target) -
 
 async def exclusive_counts(conn: aiosqlite.Connection, session: Mapping[str, Any]) -> tuple[int, int]:
     """(live exclusive claims of this session, live exclusive claims of this agent id) for the §5.1 caps."""
-    a = await fetchone(
+    counts = await fetchone(
         conn,
-        """SELECT COUNT(*) AS n FROM crew_claims WHERE holder_session_id = ? AND mode = 'exclusive' AND source != 'micro_lease'
-             AND (state IN ('active','offered') OR (state = 'reserved' AND reserved_for = ?))""",
-        (session["id"], session["id"]),
+        """SELECT
+             (SELECT COUNT(*) FROM crew_claims WHERE holder_session_id = ?
+                AND mode = 'exclusive' AND source != 'micro_lease'
+                AND (state IN ('active','offered') OR (state = 'reserved' AND reserved_for = ?))) AS per_session,
+             (SELECT COUNT(*) FROM crew_claims WHERE crew_id = ? AND holder_user_id = ? AND holder_agent_id = ?
+                AND holder_kind = 'session' AND mode = 'exclusive' AND source != 'micro_lease'
+                AND state IN ('active','offered')) AS per_agent""",
+        (session["id"], session["id"], session["crew_id"], session["user_id"], session["agent_id"]),
     )
-    b = await fetchone(
-        conn,
-        """SELECT COUNT(*) AS n FROM crew_claims WHERE crew_id = ? AND holder_user_id = ? AND holder_agent_id = ?
-             AND holder_kind = 'session' AND mode = 'exclusive' AND source != 'micro_lease' AND state IN ('active','offered')""",
-        (session["crew_id"], session["user_id"], session["agent_id"]),
-    )
-    return int(a["n"] if a else 0), int(b["n"] if b else 0)
+    return int(counts["per_session"] if counts else 0), int(counts["per_agent"] if counts else 0)
 
 
 async def _over_cap(conn: aiosqlite.Connection, session: Mapping[str, Any], settings: Mapping[str, Any], adding: int = 1) -> bool:
@@ -822,27 +821,27 @@ async def _retake(
 
 async def _hoarding_check(tx: EventTx, crew_id: str, session: Mapping[str, Any], actor: Actor) -> None:
     """Needs-you "zone hoarding" when a session holds more than 3 zones or more than half of the estimated files (§5.1)."""
-    rows = await fetchall(
+    counts = await fetchone(
         tx.conn,
-        """SELECT z.files_estimate FROM crew_claims c JOIN crew_zones z ON z.id = c.zone_id
-            WHERE c.holder_session_id = ? AND c.state IN ('active','offered')""",
-        (session["id"],),
+        """WITH held_zones AS (
+             SELECT z.files_estimate FROM crew_claims c JOIN crew_zones z ON z.id = c.zone_id
+               WHERE c.holder_session_id = ? AND c.state IN ('active','offered')
+           ) SELECT
+             (SELECT COUNT(*) FROM held_zones) AS zone_areas,
+             (SELECT COALESCE(SUM(files_estimate), 0) FROM held_zones) AS held_files,
+             (SELECT COALESCE(SUM(files_estimate), 0) FROM crew_zones
+                WHERE crew_id = ? AND archived_at IS NULL AND builtin = 0) AS all_files,
+             (SELECT COUNT(*) FROM crew_claims WHERE holder_session_id = ?
+                AND zone_id IS NULL AND path_glob IS NOT NULL AND source != 'micro_lease'
+                AND mode != 'watch' AND state IN ('active','offered')) AS glob_areas""",
+        (session["id"], crew_id, session["id"]),
     )
-    total = await fetchone(
-        tx.conn,
-        "SELECT COALESCE(SUM(files_estimate), 0) AS n FROM crew_zones WHERE crew_id = ? AND archived_at IS NULL AND builtin = 0",
-        (crew_id,),
-    )
-    # file claims (path globs) count as areas too: a glob squat must raise the same alarm as a zone squat
-    globs = await fetchone(
-        tx.conn,
-        """SELECT COUNT(*) AS n FROM crew_claims WHERE holder_session_id = ? AND zone_id IS NULL AND path_glob IS NOT NULL
-             AND source != 'micro_lease' AND mode != 'watch' AND state IN ('active','offered')""",
-        (session["id"],),
-    )
-    held_files = sum(int(r["files_estimate"] or 0) for r in rows)
-    all_files = int(total["n"]) if total else 0
-    areas = len(rows) + (int(globs["n"]) if globs else 0)
+    # Keep both cap decisions inside the caller's writer transaction, but avoid
+    # repeated SQLite worker handoffs. File globs still count as areas too.
+    assert counts is not None  # aggregate SELECT always yields one row
+    held_files = int(counts["held_files"])
+    all_files = int(counts["all_files"])
+    areas = int(counts["zone_areas"]) + int(counts["glob_areas"])
     if areas > HOARD_ZONES or (all_files > 0 and held_files > HOARD_FILES_FRACTION * all_files):
         await raise_inbox_item(
             tx,
