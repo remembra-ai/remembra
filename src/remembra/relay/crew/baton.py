@@ -61,7 +61,10 @@ def git(
     stdin: bytes | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    full_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", **(env or {})}
+    # crewd observes a checkout while its agent may be staging/committing.
+    # Suppress Git's optional index refresh; explicit writes (including baton
+    # temporary indexes and refs) still take their required locks.
+    full_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C", **(env or {})}
     try:
         res = subprocess.run(  # noqa: S603,S607 - fixed git argv, no shell
             ["git", *args], cwd=str(cwd), capture_output=True, timeout=timeout, env=full_env, input=stdin, check=False
