@@ -147,6 +147,39 @@ def test_hooks_cannot_replace_a_proven_close_fix():
     assert result.fallback_reason == "command_contradicts_verdict"
 
 
+def test_live_model_stub_follows_a_proven_diagnosis():
+    import json
+
+    from remembra.security.untrusted import dump_untrusted
+    from tests.marshal_stub_openai import auto_reply
+
+    command = "remembra-relay doctor --agent codex"
+    result = auto_reply(
+        {
+            "tool_choice": "none",
+            "messages": [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_context_r1",
+                    "content": dump_untrusted(
+                        {
+                            "status": "ok",
+                            "id": "r1",
+                            "verdict": {
+                                "proven": True,
+                                "commands": [command, "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent codex"],
+                            },
+                        }
+                    ),
+                }
+            ],
+        }
+    )
+    answer = json.loads(result["choices"][0]["message"]["content"])
+    assert answer["commands"] == [command]
+    assert "/hooks" not in answer["text"]
+
+
 @pytest.mark.parametrize(
     "tool,data", [("trail", {"items": [], "total": 0}), ("brief_preview", {"project_id": "ghost", "handoff": None})]
 )

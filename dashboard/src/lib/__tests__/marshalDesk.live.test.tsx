@@ -178,7 +178,7 @@ describe.skipIf(!URL_)('live Marshal desk', () => {
       expect(first.error).toBeUndefined();
       expect(first.reads.length).toBeGreaterThanOrEqual(1);
       expect(first.reads.every((r) => r.ok)).toBe(true);
-      expect(first.answer?.fallback).toBe(false);
+      expect(first.answer?.fallback, JSON.stringify(first.answer)).toBe(false);
       expect(first.answer?.evidence.length).toBeGreaterThanOrEqual(1);
       expect(first.usage?.billed_to_credits).toBe(false);
       expect(first.usage?.reads).toBe(first.reads.length);
