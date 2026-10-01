@@ -35,8 +35,9 @@ other request's DB access waits on it.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Iterable
-from contextlib import asynccontextmanager
+from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Iterable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -62,23 +63,94 @@ class _TxToken:
 
 
 _active_tx: ContextVar[_TxToken | None] = ContextVar("remembra_sqlite_tx", default=None)
+_control_lane: ContextVar[bool] = ContextVar("remembra_sqlite_control_lane", default=False)
+
+
+@contextmanager
+def sqlite_control_lane() -> Iterator[None]:
+    """Give authenticated lease maintenance bounded priority on Crew's writer.
+
+    This changes scheduling only: transaction ownership and isolation still apply.
+    Main-memory databases retain their ordinary FIFO lock.
+    """
+    token = _control_lane.set(True)
+    try:
+        yield
+    finally:
+        _control_lane.reset(token)
+
+
+class _FairControlLock:
+    """FIFO within each lane; at most eight control grants before a normal grant.
+
+    No active holder is preempted. Cancelled waiters are removed, including a
+    waiter cancelled just after it was granted the lock.
+    """
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._control: deque[asyncio.Future[bool]] = deque()
+        self._normal: deque[asyncio.Future[bool]] = deque()
+        self._control_grants = 0
+
+    async def acquire(self) -> bool:
+        if not self._locked:
+            self._locked = True
+            self._control_grants = 0
+            return True
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        queue = self._control if _control_lane.get() else self._normal
+        queue.append(future)
+        try:
+            return await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                self.release()
+            else:
+                future.cancel()
+                if future in queue:
+                    queue.remove(future)
+            raise
+
+    def release(self) -> None:
+        if not self._locked:
+            raise RuntimeError("Lock is not acquired")
+        for queue in (self._control, self._normal):
+            while queue and queue[0].cancelled():
+                queue.popleft()
+        if self._control and (not self._normal or self._control_grants < 8):
+            self._control_grants += 1
+            self._control.popleft().set_result(True)
+        elif self._normal:
+            self._control_grants = 0
+            self._normal.popleft().set_result(True)
+        else:
+            self._locked = False
+            self._control_grants = 0
+
+    async def __aenter__(self) -> None:
+        await self.acquire()
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.release()
 
 
 class TxCoordinator:
     """Serializes statements on one connection around explicit transactions."""
 
-    def __init__(self) -> None:
-        self._lock: asyncio.Lock | None = None
+    def __init__(self, *, control_priorities: bool = False) -> None:
+        self._control_priorities = control_priorities
+        self._lock: asyncio.Lock | _FairControlLock | None = None
         self._lock_loop: asyncio.AbstractEventLoop | None = None
         self._current: _TxToken | None = None
 
     @property
-    def lock(self) -> asyncio.Lock:
+    def lock(self) -> asyncio.Lock | _FairControlLock:
         # asyncio.Lock binds to the running loop on first contention; recreate
         # it if the Database is reused on a new loop (test suites do this).
         loop = asyncio.get_running_loop()
         if self._lock is None or self._lock_loop is not loop:
-            self._lock = asyncio.Lock()
+            self._lock = _FairControlLock() if self._control_priorities else asyncio.Lock()
             self._lock_loop = loop
         return self._lock
 
@@ -215,6 +287,11 @@ class GuardedConnection:
     def executemany(self, sql: str, parameters: Iterable[Iterable[Any]]) -> _GuardedResult:
         raw = self._raw
         return _GuardedResult(self._coord, lambda: raw.executemany(sql, parameters))
+
+    async def execute_fetchall(self, sql: str, parameters: Iterable[Any] | None = None) -> list[Any]:
+        """Execute and fetch in one worker call without bypassing isolation."""
+        rows = await self._coord.run(lambda: self._raw.execute_fetchall(sql, tuple(parameters or ())))
+        return list(rows)
 
     def executescript(self, sql_script: str) -> _GuardedResult:
         if self._coord.owns():

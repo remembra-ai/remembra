@@ -198,6 +198,9 @@ def clip(text: str | None, limit: int) -> str | None:
 
 
 async def fetchone(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> dict[str, Any] | None:
+    if conn.row_factory is aiosqlite.Row:
+        rows = list(await conn.execute_fetchall(sql, tuple(params)))
+        return dict(zip(rows[0].keys(), tuple(rows[0]), strict=True)) if rows else None
     cursor = await conn.execute(sql, tuple(params))
     row = await cursor.fetchone()
     if row is None:
@@ -207,6 +210,8 @@ async def fetchone(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] =
 
 
 async def fetchall(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    if conn.row_factory is aiosqlite.Row:
+        return [dict(zip(row.keys(), tuple(row), strict=True)) for row in await conn.execute_fetchall(sql, tuple(params))]
     cursor = await conn.execute(sql, tuple(params))
     names = [d[0] for d in cursor.description]
     return [dict(zip(names, tuple(r), strict=True)) for r in await cursor.fetchall()]

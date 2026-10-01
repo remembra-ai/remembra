@@ -55,6 +55,7 @@ from remembra.crew.reaper import build_sessions_service
 from remembra.crew.sessions import SESSION_TOKEN_HEADER, CrewSessions, JoinRequest, SessionError, get_session
 from remembra.crew.store import now_iso
 from remembra.inbox.manager import is_reserved_sender
+from remembra.storage.sqlite_tx import sqlite_control_lane
 
 router = APIRouter(tags=["crew-sessions"])
 
@@ -284,6 +285,11 @@ async def crew_heartbeat(
 ) -> dict[str, Any]:
     """Batched host heartbeat (every 60 s). Renews leases; never an event (§4.2). Natural key ``(host, batch_id)``."""
     _require_perm(user, "crew:write")
+    with sqlite_control_lane():
+        return await _heartbeat_control(request, user, host_token)
+
+
+async def _heartbeat_control(request: Request, user: AuthenticatedUser, host_token: str | None) -> dict[str, Any]:
     db = _crew_db(request)
     try:
         host = await authenticate_host_token(db.conn, user_id=user.user_id, token=host_token)

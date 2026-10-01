@@ -484,6 +484,9 @@ def session_actor(row: Mapping[str, Any]) -> Actor:
 
 
 async def _one(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> dict[str, Any] | None:
+    if conn.row_factory is aiosqlite.Row:
+        rows = list(await conn.execute_fetchall(sql, tuple(params)))
+        return dict(zip(rows[0].keys(), tuple(rows[0]), strict=True)) if rows else None
     async with conn.execute(sql, tuple(params)) as cur:
         row = await cur.fetchone()
         if row is None:
@@ -493,6 +496,8 @@ async def _one(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ())
 
 
 async def _all(conn: aiosqlite.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    if conn.row_factory is aiosqlite.Row:
+        return [dict(zip(row.keys(), tuple(row), strict=True)) for row in await conn.execute_fetchall(sql, tuple(params))]
     async with conn.execute(sql, tuple(params)) as cur:
         rows = await cur.fetchall()
         names = [d[0] for d in cur.description]

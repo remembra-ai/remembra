@@ -14,6 +14,7 @@ import re
 import pytest
 
 from remembra.crew import schemas
+from remembra.crew.events import format_ts
 from remembra.crew.hosts import hash_token
 from remembra.crew.sessions import (
     FOOTPRINT_SINKS,
@@ -233,10 +234,24 @@ async def test_heartbeat_isolates_bad_sessions_in_the_batch(mk):
     h2, t2 = await host(env, "mbp2")
     a = await _join(env, "s-a", host_id=h1["id"], host_token=t1)
     b = await _join(env, "s-b", host_id=h2["id"], host_token=t2)
-    body = {"batch_id": "b", "sessions": [hb_item(a.session, a.session_token), hb_item(b.session, b.session_token)]}
+    c = await _join(env, "s-c", host_id=h1["id"], host_token=t1, checkout="fp-c")
+    untouched = await get_session(env.conn, b.session["id"])
+    env.clock.advance(60)
+    body = {
+        "batch_id": "b",
+        "sessions": [
+            hb_item(a.session, a.session_token),
+            hb_item(b.session, b.session_token),
+            hb_item(c.session, c.session_token),
+        ],
+    }
     res = await env.svc.heartbeat(user_id=OWNER, host=h1, body=body)
     assert "error" not in res["per_session"][a.session["id"]]
     assert res["per_session"][b.session["id"]]["error"] == "session_token_invalid"  # wrong host
+    assert "error" not in res["per_session"][c.session["id"]]
+    assert await get_session(env.conn, b.session["id"]) == untouched
+    for valid in (a, c):
+        assert (await get_session(env.conn, valid.session["id"]))["last_heartbeat_at"] == format_ts(env.clock.now)
 
 
 async def test_heartbeat_redacts_last_action_and_upserts_footprints_for_sinks(mk):

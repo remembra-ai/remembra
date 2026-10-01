@@ -15,6 +15,8 @@ from tests.crew.load import loadgen as L
 def healthy_report():
     args = L.parse_args(["--crews", "1", "--sessions", "1", "--duration", "10", "--ingest-rate", "5"])
     metrics = {
+        "vector_backend": "in-process-local",
+        "event_loop_backend": "uvloop",
         "routes": {
             L.HEARTBEAT_ROUTE: {"count": 3, "p95_ms": 10.0, "statuses": {"200": 3}},
             L.CLAIM_ROUTE: {"count": 10, "p95_ms": 20.0, "statuses": {"201": 10}},
@@ -34,6 +36,20 @@ def healthy_report():
 def test_healthy_load_can_pass():
     args, metrics, retention, stats = healthy_report()
     assert L.summarize(args, metrics, retention, stats)["ok"]
+
+
+def test_local_report_cannot_satisfy_requested_server_backend():
+    args, metrics, retention, stats = healthy_report()
+    args.vector_backend = "isolated-server"
+    report = L.summarize(args, metrics, retention, stats)
+    assert not report["checks"]["requested_vector_backend"] and not report["ok"]
+
+
+def test_asyncio_report_cannot_satisfy_requested_production_loop():
+    args, metrics, retention, stats = healthy_report()
+    metrics["event_loop_backend"] = "asyncio"
+    report = L.summarize(args, metrics, retention, stats)
+    assert not report["checks"]["requested_event_loop"] and not report["ok"]
 
 
 @pytest.mark.parametrize("failure", ["client_error", "rejected_store", "missing_heartbeats", "retention_chain"])

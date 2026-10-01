@@ -10,8 +10,10 @@ invariant job, notifications and retention. Auth is **on** (JWT and API keys, re
 
 What differs from production, and why:
 
-* the vector store is Qdrant's in-process local mode and the embedder is a deterministic hashed
-  bag of words (no network, no model): memory ingestion and ``recall_memories`` still run the real
+* the vector store defaults to Qdrant's in-process local mode. Capacity jobs set
+  REMEMBRA_E2E_QDRANT_URL to an isolated loopback server because local-mode async
+  calls execute their vector work in the API process. The embedder is a deterministic hashed
+  bag of words (no model): memory ingestion and ``recall_memories`` still run the real
   :class:`MemoryService` and SQLite paths;
 * webhook notifications go through the real :class:`~remembra.crew.notify.WebhookSender` (signing,
   SSRF resolution, pinned IP, no redirects). Hosts ending in ``.e2e.test`` resolve to a
@@ -33,13 +35,14 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import uuid
 import logging
 import os
 import re
 import sys
 import time
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -106,8 +109,23 @@ async def memory_backend(settings: Any, db: Database) -> MemoryService:
 
     from remembra.storage.qdrant import QdrantStore
 
+    remote = os.environ.get("REMEMBRA_E2E_QDRANT_URL")
+    if remote:
+        parts = urlsplit(remote)
+        if (
+            parts.scheme != "http"
+            or parts.hostname not in {"127.0.0.1", "localhost"}
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in {"", "/"}
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError("E2E Qdrant must be an isolated credential-free HTTP loopback service")
+        settings.qdrant_url = remote
+        settings.qdrant_collection = "e2e_load_" + uuid.uuid4().hex
     store = QdrantStore(settings)
-    store._client = AsyncQdrantClient(location=":memory:")
+    store._client = AsyncQdrantClient(url=remote) if remote else AsyncQdrantClient(location=":memory:")
     await store.init_collection(EMBED_DIM)
     service = MemoryService(settings=settings, qdrant=store, db=db, embeddings=HashedEmbeddings())  # type: ignore[arg-type]
     service.extractor = OneFactExtractor()  # type: ignore[assignment]
@@ -191,7 +209,25 @@ class Metrics:
         self.statuses: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.sweeps: list[float] = []
         self.tx_holds: dict[str, list[float]] = defaultdict(list)
+        self.tx_waits: dict[str, list[float]] = defaultdict(list)
+        self.sweep_steps: dict[str, list[float]] = defaultdict(list)
+        self.sqlite_calls: dict[str, dict[str, float]] = {}
+        self.statement_waits: dict[str, list[float]] = defaultdict(list)
+        self.resource_baseline = self.process_resources()
         self.errors: list[str] = []
+
+    @staticmethod
+    def process_resources() -> dict[str, float]:
+        try:
+            usage = __import__("resource").getrusage(0)
+        except ImportError:
+            return {}
+        return {
+            "user_s": usage.ru_utime,
+            "system_s": usage.ru_stime,
+            "voluntary_switches": usage.ru_nvcsw,
+            "involuntary_switches": usage.ru_nivcsw,
+        }
 
     def summary(self) -> dict[str, Any]:
         def pct(values: list[float], q: float) -> float:
@@ -214,7 +250,31 @@ class Metrics:
         return {
             "routes": routes,
             "sweeps_ms": [round(s * 1000, 2) for s in self.sweeps],
-            "tx_holds": {tag: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for tag, v in self.tx_holds.items()},
+            "tx_holds": {
+                tag: {
+                    "count": len(v),
+                    "total_ms": round(sum(v) * 1000, 2),
+                    "mean_ms": round(sum(v) / len(v) * 1000, 2),
+                    "max_ms": round(max(v) * 1000, 2),
+                }
+                for tag, v in self.tx_holds.items()
+            },
+            "tx_waits": {
+                tag: {"count": len(v), "p95_ms": round(pct(v, 0.95) * 1000, 2), "max_ms": round(max(v) * 1000, 2)}
+                for tag, v in self.tx_waits.items()
+            },
+            "sweep_steps": {step: {"count": len(v), "max_ms": round(max(v) * 1000, 2)} for step, v in self.sweep_steps.items()},
+            "sqlite_calls": self.sqlite_calls,
+            "statement_waits": {
+                tag: {
+                    "count": len(v),
+                    "p95_ms": round(pct(v, 0.95) * 1000, 2),
+                    "total_ms": round(sum(v) * 1000, 2),
+                    "max_ms": round(max(v) * 1000, 2),
+                }
+                for tag, v in self.statement_waits.items()
+            },
+            "process_resources": {k: v - self.resource_baseline.get(k, 0) for k, v in self.process_resources().items()},
             "database_locked": self.locked.count,
             "database_locked_samples": self.locked.samples,
             "errors": self.errors[:20],
@@ -233,6 +293,7 @@ class TimingMiddleware:
             await self.app(scope, receive, send)
             return
         started = time.perf_counter()
+        tag_token = _TAG.set(route_key(scope))
         status = {"code": 0}
 
         async def wrapped_send(message: dict[str, Any]) -> None:
@@ -249,25 +310,74 @@ class TimingMiddleware:
                 METRICS.locked.count += 1
             raise
         finally:
+            _TAG.reset(tag_token)
             key = route_key(scope)
             METRICS.durations[key].append(time.perf_counter() - started)
             METRICS.statuses[key][status["code"]] += 1
 
 
-def instrument_transactions(crew_db: Any) -> None:
+def instrument_transactions(crew_db: Any, *, prefix: str = "") -> None:
     """Time every ``crew.db`` transaction; tagged ones (retention) are reported separately."""
     original: Callable[[], Any] = crew_db.transaction
 
     @asynccontextmanager
     async def timed() -> AsyncIterator[None]:
+        waiting = time.perf_counter()
         async with original():
             started = time.perf_counter()
+            METRICS.tx_waits[prefix + (_TAG.get() or "all")].append(started - waiting)
             try:
                 yield
             finally:
-                METRICS.tx_holds[_TAG.get() or "all"].append(time.perf_counter() - started)
+                METRICS.tx_holds[prefix + (_TAG.get() or "all")].append(time.perf_counter() - started)
 
     crew_db.transaction = timed
+    # Test-only diagnostics: distinguish SQLite execution from worker scheduling
+    # and coroutine overhead. No parameters, tokens or SQL text are retained.
+    raw = crew_db.conn.raw
+    original_execute = raw._execute
+    coord = crew_db._tx
+    original_run = coord.run
+
+    async def measured_run(factory: Any) -> Any:
+        if coord.owns():
+            return await original_run(factory)
+        waiting = time.perf_counter()
+
+        async def entered() -> Any:
+            METRICS.statement_waits[prefix + (_TAG.get() or "background")].append(time.perf_counter() - waiting)
+            return await factory()
+
+        return await original_run(entered)
+
+    coord.run = measured_run
+
+    async def measured_execute(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        elapsed = [0.0]
+
+        def measured() -> Any:
+            started = time.perf_counter()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                elapsed[0] = (time.perf_counter() - started) * 1000
+
+        started = time.perf_counter()
+        try:
+            return await original_execute(measured)
+        finally:
+            operation = getattr(fn, "__name__", type(fn).__name__)
+            if args and isinstance(args[0], str):
+                table = re.search(r"\b(?:FROM|UPDATE|INTO)\s+([a-z_]+)", args[0], re.IGNORECASE)
+                if table:
+                    operation += ":" + table[1].lower()
+            key = f"{prefix}{_TAG.get() or 'background'}:{operation}"
+            stat = METRICS.sqlite_calls.setdefault(key, {"count": 0, "worker_ms": 0, "wall_ms": 0})
+            stat["count"] += 1
+            stat["worker_ms"] += elapsed[0]
+            stat["wall_ms"] += (time.perf_counter() - started) * 1000
+
+    raw._execute = measured_execute
 
 
 def instrument_reaper(app: FastAPI) -> None:
@@ -284,6 +394,19 @@ def instrument_reaper(app: FastAPI) -> None:
             METRICS.sweeps.append(time.perf_counter() - started)
 
     reaper.sweep = timed
+
+    def time_step(name: str, original_step: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            started = time.perf_counter()
+            try:
+                return await original_step(*args, **kwargs)
+            finally:
+                METRICS.sweep_steps[name].append(time.perf_counter() - started)
+
+        return wrapped
+
+    for name in ("_hosts", "_presence", "_leases", "_idle_park", "_reservations", "_close_lost", "_alarms"):
+        setattr(reaper, name, time_step(name, getattr(reaper, name)))
     reaper._e2e_timed = True
 
 
@@ -346,7 +469,13 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None, crew_rate_li
     @app.get("/__e2e/metrics")
     async def metrics() -> dict[str, Any]:
         instrument_reaper(app)
-        return METRICS.summary()
+        return {
+            **METRICS.summary(),
+            "vector_backend": "isolated-server" if os.environ.get("REMEMBRA_E2E_QDRANT_URL") else "in-process-local",
+            "embedding_backend": "deterministic-hashed-64",
+            "event_loop_backend": "uvloop" if type(asyncio.get_running_loop()).__module__.startswith("uvloop") else "asyncio",
+            "event_loop_class": type(asyncio.get_running_loop()).__module__ + "." + type(asyncio.get_running_loop()).__name__,
+        }
 
     @app.post("/__e2e/metrics/reset")
     async def metrics_reset() -> dict[str, bool]:
@@ -428,12 +557,22 @@ async def serve(workdir: Path, port: int, webhook_forward: str | None, users: in
             raise RuntimeError("the e2e server stopped during start-up")
         await asyncio.sleep(0.05)
     instrument_transactions(app.state.crew_db)
+    instrument_transactions(app.state.db, prefix="main:")
     instrument_reaper(app)
     creds = await seed_owner(app)
     extra = await seed_users(app, users) if users else []
     print(json.dumps({"port": port, **creds, "keys": extra}), flush=True)
     with contextlib.suppress(asyncio.CancelledError):
         await task
+
+
+def run_fixture(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Use production Uvicorn's auto-loop choice, without changing global policy."""
+    try:
+        import uvloop
+    except ImportError:
+        return asyncio.run(coro)
+    return uvloop.run(coro)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -444,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed-users", type=int, default=0, help="extra owners with one admin key each (load tests)")
     p.add_argument("--crew-rate-limits", action="store_true", help="the crew rate limiter on, as in production")
     args = p.parse_args(argv)
-    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users, args.crew_rate_limits))
+    run_fixture(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users, args.crew_rate_limits))
     return 0
 
 

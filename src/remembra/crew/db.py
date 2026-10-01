@@ -383,7 +383,7 @@ class CrewDatabase:
             db_path = db_path.split("///")[-1]
         self.db_path = db_path
         self._connection: aiosqlite.Connection | None = None
-        self._tx = TxCoordinator()
+        self._tx = TxCoordinator(control_priorities=True)
         # Distinct from the short SQLite transaction lock: handlers may await I/O.
         # File-backed databases also use an OS lock across connections/processes.
         self.outbox_run_lock = asyncio.Lock()
@@ -464,18 +464,42 @@ class CrewDatabase:
     def in_transaction(self) -> bool:
         return self._tx.in_transaction
 
+    @asynccontextmanager
+    async def read_snapshot(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Read committed WAL state without joining the writer queue.
+
+        Timer scans use short read-only snapshots. Decisions to mutate must
+        re-read their subjects inside the normal serialized write transaction.
+        In-memory databases and callers already owning a transaction retain
+        the existing connection so uncommitted state is never lost.
+        """
+        if not self.is_connected:
+            raise RuntimeError("crew database not connected; call connect() first")
+        if self.db_path == ":memory:" or self._tx.owns():
+            async with self.transaction():
+                yield self.conn
+            return
+        uri = Path(self.db_path).resolve().as_uri() + "?mode=ro"
+        async with aiosqlite.connect(uri, uri=True) as reader:
+            reader.row_factory = aiosqlite.Row
+            await reader.execute(f"PRAGMA busy_timeout = {CREW_BUSY_TIMEOUT_MS}")
+            await reader.execute("PRAGMA query_only = ON")
+            await reader.execute("BEGIN")
+            try:
+                yield reader
+            finally:
+                await reader.rollback()
+
     def after_commit(self, callback: AfterCommit) -> bool:
         """Run ``callback`` after the crew transaction the caller owns commits (see ``TxCoordinator.after_commit``)."""
         return self._tx.after_commit(callback)
 
     async def fetchone(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
-        cursor = await self.conn.execute(sql, params)
-        row = await cursor.fetchone()
-        return dict(row) if row is not None else None
+        rows = list(await self.conn.execute_fetchall(sql, params))
+        return dict(rows[0]) if rows else None
 
     async def fetchall(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
-        cursor = await self.conn.execute(sql, params)
-        return [dict(r) for r in await cursor.fetchall()]
+        return [dict(row) for row in await self.conn.execute_fetchall(sql, params)]
 
 
 async def open_crew_db(main_db_path: str, override: str | None = None) -> CrewDatabase:
