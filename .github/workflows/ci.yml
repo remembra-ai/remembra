@@ -14,6 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend:
+    name: Node audit, test and build (${{ matrix.path }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path: [dashboard, sdk/typescript]
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Audit the complete locked Node dependency set
+        run: npm audit --audit-level=low
+      - name: Test without competing worker CPU affecting graph timing
+        run: npm test -- --maxWorkers=1
+      - run: npm run build
+      - if: matrix.path == 'dashboard'
+        run: npm run lint
+      - if: matrix.path == 'sdk/typescript'
+        run: npm run typecheck
+
   # ---------------------------------------------------------------------------
   # Lint & type-check
   # ---------------------------------------------------------------------------

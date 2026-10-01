@@ -41,11 +41,22 @@ def _runs(job: dict[str, Any]) -> str:
     return "\n".join(str(step.get("run", "")) for step in job["steps"])
 
 
-@pytest.mark.parametrize(("ecosystem", "directory"), [("uv", "/"), ("npm", "/dashboard")])
+@pytest.mark.parametrize(("ecosystem", "directory"), [("uv", "/"), ("npm", "/dashboard"), ("npm", "/sdk/typescript")])
 def test_dependabot_watches_the_server_and_dashboard_locks(ecosystem: str, directory: str) -> None:
     entry = _dependabot()[(ecosystem, directory)]
     assert entry["schedule"]["interval"] == "weekly"
     assert entry["groups"], "updates are grouped into one weekly PR"
+
+
+def test_ci_audits_and_exercises_both_node_lockfiles() -> None:
+    job = yaml.safe_load(CI.read_text())["jobs"]["frontend"]
+    assert set(job["strategy"]["matrix"]["path"]) == {"dashboard", "sdk/typescript"}
+    assert job["defaults"]["run"]["working-directory"] == "${{ matrix.path }}"
+    runs = _runs(job)
+    assert "npm ci" in runs and "npm audit --audit-level=low" in runs
+    assert "npm test -- --maxWorkers=1" in runs and "npm run build" in runs
+    assert job.get("continue-on-error") is not True
+    assert all(step.get("continue-on-error") is not True for step in job["steps"])
 
 
 def test_ci_audits_exactly_what_the_production_image_installs() -> None:
