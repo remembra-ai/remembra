@@ -44,7 +44,7 @@ def _load_cross_encoder(model_name: str) -> Any:
     try:
         from sentence_transformers import CrossEncoder
 
-        _cross_encoder = CrossEncoder(model_name)
+        _cross_encoder = CrossEncoder(model_name, trust_remote_code=False)
         _cross_encoder_loaded = True
         log.info("cross_encoder_loaded", model=model_name)
         return _cross_encoder
