@@ -15,6 +15,7 @@ import pytest
 from limits.errors import ConfigurationError
 
 import remembra.config as config_module
+from remembra.cloud import metering as metering_module
 from remembra.cloud import signup_guard
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import BillingInterval, PlanTier
@@ -117,7 +118,10 @@ async def test_memory_caps_shrink_only_after_notice_date(tmp_path, monkeypatch) 
 # ---------------------------------------------------------------------------
 
 
-async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
+async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path, monkeypatch) -> None:
+    # Revenue uses receipt time; the subscription bank uses its billing period.
+    receipt_time = datetime(2026, 10, 1, 0, 1, tzinfo=UTC)
+    monkeypatch.setattr(metering_module, "now_utc", lambda: receipt_time)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await c.h.create_user("buyer@example.com")
@@ -145,7 +149,8 @@ async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
         # R-27: a new yearly bank releases one month's credits until 14 days after the purchase.
         assert account.credit_limit == 2_200 and account.bank_unlock_at == datetime(2026, 10, 9, 10, tzinfo=UTC)
         assert await c.meter.founding_redemptions() == 1
-        assert await c.meter.revenue_for_month("2026-09") == pytest.approx(102.10)
+        assert await c.meter.revenue_for_month("2026-10") == pytest.approx(102.10)
+        assert await c.meter.revenue_for_month("2026-09") is None
 
         team_uid = await c.h.create_user("team-owner@example.com")
         event = {
