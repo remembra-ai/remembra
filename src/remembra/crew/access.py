@@ -39,6 +39,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+import aiosqlite
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.routing import APIRoute
@@ -276,6 +277,11 @@ class CrewEntity:
 
 
 async def _fetchone(conn: Any, sql: str, params: Sequence[Any]) -> dict[str, Any] | None:
+    # Keep the entire lookup under one guarded worker call. Separate execute /
+    # fetch / close calls each wait behind other crews' write transactions.
+    if getattr(conn, "row_factory", None) is aiosqlite.Row:
+        rows = await conn.execute_fetchall(sql, tuple(params))
+        return dict(rows[0]) if rows else None
     cursor = await conn.execute(sql, tuple(params))
     try:
         row = await cursor.fetchone()

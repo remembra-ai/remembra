@@ -712,3 +712,27 @@ def test_dev_principal_passes_step_up_only_outside_production():
         assert not login_is_fresh(dev, None)
     finally:
         config_module._settings = previous
+
+
+@pytest.mark.parametrize("row_factory", [None, aiosqlite.Row])
+async def test_access_rechecks_membership_and_keeps_tuple_connections_supported(settings_prod, row_factory):
+    conn = await open_crew_db()
+    try:
+        getattr(conn, "raw", conn).row_factory = row_factory
+        await add_crew(conn, CREW_A, OWNER, "project-a")
+        await add_member(conn, CREW_A, OTHER, "member")
+        user = key_user(OTHER, project_ids=["project-a"])
+        assert (await load_crew(conn, CREW_A, user, "crew:claim")).role == "member"
+        await conn.execute("UPDATE crew_members SET role='viewer' WHERE crew_id=? AND user_id=?", (CREW_A, OTHER))
+        await conn.commit()
+        assert (await load_crew(conn, CREW_A, user, "crew:read")).role == "viewer"
+        with pytest.raises(HTTPException) as denied:
+            await load_crew(conn, CREW_A, user, "crew:claim")
+        assert denied.value.status_code == 403
+        await conn.execute("DELETE FROM crew_members WHERE crew_id=? AND user_id=?", (CREW_A, OTHER))
+        await conn.commit()
+        with pytest.raises(HTTPException) as removed:
+            await load_crew(conn, CREW_A, user, "crew:read")
+        assert removed.value.status_code == 404
+    finally:
+        await conn.close()
