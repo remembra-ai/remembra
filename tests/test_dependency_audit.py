@@ -69,6 +69,16 @@ def test_ci_audits_exactly_what_the_production_image_installs() -> None:
     assert re.search(r"\| pip-audit --disable-pip -r /dev/stdin --strict", runs)
 
 
+def test_current_crewai_tools_are_exercised_with_the_framework_installed() -> None:
+    job = yaml.safe_load(CI.read_text())["jobs"]["crewai"]
+    runs = _runs(job)
+    assert "crewai]" in runs
+    assert "mypy src/remembra/integrations/crewai.py" in runs
+    assert "pytest tests/test_crewai_integration.py" in runs
+    assert job.get("continue-on-error") is not True
+    assert all(step.get("continue-on-error") is not True for step in job["steps"])
+
+
 def test_the_audit_job_installs_its_tools_with_hashes_only() -> None:
     job = _audit_job()
     installs = [line.strip() for line in _runs(job).splitlines() if "pip install" in line]
