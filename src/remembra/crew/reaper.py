@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
@@ -68,6 +69,7 @@ from remembra.crew.sessions import (
     session_actor,
 )
 from remembra.crew.settings import load_settings
+from remembra.storage.sqlite_tx import sqlite_control_lane
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -188,7 +190,12 @@ class CrewReaper:
             self._alarms,
         ):
             try:
-                await step(now, report)
+                # Presence and lease deadlines share the bounded control lane
+                # with heartbeats. Keep bulk retirement/notice work ordinary;
+                # each mutation still revalidates under the writer lock.
+                control = step in (self._hosts, self._presence, self._leases)
+                with sqlite_control_lane() if control else nullcontext():
+                    await step(now, report)
             except Exception as e:  # one failing step must not stop the others
                 log.error("crew_reaper_step_failed", step=step.__name__, error_type=type(e).__name__, error=str(e))
                 report.errors.append(f"{step.__name__}: {type(e).__name__}: {e}")
