@@ -1728,19 +1728,26 @@ class CrewSessions:
         """
         now = self.now()
         now_s = format_ts(now)
+        per_session: dict[str, Any] = {}
+        etags: dict[str, str] = {}
+        # Rejoining the writer queue for every session multiplies latency.
+        # Process at most five sessions per transaction, so a maximum-sized
+        # (100-session) request still yields to unrelated crews between chunks.
+        # Invalid tokens/ended sessions are checked before any mutations.
         async with self.log.transaction() as tx:
             previous = await mark_seen(tx.conn, host["id"], now_s)
             if previous == "unreachable":
                 await self._host_recovered(tx, host, now)
-        per_session: dict[str, Any] = {}
-        etags: dict[str, str] = {}
-        for item in body.get("sessions") or []:
-            sid = item["session_id"]
-            try:
-                per_session[sid] = await self._heartbeat_session(host, item, now)
-                etags[per_session[sid]["crew_id"]] = f'"{per_session[sid]["crew_last_seq"]}"'
-            except SessionError as e:
-                per_session[sid] = {"error": e.code, "message": e.message}
+        items = body.get("sessions") or []
+        for offset in range(0, len(items), 5):
+            async with self.log.transaction():
+                for item in items[offset : offset + 5]:
+                    sid = item["session_id"]
+                    try:
+                        per_session[sid] = await self._heartbeat_session(host, item, now)
+                        etags[per_session[sid]["crew_id"]] = f'"{per_session[sid]["crew_last_seq"]}"'
+                    except SessionError as e:
+                        per_session[sid] = {"error": e.code, "message": e.message}
         return {
             "per_session": per_session,
             "snapshot_etag": etags,
