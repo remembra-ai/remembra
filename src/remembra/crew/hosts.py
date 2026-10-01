@@ -104,6 +104,9 @@ class RegisteredHost:
 
 
 async def _fetchone(conn: aiosqlite.Connection, sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+    if conn.row_factory is aiosqlite.Row:
+        rows = list(await conn.execute_fetchall(sql, params))
+        return dict(zip(rows[0].keys(), tuple(rows[0]), strict=True)) if rows else None
     async with conn.execute(sql, params) as cur:
         row = await cur.fetchone()
         if row is None:
