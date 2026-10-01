@@ -52,7 +52,8 @@ RUN uv pip install --no-cache --no-deps .
 # Bake the default reranker model into the image so the first recall doesn't
 # block on a Hugging Face download (and works if HF is unreachable).
 ENV HF_HOME=/opt/hf-cache
-RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+COPY scripts/ci/check-reranker-runtime.py /tmp/check-reranker-runtime.py
+RUN python /tmp/check-reranker-runtime.py
 
 # =============================================================================
 # Stage 3: Production Image

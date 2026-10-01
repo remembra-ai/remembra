@@ -128,7 +128,8 @@ cloud = [
 
 # Advanced retrieval (optional reranking)
 rerank = [
-    "sentence-transformers>=2.5.0",
+    # CVE-2026-68770: v6 requires explicit trust for local custom model code.
+    "sentence-transformers>=6.1.0,<7",
 ]
 
 # OpenTelemetry tracing (optional, for production observability)
