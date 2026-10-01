@@ -3027,8 +3027,12 @@ class CrewSessions:
         live_before = await live_session_count(tx.conn, row["crew_id"])
         now_s = format_ts(now)
         cur = await tx.conn.execute(
-            """UPDATE crew_sessions SET state = 'ended', ended_at = ?, end_reason = ?, state_reason = ?, quiet_reason = NULL
-                WHERE id = ? AND state != 'ended'""",
+            # The end hook's generic reason must not erase the StopFailure
+            # reason used by a successor's baton. Preserve quota/auth detail
+            # just as the reverse (end, then late stall) delivery order does.
+            """UPDATE crew_sessions SET state = 'ended', ended_at = ?, end_reason = ?,
+                       state_reason = CASE WHEN state = 'quota_blocked' THEN state_reason ELSE ? END,
+                       quiet_reason = NULL WHERE id = ? AND state != 'ended'""",
             (now_s, reason[:64], reason[:64], row["id"]),
         )
         if cur.rowcount != 1:
