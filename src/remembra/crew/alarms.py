@@ -171,15 +171,20 @@ def _stuck_facts(row: Mapping[str, Any], now: datetime, interval: int) -> tuple[
 
 
 async def _stuck(log_: Any, now: datetime, settings_for: Any, out: dict[str, int]) -> None:
-    conn = log_.db.conn
-    rows = await fetchall(conn, "SELECT * FROM crew_sessions WHERE state = 'active' OR stuck = 1")
-    for row in rows:
-        settings = await settings_for(str(row["crew_id"]))
-        interval = int(((settings or {}).get("checkpoint") or {}).get("interval_s") or 600)
-        overdue, last, busy, stuck_now = _stuck_facts(row, now, interval)
-        missed = busy and overdue >= CHECKPOINT_MISSED_FACTOR * interval and not await _missed_since(conn, row, last)
-        if not missed and stuck_now == bool(row.get("stuck")):
-            continue  # nothing to change: no transaction
+    candidates: list[tuple[dict[str, Any], int]] = []
+    # An unchanged alarm must not enter the writer queue once per session.
+    # Keep this read snapshot short, then re-read every mutation below.
+    async with log_.db.read_snapshot() as conn:
+        rows = await fetchall(conn, "SELECT * FROM crew_sessions WHERE state = 'active' OR stuck = 1")
+        for row in rows:
+            settings = await settings_for(str(row["crew_id"]))
+            interval = int(((settings or {}).get("checkpoint") or {}).get("interval_s") or 600)
+            overdue, last, busy, stuck_now = _stuck_facts(row, now, interval)
+            missed = busy and overdue >= CHECKPOINT_MISSED_FACTOR * interval and not await _missed_since(conn, row, last)
+            if not missed and stuck_now == bool(row.get("stuck")):
+                continue  # nothing to change: no transaction
+            candidates.append((row, interval))
+    for row, interval in candidates:
         async with log_.transaction() as tx:
             fresh = await fetchone(tx.conn, "SELECT * FROM crew_sessions WHERE id = ?", (row["id"],))
             if fresh is None:
