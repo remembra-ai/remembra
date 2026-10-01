@@ -414,3 +414,27 @@ async def test_session_token_authentication(env):
     await db.conn.commit()
     with pytest.raises(Z.CrewOpError):
         await C.authenticate_session(db.conn, token, user_id=OWNER)
+
+
+@pytest.mark.parametrize("as_human", [False, True])
+@pytest.mark.parametrize("target_kind", ["zone", "path", "resource"])
+async def test_repeated_claim_keeps_its_principal_and_target_among_peer_watches(env, as_human, target_kind):
+    db, ops, _, a, b = env
+    principal = HUMAN if as_human else a
+    target = (
+        {"zone_id": await zone_id(db, "billing")}
+        if target_kind == "zone"
+        else {"path_glob": "unowned.txt"}
+        if target_kind == "path"
+        else {"resource": "schema:target"}
+    )
+    peer = await C.request_claim(ops, CREW, b, mode="watch", **target)
+    own = await C.request_claim(ops, CREW, principal, mode="watch", **target)
+    assert peer.status == own.status == "granted"
+    for i in range(10):
+        await C.request_claim(ops, CREW, principal, resource=f"schema:unrelated-{i}", mode="watch")
+    repeated = await C.request_claim(ops, CREW, principal, mode="watch", **target)
+    assert repeated.status == "existing"
+    assert repeated.claim["id"] == own.claim["id"] != peer.claim["id"]
+    other = await C.get_claim(db.conn, peer.claim["id"])
+    assert other["state"] == "active"

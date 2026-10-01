@@ -331,10 +331,16 @@ async def conflicts(
     states: Sequence[str] = BLOCKING,
 ) -> list[dict[str, Any]]:
     """Other principals' claims in ``states`` that block ``mode`` on ``target`` (own claims never block)."""
+    if mode == "watch":
+        return []
     skip = set(exclude)
     marks = ",".join("?" for _ in states)
+    blocking_modes = ("exclusive",) if mode == "shared" else ("exclusive", "shared")
+    mode_marks = ",".join("?" for _ in blocking_modes)
     rows = await fetchall(
-        conn, f"SELECT * FROM crew_claims WHERE crew_id = ? AND state IN ({marks}) ORDER BY created_at", (crew_id, *states)
+        conn,
+        f"SELECT * FROM crew_claims WHERE crew_id = ? AND state IN ({marks}) AND mode IN ({mode_marks}) ORDER BY created_at",
+        (crew_id, *states, *blocking_modes),
     )
     cache: dict[str, Any] = {}
     out: list[dict[str, Any]] = []
@@ -644,11 +650,14 @@ async def request_claim(
         _zone_rules(target, principal, settings, task_id, source)
         now = utcnow()
         # own claim on the same target: idempotent, or a re-take of an own reservation
+        holder_column = "holder_session_id" if principal.kind == "session" else "holder_user_id"
+        holder_id = principal.session_id if principal.kind == "session" else principal.user_id
         own = await fetchall(
             conn,
             "SELECT * FROM crew_claims WHERE crew_id = ? AND state IN ('queued','active','offered','reserved') "
-            "ORDER BY created_at",
-            (crew_id,),
+            f"AND holder_kind = ? AND {holder_column} IS ? "
+            "AND zone_id IS ? AND path_glob IS ? AND resource IS ? ORDER BY created_at",
+            (crew_id, principal.kind, holder_id, target.zone_id, target.path_glob, target.resource),
         )
         for r in own:
             if not (_mine(r, principal) and target.same(r)):
