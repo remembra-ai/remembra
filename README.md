@@ -70,7 +70,7 @@ With the session hooks, `remembra-relay` builds the done, not done and failing s
 ## How it works
 
 1. **Close.** When a session ends, `remembra-relay close` reads the branch, commits, changed and uncommitted files and unpushed commits from git, and, for Claude Code and Codex, the commands, test runs and open items in the local transcript (Codex's is its rollout file). The transcript itself stays on your machine. Secrets that match Remembra's patterns are redacted from what is sent.
-2. **Brief.** When the next session starts, in the same tool or another, `remembra-relay brief` (run by the verified session hooks) or the `session_brief` MCP tool (any MCP agent can call it) gives the agent who worked last, what is done, what is failing and the next step. The text brief is capped at about 1,500 tokens (6,000 characters). `session_brief` returns only that text with `compact=true`; by default it also returns the full brief as JSON, which is larger. Everything another agent recorded is wrapped as untrusted data.
+2. **Brief.** When the next session starts, in the same tool or another, `remembra-relay brief` (run by the verified session hooks) or the `session_brief` MCP tool (any MCP agent can call it) gives the agent who worked last, what is done, what is failing and the next step. The text brief is capped at about 1,500 tokens (6,000 characters). `session_brief` returns only that text with `compact=true`; by default it also returns the full brief as JSON, which is larger. Everything another agent recorded is wrapped as untrusted data. With the new server and MCP package, explicit unresolved TODOs and failures persist across later handoffs. `session_open_work` pages them and proposes evidence; only an authenticated account holder can confirm a resolution.
 3. **Trail.** Every handoff stays in order: `remembra-relay trail`, or the Trail page in the dashboard. A git log for your agents.
 
 The same repository on a laptop, a server or in a worktree is one project, because it is identified by its git remote. Give each agent its own scoped key and its handoffs show as key-verified.
@@ -282,7 +282,7 @@ Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/loc
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
 | [Remembra Relay](https://docs.remembra.dev/guides/relay/) | Handoffs, briefs and the trail across agents |
-| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 31 tools |
+| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 33 tools |
 | [REST API](https://docs.remembra.dev/guides/rest-api/) | API reference |
 | [Self-Hosting](https://docs.remembra.dev/getting-started/docker/) | Docker deployment guide |
 
@@ -297,18 +297,18 @@ pip install remembra[mcp]
 claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 ```
 
-**Available tools (31):**
+**Available tools (33):**
 
 | Group | Tools |
 |------|-------|
-| Remembra Relay | `session_brief`, `close_session`, `resolve_project`, `store_status`, `list_status` |
+| Remembra Relay | `session_brief`, `close_session`, `session_open_work`, `resolve_project`, `store_status`, `list_status` |
 | Inbox between agents | `send_to_inbox`, `get_inbox`, `ack_inbox` |
 | Memory | `store_memory`, `recall_memories`, `update_memory`, `forget_memories`, `list_memories`, `ingest_conversation` |
 | Entities and time | `search_entities`, `timeline`, `relationships_at` |
 | Sharing | `share_memory`, `list_spaces`, `create_space` |
 | Connection | `health_check` |
 | Setup and diagnosis (read-only) | `remembra_doctor`, `remembra_setup`, `remembra_help` |
-| Crew mode (when the server runs it) | `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`, `crew_report` |
+| Crew mode (when the server runs it) | `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`, `crew_report`, `crew_collision` |
 
 ---
 

@@ -56,6 +56,7 @@ from remembra.security.secrets import scrub as scrub_secrets
 from remembra.security.secrets import scrub_value
 from remembra.security.untrusted import repo_url_prefixes
 from remembra.services.agent_session import HANDOFF_ENDED_JD, AgentSessionService, _parse_metadata
+from remembra.services.continuity import ContinuityService, reported_open_work
 
 log = structlog.get_logger(__name__)
 
@@ -634,6 +635,7 @@ class RelayService:
             "health": health,
             "closed_at": closed_at.isoformat(),
             "received_at": received_at.isoformat(),
+            "open_work": reported_open_work(facts),
         }
         if location:
             relay_meta["location"] = location
@@ -676,6 +678,14 @@ class RelayService:
                 prev_relay: dict[str, Any] = raw_relay if isinstance(raw_relay, dict) else {}
                 prev_body = (current[0].get("content") or "").split("\n", 1)[1:]
                 if _same_session_facts(prev_relay, relay_meta) and prev_body == text.strip().split("\n", 1)[1:]:
+                    await ContinuityService(self.db).capture(
+                        user_id=user_id,
+                        project_id=project_id,
+                        handoff_id=current[0]["id"],
+                        sections=prev_relay.get("open_work", prev_relay),
+                        closed_at=prev_relay.get("closed_at") or closed_at.isoformat(),
+                        agent_id=agent_id,
+                    )
                     unchanged = self._close_result(
                         current[0]["id"], False, [], current[0]["content"], sections, grounding, counts, health
                     )
@@ -705,6 +715,14 @@ class RelayService:
                 request, source="agent_generated", trust_score=trust_score, checksum=checksum, skip_extraction=True
             )
             new_id = stored.id
+            await ContinuityService(self.db).capture(
+                user_id=user_id,
+                project_id=project_id,
+                handoff_id=new_id,
+                sections=relay_meta["open_work"],
+                closed_at=closed_at.isoformat(),
+                agent_id=agent_id,
+            )
             superseded: list[str] = []
             for row in await self._current_handoffs_for_key(user_id, project_id, key):
                 if row["id"] == new_id:
@@ -1269,6 +1287,7 @@ class RelayService:
         remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
         brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))
         brief["handoff_health"] = stored_health(brief.get("handoff"))
+        brief["open_work"] = scrub_value(await ContinuityService(self.db).open_work(user_id, project_id)) if project_id else None
         # The crew block (task titles, notes, decisions, baton facts from crew.db) is scrubbed like the rest.
         brief["crew"] = scrub_value(await self._crew_brief(user_id, project_id, agent_id, client_session_id))
         # Every field above is read through the scrubbed row views; the text is scrubbed once more as a whole.

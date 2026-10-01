@@ -369,7 +369,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    MCP server expanded from 5 → 11 tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, and `relationships_at`. (It has 31 tools today.)
+    MCP server expanded from 5 → 11 tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, and `relationships_at`. (It has 33 tools today.)
 
 -   :material-graph:{ .lg .middle } __Entity Graph Visualization__
 

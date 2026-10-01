@@ -164,6 +164,6 @@ startup_timeout_sec = 30
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 31 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 33 tools and 2 resources
 - [Python SDK](../guides/python-sdk.md) — Programmatic access from Python
 - [REST API](../guides/rest-api.md) — Direct HTTP access

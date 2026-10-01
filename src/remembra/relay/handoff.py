@@ -1284,6 +1284,16 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
             " tests, errors, todos, next step or summary: idle or automated runs)."
         )
 
+    open_work = brief.get("open_work")
+    if isinstance(open_work, dict) and open_work.get("total"):
+        data.append(f"Open work: {open_work['total']} reported unresolved; proposed resolutions still need acceptance.")
+        for item in (open_work.get("items") or [])[:10]:
+            verdict = _verdict_for_item([item.get("text")], item, allowed)
+            shown = withheld_note(verdict, item.get("id")) if verdict.withheld else _data_item(item.get("text"), 160, allowed)
+            data.append(f"- {item.get('id')} [{item.get('state')}, agent-declared]: {shown}")
+        if open_work.get("next_after"):
+            data.append("Additional open work remains: use session_open_work for the complete paginated list.")
+
     inbox = brief.get("inbox")
     if inbox and inbox.get("available", True) and inbox.get("unread_count"):
         data.append(f"Inbox: {inbox['unread_count']} unread (get_inbox for bodies, ack_inbox when done)")
@@ -1607,6 +1617,15 @@ def police_brief(brief: dict[str, Any]) -> None:
     (:func:`police_health`). Call it after rendering.
     """
     allowed = tuple(brief.get("repo_url_prefixes") or ())
+    open_work = brief.get("open_work")
+    if isinstance(open_work, dict):
+        items = []
+        for item in open_work.get("items") or []:
+            verdict = _verdict_for_item([item.get("text")], item, allowed)
+            if verdict.withheld:
+                item = {**item, "text": withheld_note(verdict, item.get("id"))}
+            items.append({**_strip_hidden_deep(item), **verdict.as_dict()})
+        open_work["items"] = items
     handoff = brief.get("handoff")
     location = brief.get("handoff_location")
     if isinstance(location, dict):

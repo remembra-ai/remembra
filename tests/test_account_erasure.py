@@ -185,7 +185,11 @@ BYSTANDER = "u_bystander_2"
 BYSTANDER_EMAIL = "bystander@example.com"
 
 
-def _seed_value(owner: str, email: str, column: str, declared: str) -> Any:
+def _seed_value(owner: str, email: str, column: str, declared: str, table: str = "") -> Any:
+    if table == "continuity_items" and column == "kind":
+        return "todo"
+    if table == "continuity_items" and column == "state":
+        return "open"
     if column == "email":
         return email
     if column == "account_key":
@@ -206,16 +210,16 @@ async def _seed_everything(conn: Any, schema: dict[str, list[tuple[str, str, int
         if is_exempt(table):
             continue
         names = [c for c, _t, _n in columns]
-        values = [_seed_value(owner, email, c, t) for c, t, _n in columns]
+        values = [_seed_value(owner, email, c, t, table) for c, t, _n in columns]
         placeholders = ", ".join("?" for _ in names)
         quoted = ", ".join(f'"{n}"' for n in names)
         await conn.execute(f'INSERT INTO "{table}" ({quoted}) VALUES ({placeholders})', values)
     await conn.commit()
 
 
-def _owner_row_predicate(columns: list[tuple[str, str, int]], owner: str, email: str) -> tuple[str, list[Any]]:
+def _owner_row_predicate(columns: list[tuple[str, str, int]], owner: str, email: str, table: str = "") -> tuple[str, list[Any]]:
     clauses = [f'"{c}" IS ?' for c, _t, _n in columns]
-    return " AND ".join(clauses), [_seed_value(owner, email, c, t) for c, t, _n in columns]
+    return " AND ".join(clauses), [_seed_value(owner, email, c, t, table) for c, t, _n in columns]
 
 
 async def _cells_holding(conn: Any, table: str, columns: list[tuple[str, str, int]], needles: list[str]) -> int:
@@ -290,7 +294,7 @@ async def test_erasure_removes_every_row_and_vector_of_the_account_and_nothing_e
         for table, columns in schema.items():
             if is_exempt(table):
                 continue
-            where, params = _owner_row_predicate(columns, BYSTANDER, BYSTANDER_EMAIL)
+            where, params = _owner_row_predicate(columns, BYSTANDER, BYSTANDER_EMAIL, table)
             cursor = await db.conn.execute(f'SELECT COUNT(*) FROM "{table}" WHERE {where}', params)
             bystander_rows[table] = int((await cursor.fetchone())[0])
         # Every non-exempt table really was seeded for both accounts.
@@ -314,7 +318,7 @@ async def test_erasure_removes_every_row_and_vector_of_the_account_and_nothing_e
         for table, columns in schema.items():
             if is_exempt(table):
                 continue
-            where, params = _owner_row_predicate(columns, BYSTANDER, BYSTANDER_EMAIL)
+            where, params = _owner_row_predicate(columns, BYSTANDER, BYSTANDER_EMAIL, table)
             cursor = await db.conn.execute(f'SELECT COUNT(*) FROM "{table}" WHERE {where}', params)
             assert int((await cursor.fetchone())[0]) == bystander_rows[table], table
         # The third member the victim invited stays in the bystander's team, inviter cleared.
