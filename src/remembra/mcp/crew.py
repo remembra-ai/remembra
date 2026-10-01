@@ -1427,7 +1427,10 @@ class CrewBridge:
         ]
         if not mine:
             return ["COLLISION CHECK: no overlap with other sessions."]
-        lines = [f"COLLISIONS ({len(mine)}):"]
+        lines = [
+            f"COLLISIONS ({len(mine)}):",
+            'Inspect with crew_collision(action="list"); resolve only after checking that the overlap is reconciled.',
+        ]
         for c in mine[:6]:
             other_id = c.get("session_b") if c.get("session_a") == seat.session_id else c.get("session_a")
             other = self._callsign(http, seat, other_id) or ("a human" if not other_id else "another session")
@@ -1442,6 +1445,52 @@ class CrewBridge:
                 line += " " + CORRECTIVE.format(who=other if _safe(other) and " " not in other else "mani")
             lines.append(line)
         return lines
+
+    # -- crew_collision -------------------------------------------------------------------
+
+    def collision(self, caller: CallerInfo, *, action: str, collision: str | None, resolution: str | None) -> str:
+        """Use the current MCP seat's token; never accept a caller-supplied identity."""
+        if action not in {"list", "ack", "resolve"}:
+            raise CrewUsageError("Collision action must be list, ack or resolve.")
+        if action == "list" and (collision is not None or resolution is not None):
+            raise CrewUsageError("list takes no collision id or resolution.")
+        if action != "list" and (not collision or not re.fullmatch(r"col_[A-Za-z0-9_-]+", collision)):
+            raise CrewUsageError("Give a collision id (col_...).")
+        if action == "resolve" and (not resolution or not resolution.strip() or len(resolution) > 64):
+            raise CrewUsageError("Resolve requires an explanation of 1-64 characters.")
+        if action == "ack" and resolution is not None:
+            raise CrewUsageError("ack takes no resolution; acknowledgement does not resolve the overlap.")
+        seat, _ = self.seat(caller)
+        http = CrewHttp(caller.client)
+        self._touch_quietly(caller, seat)
+        _, body, _ = http.call("GET", f"/crews/{seat.crew_id}/collisions", token=seat.token)
+        mine = [
+            row
+            for row in (body or {}).get("collisions") or []
+            if isinstance(row, dict) and seat.session_id in (row.get("session_a"), row.get("session_b"))
+        ]
+        if action == "list":
+            unresolved = [row for row in mine if row.get("state") in {"open", "acknowledged"}]
+            lines = [f"YOUR UNRESOLVED COLLISIONS ({len(unresolved)}):"]
+            data = []
+            for row in unresolved[:50]:
+                lines.append(f"- {row['id']} {row.get('kind')} [{row.get('severity')}] {row.get('state')}")
+                data.append(f"{row['id']} subject: {agent_text(row.get('subject'))}")
+            if len(unresolved) > 50:
+                lines.append(f"{len(unresolved) - 50} additional notices omitted; view the crew collision list.")
+            return join_text(lines, data)
+        target = next((row for row in mine if row.get("id") == collision), None)
+        if target is None:
+            raise CrewUsageError("Collision is not in your current crew or you are not a party to it.")
+        # The REST endpoint rechecks party membership and state under the writer
+        # transaction; this inventory check is not an authorization substitute.
+        payload = {"resolution": resolution} if action == "resolve" else None
+        _, fresh, _ = http.call("POST", f"/collisions/{collision}/{action}", token=seat.token, json=payload)
+        state = (fresh or {}).get("state")
+        lines = [f"COLLISION {collision}: {state}"]
+        if action == "ack":
+            lines.append("Acknowledged only; the overlap remains unresolved.")
+        return join_text(lines, [f"resolution: {agent_text(resolution)}"] if resolution else [])
 
     # -- crew_report ----------------------------------------------------------------------
 
