@@ -94,12 +94,20 @@ def install_crew(app: FastAPI, modules: tuple[str, ...] = CREW_ROUTER_MODULES) -
     from remembra.crew import startup as crew_startup
 
     mounted: list[str] = []
+    first = len(app.router.routes)
     for name in modules:
         if importlib.util.find_spec(name) is None:
             continue
         module = importlib.import_module(name)
         app.include_router(module.router, prefix="/api/v1")
         mounted.append(name)
+    # These namespaces are distinct from the ordinary API. Put the frequent
+    # heartbeat/claim/event lanes before it so each request does not scan every
+    # unrelated endpoint. Preserve Crew's static-before-parameter ordering and
+    # the handlers, dependencies, middleware and lifespan registered above.
+    added = app.router.routes[first:]
+    del app.router.routes[first:]
+    app.router.routes[0:0] = added
     crew_startup.register(app)
     log.info("crew_mode_enabled", routers=mounted)
     return mounted

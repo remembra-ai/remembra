@@ -65,9 +65,11 @@ def test_create_app_mounts_crew_routes_only_in_crew_mode(monkeypatch):
     paths = _paths(on)
     assert {("GET", "/api/v1/crews"), ("POST", "/api/v1/crews/resolve"), ("GET", "/api/v1/crews/{crew_id}/snapshot")} <= paths
     assert on.state.crew_registered is True
-    # the crew routes come before the SPA catch-all and after the static /api routes
+    # Crew's static paths precede its parameter routes. Its distinct namespace
+    # can precede the general API without shadowing that API's static handlers.
     order = [path for path, _r, _ in _walk_routes(on.routes)]
-    assert order.index("/api/v1/crews/{crew_id}") > order.index("/api/v1/session/close")
+    assert order.index("/api/v1/crews/resolve") < order.index("/api/v1/crews/{crew_id}")
+    assert order.index("/api/v1/crews/join") < order.index("/api/v1/crews/{crew_id}")
 
 
 def test_install_crew_skips_unbuilt_modules_but_fails_on_a_broken_one(tmp_path, monkeypatch):
