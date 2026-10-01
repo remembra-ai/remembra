@@ -220,12 +220,12 @@ class Actor:
 
 async def load_session_actor(conn: aiosqlite.Connection, crew_id: str, session_id: str) -> Actor | None:
     """The actor for a crew session, read from ``crew_sessions`` (scoped by crew)."""
-    async with conn.execute(
+    rows = await conn.execute_fetchall(
         "SELECT id, callsign, agent_id, user_id, agent_verified, parent_session_id FROM crew_sessions"
         " WHERE crew_id = ? AND id = ?",
         (crew_id, session_id),
-    ) as cur:
-        row = await cur.fetchone()
+    )
+    row = next(iter(rows), None)
     if row is None:
         return None
     return Actor.session(
@@ -349,19 +349,19 @@ class CrewHead:
 
 
 async def crew_head(conn: aiosqlite.Connection, crew_id: str) -> CrewHead | None:
-    async with conn.execute(
+    rows = await conn.execute_fetchall(
         "SELECT owner_user_id, project_id, last_seq, last_hash FROM crews WHERE id = ?",
         (crew_id,),
-    ) as cur:
-        row = await cur.fetchone()
+    )
+    row = next(iter(rows), None)
     if row is None:
         return None
     return CrewHead(crew_id, row[0], row[1], int(row[2]), row[3])
 
 
 async def _event_by_idem(conn: aiosqlite.Connection, crew_id: str, idem_key: str) -> StoredEvent | None:
-    async with conn.execute(f"{EVENT_SELECT} WHERE crew_id = ? AND idem_key = ?", (crew_id, idem_key)) as cur:
-        row = await cur.fetchone()
+    rows = await conn.execute_fetchall(f"{EVENT_SELECT} WHERE crew_id = ? AND idem_key = ?", (crew_id, idem_key))
+    row = next(iter(rows), None)
     return row_to_stored(row) if row is not None else None
 
 
@@ -575,8 +575,7 @@ async def fetch_events(
     else:
         sql = f"{EVENT_SELECT} WHERE crew_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?"
         params = (crew_id, after_seq, upto_seq, limit)
-    async with conn.execute(sql, params) as cur:
-        rows = await cur.fetchall()
+    rows = await conn.execute_fetchall(sql, params)
     return [row_to_stored(r).envelope for r in rows]
 
 
@@ -1071,11 +1070,11 @@ async def idem_lookup(
     Raises :class:`IdempotencyConflict` when the key was used with a different body.
     Entries older than 72 h are ignored (the retention job deletes them).
     """
-    async with conn.execute(
+    rows = await conn.execute_fetchall(
         "SELECT response_json, created_at FROM crew_idempotency WHERE key = ?",
         (_stored_idem_key(principal, route, key),),
-    ) as cur:
-        row = await cur.fetchone()
+    )
+    row = next(iter(rows), None)
     if row is None:
         return None
     if parse_ts(row[1]) < (now or utc_now()) - IDEMPOTENCY_TTL:
