@@ -106,7 +106,9 @@ openai-agents = [
 
 # CrewAI integration
 crewai = [
-    "crewai>=0.80.0",
+    # Older CrewAI pins vulnerable json-repair; Chroma advisories remain
+    # unresolved upstream and this extra is not installed in Remembra Cloud.
+    "crewai>=1.15.23,<2",
 ]
 
 # Anthropic Claude integration (entity extraction, LLM provider)
@@ -282,7 +284,14 @@ audit = [
 # only; they are not published as requirements of the package.
 # ---------------------------------------------------------------------------
 [tool.uv]
+# The audit tool runs in its own environment. Its tomli floor conflicts with
+# CrewAI's runtime ceiling; neither requirement is overridden or ignored.
+conflicts = [
+    [{ group = "audit" }, { extra = "crewai" }],
+    [{ group = "audit" }, { extra = "all" }],
+]
 constraint-dependencies = [
     "idna>=3.15",  # PYSEC-2026-215
     "urllib3>=2.7.0",  # PYSEC-2026-141, PYSEC-2026-142
+    "oauthlib>=4.0.0",  # CVE-2026-49265 (optional CrewAI/Kubernetes dependency)
 ]
