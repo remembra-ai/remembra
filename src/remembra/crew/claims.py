@@ -1022,13 +1022,15 @@ async def release_claim(
                 "Only the holder (or the session that started it, for a sub-agent) can release this claim;"
                 " a human can override it.",
             )
-        settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
         state = row["state"]
         label = await _target_label(tx.conn, row)
         if state == "queued":
             fresh = await _end(tx, row, "released", "cancelled")
             baton = False
         elif state in LIVE_HOLD and baton:
+            # Reservation deadlines need fresh settings; ordinary releases do
+            # not. Queue promotion still loads its own current settings.
+            settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
             fresh = await _reserve(tx, row, "baton", reserved_for=None, settings=settings)
         elif state in LIVE_HOLD or (
             state == "reserved" and row.get("reserved_for") in (None, principal.session_id, row.get("holder_session_id"))
