@@ -2587,19 +2587,23 @@ class Database:
         project_id: str,
         content: str,
     ) -> None:
-        """Index a memory in FTS5 for keyword search."""
+        """Index a live, scoped memory; a late worker cannot restore deleted text."""
         async with self.transaction():
-            # Delete existing entry first (upsert)
+            # Keep both the ownership check and upsert under SQLite's writer lock.
+            # A worker may have copied this row before awaiting an embedding.
             await self.conn.execute(
-                "DELETE FROM memories_fts WHERE id = ?",
-                (memory_id,),
+                "DELETE FROM memories_fts WHERE id = ? AND user_id = ? AND project_id = ?",
+                (memory_id, user_id, project_id),
             )
             await self.conn.execute(
                 """
                 INSERT INTO memories_fts (id, user_id, project_id, content)
-                VALUES (?, ?, ?, ?)
+                SELECT ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM memories WHERE id = ? AND user_id = ? AND project_id = ?
+                )
                 """,
-                (memory_id, user_id, project_id, content),
+                (memory_id, user_id, project_id, content, memory_id, user_id, project_id),
             )
 
     async def delete_memory_fts(self, memory_id: str) -> None:

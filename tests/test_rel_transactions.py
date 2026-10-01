@@ -49,6 +49,31 @@ async def _insert_memory(db: Database, memory_id: str, user_id: str = "u1", proj
     )
 
 
+async def test_late_fts_writer_cannot_restore_deleted_content(db: Database) -> None:
+    await _insert_memory(db, "deleted")
+    await db.index_memory_fts("deleted", "u1", "default", "private content")
+    async with db.transaction():
+        await db.conn.execute("DELETE FROM memories_fts WHERE id = ?", ("deleted",))
+        await db.conn.execute("DELETE FROM memories WHERE id = ?", ("deleted",))
+
+    # A queued worker resumed after embedding, with a stale copy of the row.
+    await db.index_memory_fts("deleted", "u1", "default", "private content")
+    assert await _observer_count(db.db_path, "SELECT COUNT(*) FROM memories_fts WHERE id = ?", ("deleted",)) == 0
+
+
+@pytest.mark.parametrize("user_id,project_id", [("other-user", "default"), ("u1", "other-project")])
+async def test_fts_writer_cannot_replace_another_scope(db: Database, user_id: str, project_id: str) -> None:
+    await _insert_memory(db, "scoped")
+    await db.index_memory_fts("scoped", "u1", "default", "original private content")
+    await db.index_memory_fts("scoped", user_id, project_id, "wrong scope")
+    assert await _observer_count(
+        db.db_path,
+        "SELECT COUNT(*) FROM memories_fts WHERE id = ? AND user_id = ? AND project_id = ? AND content = ?",
+        ("scoped", "u1", "default", "original private content"),
+    ) == 1
+    assert await _observer_count(db.db_path, "SELECT COUNT(*) FROM memories_fts WHERE id = ?", ("scoped",)) == 1
+
+
 # ---------------------------------------------------------------------------
 # Transaction primitive
 # ---------------------------------------------------------------------------
