@@ -400,14 +400,18 @@ async def _contested(log_: Any, now: datetime, out: dict[str, int]) -> None:
     # resolve contested items whose zone is no longer contested
     for item in await fetchall(
         conn,
-        "SELECT crew_id, dedupe_key FROM crew_inbox_items WHERE kind = 'zone_contested' AND state IN ('open','seen','claimed')",
+        "SELECT crew_id, dedupe_key, ref_id FROM crew_inbox_items"
+        " WHERE kind = 'zone_contested' AND state IN ('open','seen','claimed')",
     ):
-        if (str(item["crew_id"]), str(item["dedupe_key"])) in live_keys:
+        crew_id, key = str(item["crew_id"]), str(item["dedupe_key"])
+        if (crew_id, key) in live_keys:
             continue
+        zone_id = str(item.get("ref_id") or key.partition(":")[2])
         async with log_.transaction() as tx:
-            await resolve_inbox_items(
-                tx, str(item["crew_id"]), dedupe_keys=[str(item["dedupe_key"])], resolved_by="system", actor=Actor.system()
-            )
+            # The same rule as raising: a zone that is contested again by now keeps its alarm.
+            if zone_id and await _contest_now(tx.conn, crew_id, zone_id, now, since) is not None:
+                continue
+            await resolve_inbox_items(tx, crew_id, dedupe_keys=[key], resolved_by="system", actor=Actor.system())
             out["uncontested"] += 1
 
 
