@@ -552,7 +552,10 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
     at the server it was queued for: a key configured elsewhere may belong to
     another account. An entry the server refused (403) goes only with the very
     key that was refused: a different key in the same source must not send a
-    write the first key was refused. An entry queued without a key is kept for
+    write the first key was refused. A refused entry with no record of that key
+    (an older client wrote it) is held for the owner, whatever key is configured:
+    the client cannot tell the refused key from a replacement. An entry queued
+    without a key is kept for
     the server that was configured then (``REMEMBRA_URL``, else the local
     default) and goes only once a key for that same server is configured; it
     is never sent to a server set up later. An entry without a recorded server
@@ -580,6 +583,11 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
         return None, (
             "the server refused it for the key it was sent with, and a different key is configured now; it is only"
             " sent with the key that was refused (give that key access in the dashboard, or delete the file to drop it)"
+        )
+    if not refused_for and entry.data.get("last_status") == 403:
+        return None, (
+            "the server refused it, and it was queued before this client recorded which key was refused; it is kept"
+            " and never sent on its own (delete the file to drop it)"
         )
     return config, None
 
