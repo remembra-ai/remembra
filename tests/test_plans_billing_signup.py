@@ -15,7 +15,7 @@ import pytest
 from limits.errors import ConfigurationError
 
 import remembra.config as config_module
-from remembra.cloud import signup_guard
+from remembra.cloud import metering, signup_guard
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import BillingInterval, PlanTier
 from remembra.cloud.billing_paddle import checkout_binding
@@ -117,7 +117,10 @@ async def test_memory_caps_shrink_only_after_notice_date(tmp_path, monkeypatch) 
 # ---------------------------------------------------------------------------
 
 
-async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
+async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path, monkeypatch) -> None:
+    # The purchase below is dated 2026-09-25, and what it asserts depends on the clock: the month the
+    # revenue lands in, and R-27's 14 days still running. So the clock is the day after the purchase.
+    monkeypatch.setattr(metering, "now_utc", lambda: datetime(2026, 9, 26, 12, tzinfo=UTC))
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await c.h.create_user("buyer@example.com")

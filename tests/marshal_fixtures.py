@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import httpx
 
@@ -144,14 +145,17 @@ class FakeHome:
         attempts: int = 2,
         queued_ts: float | None = None,
     ) -> Path:
-        path = outbox.enqueue(
-            self.home,
-            {"agent_id": agent, "session_id": session, "facts": {"branch": "main"}},
-            url=url,
-            config_source=source if source is not None else f"credentials:{self.home / '.remembra' / 'credentials'}",
-            error=error,
-            http_status=status,
-        )
+        # enqueue drops entries older than 14 days by the wall clock. These are dated from NOW, so the
+        # clock is at NOW while one is written; otherwise a later queue() drops the earlier entries.
+        with mock.patch.object(outbox.time, "time", return_value=NOW):
+            path = outbox.enqueue(
+                self.home,
+                {"agent_id": agent, "session_id": session, "facts": {"branch": "main"}},
+                url=url,
+                config_source=source if source is not None else f"credentials:{self.home / '.remembra' / 'credentials'}",
+                error=error,
+                http_status=status,
+            )
         assert path is not None
         data = json.loads(path.read_text())
         data["attempts"] = attempts
