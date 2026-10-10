@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remembra"
-version = "0.16.1"
+version = "0.16.2"
 description = "Remembra Relay: session handoffs between coding agents, built from git facts. Server, CLI, MCP."
 readme = "README.md"
 license = { text = "MIT" }
