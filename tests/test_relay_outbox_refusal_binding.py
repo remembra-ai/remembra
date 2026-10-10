@@ -68,12 +68,30 @@ def test_handoff_queued_for_an_unreachable_server_still_goes_after_the_key_is_re
     assert held is None and config is not None and config.api_key == BROADER
 
 
-def test_refused_entry_from_an_older_client_keeps_the_old_rule(home, monkeypatch):
-    entry = queue_refused_close(home, monkeypatch, key=SCOPED, url="http://127.0.0.1:9")
+def as_written_by_an_older_client(entry: outbox.Entry, home: Path) -> outbox.Entry:
+    """The same queued entry as remembra 0.16.1 wrote it: no mark of the key that was refused."""
     data = dict(entry.data)
-    data.pop("refused_key_fp", None)  # written before refused entries carried a key mark
+    data.pop("refused_key_fp", None)
     entry.path.write_text(json.dumps(data))
     [legacy] = outbox.pending(home)
+    return legacy
+
+
+@pytest.mark.parametrize("key_now", [BROADER, SCOPED])
+def test_refused_entry_from_an_older_client_is_held_for_the_owner(home, monkeypatch, key_now):
+    # Nothing records which key the server refused, so no key may send it: not a replacement, and not
+    # "the same" key either, because the client cannot tell them apart.
+    entry = queue_refused_close(home, monkeypatch, key=SCOPED, url="http://127.0.0.1:9")
+    legacy = as_written_by_an_older_client(entry, home)
+    monkeypatch.setenv("REMEMBRA_API_KEY", key_now)
+    config, held = cli.replay_config(legacy)
+    assert config is None, "a refused entry with no record of the refused key must not be sent automatically"
+    assert held and "refused" in held and "delete the file" in held
+
+
+def test_unrefused_entry_from_an_older_client_still_goes(home, monkeypatch):
+    entry = queue_refused_close(home, monkeypatch, key=SCOPED, url="http://127.0.0.1:9", status=None)
+    legacy = as_written_by_an_older_client(entry, home)
     monkeypatch.setenv("REMEMBRA_API_KEY", BROADER)
     config, held = cli.replay_config(legacy)
     assert held is None and config is not None
@@ -151,5 +169,17 @@ def test_replay_with_a_different_key_sends_nothing_and_keeps_the_entry(home, mon
         monkeypatch.setenv("REMEMBRA_API_KEY", BROADER)
         report = cli.replay_outbox(context(home))
         assert seen == [], f"the refused handoff was sent with another key: {len(seen)} request(s)"
+        assert report.sent == []
+        assert len(outbox.pending(home)) == 1
+
+
+def test_replay_never_sends_an_older_clients_refused_entry(home, monkeypatch):
+    # What an upgraded machine finds in its queue: an entry 0.16.1 was refused for, with no mark of the key.
+    with close_endpoint() as (url, seen):
+        entry = queue_refused_close(home, monkeypatch, key=SCOPED, url=url)
+        as_written_by_an_older_client(entry, home)
+        monkeypatch.setenv("REMEMBRA_API_KEY", BROADER)
+        report = cli.replay_outbox(context(home))
+        assert seen == [], f"an older client's refused handoff was sent with a replacement key: {len(seen)} request(s)"
         assert report.sent == []
         assert len(outbox.pending(home)) == 1
