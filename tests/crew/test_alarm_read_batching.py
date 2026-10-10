@@ -5,7 +5,7 @@ crew with a held zone (``guard.blocked``), and ``crew_claims`` once per held zon
 crews of 5 sessions that is about 350 statements per pass. The pass now asks once per bounded batch.
 The answers must be the same as before: a session is nudged only when it has no ``checkpoint.missed``
 since *its own* last checkpoint, one crew's blocks or queue never count for another crew's zone, and a
-contested alarm is raised only if the zone is still contested when the writer gets to it.
+contested alarm is raised, or cleared, only by what is true when the writer gets to it.
 """
 
 from contextlib import asynccontextmanager
@@ -188,17 +188,21 @@ async def test_unchanged_contested_scan_reads_do_not_grow_with_crews(tmp_path, m
     assert large == (1, 1)
 
 
+async def emit_block(tx, crew_id: str, session_id: str, at: datetime) -> None:
+    await tx.emit(
+        crew_id=crew_id,
+        type="guard.blocked",
+        actor=Actor.system(),
+        payload={"zone": "pos", "decision": "deny", "rule": 3, "op": "write", "surface": "pretool", "coalesced": 1},
+        summary="blocked on pos",
+        refs={"session_id": session_id},
+        now=at,
+    )
+
+
 async def blocked(ops, crew_id: str, session_id: str, at: datetime) -> None:
     async with ops.log.transaction() as tx:
-        await tx.emit(
-            crew_id=crew_id,
-            type="guard.blocked",
-            actor=Actor.system(),
-            payload={"zone": "pos", "decision": "deny", "rule": 3, "op": "write", "surface": "pretool", "coalesced": 1},
-            summary="blocked on pos",
-            refs={"session_id": session_id},
-            now=at,
-        )
+        await emit_block(tx, crew_id, session_id, at)
 
 
 @pytest.mark.parametrize("crews_per_read", [None, 1])
@@ -267,6 +271,67 @@ async def test_a_queue_that_empties_before_the_writer_raises_no_alarm(tmp_path, 
         await alarms._contested(ops.log, now, out)
         assert out == counters()
         assert await db.fetchall("SELECT id FROM crew_inbox_items WHERE kind = 'zone_contested'") == []
+    finally:
+        await db.close()
+
+
+@pytest.mark.parametrize("comes_back", ["waiter", "blocks"])
+async def test_a_contest_that_returns_before_the_writer_keeps_its_alarm(tmp_path, monkeypatch, comes_back):
+    db = await open_db(tmp_path)
+    try:
+        ((crew_id, ops, waiter, zid),) = await held_zone_crews(db, 1)
+        now = datetime.now(UTC)
+        await queue_waiter(db, ops, crew_id, waiter, zid, now - timedelta(minutes=6))
+        first = counters()
+        await alarms._contested(ops.log, now, first)
+        assert first["contested"] == 1
+        queued = await db.fetchone("SELECT id FROM crew_claims WHERE state = 'queued'")
+        async with db.transaction():  # the waiter leaves: the next pass reads an empty queue
+            await db.conn.execute("UPDATE crew_claims SET state = 'released' WHERE id = ?", (queued["id"],))
+        later = now + timedelta(seconds=30)
+        real = ops.log.transaction
+
+        @asynccontextmanager
+        async def after_the_contest_came_back():
+            # What a contest renewed between the sweep's reads and its own transaction looks like: the
+            # waiter is queued again, or it has been turned away at the zone for six minutes instead.
+            async with real() as tx:
+                if comes_back == "waiter":
+                    await tx.conn.execute("UPDATE crew_claims SET state = 'queued' WHERE id = ?", (queued["id"],))
+                else:
+                    await emit_block(tx, crew_id, waiter["id"], later - timedelta(minutes=7))
+                    await emit_block(tx, crew_id, waiter["id"], later - timedelta(minutes=1))
+                yield tx
+
+        monkeypatch.setattr(ops.log, "transaction", after_the_contest_came_back)
+        out = counters()
+        await alarms._contested(ops.log, later, out)
+        assert out == counters()  # contested again by the time the writer looks: the alarm stays
+        states = await db.fetchall("SELECT state FROM crew_inbox_items WHERE kind = 'zone_contested'")
+        assert states == [{"state": "open"}]
+    finally:
+        await db.close()
+
+
+async def test_an_ended_contest_is_cleared_once(tmp_path):
+    db = await open_db(tmp_path)
+    try:
+        ((crew_id, ops, waiter, zid),) = await held_zone_crews(db, 1)
+        now = datetime.now(UTC)
+        await queue_waiter(db, ops, crew_id, waiter, zid, now - timedelta(minutes=6))
+        first = counters()
+        await alarms._contested(ops.log, now, first)
+        assert first["contested"] == 1
+        async with db.transaction():  # the waiter leaves for good
+            await db.conn.execute("UPDATE crew_claims SET state = 'released' WHERE state = 'queued'")
+        out = counters()
+        await alarms._contested(ops.log, now + timedelta(seconds=30), out)
+        assert out["uncontested"] == 1
+        states = await db.fetchall("SELECT state FROM crew_inbox_items WHERE kind = 'zone_contested'")
+        assert states == [{"state": "resolved"}]
+        again = counters()
+        await alarms._contested(ops.log, now + timedelta(seconds=60), again)
+        assert again == counters()
     finally:
         await db.close()
 
