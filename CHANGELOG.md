@@ -5,6 +5,51 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-10-10
+
+A patch to the `remembra-relay` client. Two fixes, both in what a close sends. The server code in this release
+is the same as 0.16.1.
+
+**Upgrading.** Run the usual install line again; `--force` brings an existing install up to this release.
+Nothing else to do. If `remembra-relay status` now shows a queued handoff as held, the server had refused it;
+the line says why, and deleting the file drops it.
+
+### Fixed
+
+- **A handoff the server refused for one key is no longer sent with another key.** A close the server answers
+  with 403 (the key may not write to that project, or as that agent) stays in the local queue. The queue tied the
+  entry only to where its key came from (the environment, `~/.claude.json`, ...), so a different key put in the
+  same place later sent it: a write the first key had been refused landed under the second key. A refused entry
+  now keeps a one-way mark of the key that was refused (never the key) and goes only with that key. A later
+  failure of another kind does not clear the mark.
+- **A refused handoff queued by 0.16.1 or older is held, not sent.** Those entries carry no mark of the refused
+  key, so no key sends them on its own. `remembra-relay status` shows each one with the reason. An older entry
+  that was not refused (for example queued while the server was unreachable) still goes out.
+- **`remembra-relay close` run by hand lists a bounded window, not the whole branch.** With no `brief` first and
+  no transcript, a close listed every commit since the branch left the default branch, and `--hours` was ignored
+  whenever a default branch existed. On a long-lived branch that credited other people's older commits to the
+  closing session. The branch range is now always limited to `--hours` (12 by default). A session that started
+  with a brief, or has a transcript, is unchanged.
+
+### Security
+
+- **`uv.lock` moves two packages off versions with published advisories:** `fsspec` 2026.2.0 to 2026.9.0
+  (CVE-2026-104851) and `sentence-transformers` 5.2.3 to 5.7.0 (PYSEC-2026-4164). Only an image built with the
+  `rerank` extra installs them from the lock. The default image does not include either package, and
+  `pip install` does not read the lock, so both are unchanged by this.
+
+### Known limits
+
+- There is no command yet to send a held handoff on purpose.
+- An older queued entry whose refusal was later overwritten by another kind of failure cannot be recognized as
+  refused.
+- The mark of a refused key is the first 16 hex characters of a SHA-256 over a fixed prefix and the key. It sits
+  in the queued file, which only your user can read. It is not salted and not slow to compute. For a key Remembra
+  generated that gives nothing away; a short key you made up yourself could be guessed from it by someone who can
+  read that file.
+- After a refusal the client still prints that the handoff "will be sent by the next brief or close". That is
+  only true while the same key stays configured.
+
 ## [0.16.1] - 2026-09-26
 
 Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every

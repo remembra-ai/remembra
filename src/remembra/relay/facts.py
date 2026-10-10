@@ -369,10 +369,15 @@ def _session_range(
     Evidence order: with the HEAD recorded at session start (``brief``), the
     commits the reflog shows this checkout creating since then (a pulled or
     merged teammate commit is not this session's work); then the commits the
-    agent's own transcript shows it creating; then the branch's merge-base
-    with the default branch, then a time window (both labeled as windows:
-    they may include other people's commits). With a transcript but no commit
+    agent's own transcript shows it creating. With a transcript but no commit
     evidence, the agent committed nothing.
+
+    With no session start and no transcript, the answer is a window of the last
+    ``hours``, never the whole branch: on a branch other than the default one,
+    its commits since the merge-base with the default branch that fall in that
+    time (``merge-base:<default>:last-Nh``); otherwise the commits of that time
+    (``last-Nh``). Both are labeled as windows: they may include other people's
+    commits.
     """
     if start_head and info.head_commit:
         if start_head == info.head_commit:
@@ -389,12 +394,14 @@ def _session_range(
     if session_commits is not None:
         reachable = _reachable(git, session_commits[-MAX_COMMITS:])
         return (_no_walk(reachable), "transcript-commits") if reachable else ([], "transcript-no-commits")
+    window = f"last-{hours:g}h"
+    since = ["--since", f"{hours:g} hours ago"]
     default = git.line("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if default and info.branch and default.split("/", 1)[-1] != info.branch:
         base = git.line("merge-base", "HEAD", default)
         if base and base != info.head_commit:
-            return [f"{base}..HEAD"], f"merge-base:{default}"
-    return ["--since", f"{hours:g} hours ago", "HEAD"], f"last-{hours:g}h"
+            return [*since, f"{base}..HEAD"], f"merge-base:{default}:{window}"
+    return [*since, "HEAD"], window
 
 
 def _numstat_totals(text: str) -> tuple[set[str], int, int]:
