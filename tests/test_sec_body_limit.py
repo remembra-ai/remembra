@@ -58,6 +58,16 @@ async def api_client() -> AsyncIterator[httpx.AsyncClient]:
         config_module._settings = previous
 
 
+async def serve_one(client: httpx.AsyncClient) -> None:
+    """Let the app answer one request before a timed one.
+
+    The first request through a new app also builds its middleware stack: tens of milliseconds on a
+    laptop, hundreds on a slow CI runner; the refusal itself takes about two. A crafted body reaches
+    production long after its first request, so the timed tests measure an app that has served one, too.
+    """
+    await client.get("/health")
+
+
 # ---------------------------------------------------------------------------
 # 1. The lock pins the fixed releases
 # ---------------------------------------------------------------------------
@@ -90,6 +100,7 @@ def test_pyproject_floors_keep_pip_installs_on_the_fixed_releases() -> None:
 
 async def test_unauthenticated_form_bomb_to_the_upload_route_is_refused_fast() -> None:
     async with api_client() as client:
+        await serve_one(client)
         start = time.perf_counter()
         r = await client.post(
             "/api/v1/transfer/import/file",
@@ -111,6 +122,7 @@ async def test_a_streamed_form_bomb_without_content_length_is_cut_off_unread() -
             yield b"a;" * 32768
 
     async with api_client() as client:
+        await serve_one(client)
         start = time.perf_counter()
         r = await client.post(
             "/api/v1/transfer/import/file",
@@ -119,8 +131,8 @@ async def test_a_streamed_form_bomb_without_content_length_is_cut_off_unread() -
         )
         elapsed = time.perf_counter() - start
     assert r.status_code == 413, r.text
-    assert elapsed < 0.3, f"took {elapsed:.3f}s"
     assert sent <= 2, f"read {sent} chunks past a {FORM_CAP}-byte cap"
+    assert elapsed < 0.3, f"took {elapsed:.3f}s"
 
 
 # ---------------------------------------------------------------------------
