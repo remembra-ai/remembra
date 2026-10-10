@@ -550,11 +550,13 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
     An entry queued with a key goes only with the key of the SAME config source
     (``env``, ``claude:<path>``, ...), and only while that source still points
     at the server it was queued for: a key configured elsewhere may belong to
-    another account. An entry queued without a key is kept for the server that
-    was configured then (``REMEMBRA_URL``, else the local default) and goes
-    only once a key for that same server is configured; it is never sent to a
-    server set up later. An entry without a recorded server (written before
-    this rule) is held.
+    another account. An entry the server refused (403) goes only with the very
+    key that was refused: a different key in the same source must not send a
+    write the first key was refused. An entry queued without a key is kept for
+    the server that was configured then (``REMEMBRA_URL``, else the local
+    default) and goes only once a key for that same server is configured; it
+    is never sent to a server set up later. An entry without a recorded server
+    (written before this rule) is held.
     """
     recorded = entry.data.get("config_source")
     agent = entry.agent_id or None
@@ -572,6 +574,12 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
         return None, (
             f"it is for {entry.url}, and the key now points at {outbox.clean_url(config.url)}; it is only sent to the"
             " server it was queued for (delete the file to drop it)"
+        )
+    refused_for = entry.data.get("refused_key_fp")
+    if refused_for and outbox.key_mark(config.api_key) != refused_for:
+        return None, (
+            "the server refused it for the key it was sent with, and a different key is configured now; it is only"
+            " sent with the key that was refused (give that key access in the dashboard, or delete the file to drop it)"
         )
     return config, None
 
@@ -667,7 +675,7 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
             outbox.finish(entry, claimed, sent=True)  # resending the same body cannot succeed
             outbox.log(ctx.home, f"outbox: dropped {entry.agent_id} session {entry.session_id[:40]}: {detail}")
             continue
-        outbox.finish(entry, claimed, sent=False, error=detail, http_status=status)
+        outbox.finish(entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key)
         report.remaining.append(entry)
         if status == 403:
             # Refused for this agent or project only: the rest of the queue may use it.
@@ -1133,7 +1141,13 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
     # Always the server this close was for: without a key that is REMEMBRA_URL (or the local default),
     # and the entry is only ever sent there (replay_config).
     path = outbox.enqueue(
-        ctx.home, payload, url=ctx.config.url, config_source=ctx.config.source, error=error, http_status=http_status
+        ctx.home,
+        payload,
+        url=ctx.config.url,
+        config_source=ctx.config.source,
+        error=error,
+        http_status=http_status,
+        api_key=ctx.config.api_key,
     )
     if path is not None:  # the session has a handoff on its way: a later empty close must retire it
         mark_close_sent(ctx.home, str(payload.get("agent_id") or ""), str(payload.get("session_id") or ""))
