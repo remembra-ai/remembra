@@ -31,6 +31,13 @@ the line says why, and deleting the file drops it.
   closing session. The branch range is now always limited to `--hours` (12 by default). A session that started
   with a brief, or has a transcript, is unchanged.
 
+### Security
+
+- **`uv.lock` moves two packages off versions with published advisories:** `fsspec` 2026.2.0 to 2026.9.0
+  (CVE-2026-104851) and `sentence-transformers` 5.2.3 to 5.7.0 (PYSEC-2026-4164). Only an image built with the
+  `rerank` extra installs them from the lock. The default image does not include either package, and
+  `pip install` does not read the lock, so both are unchanged by this.
+
 ### Known limits
 
 - There is no command yet to send a held handoff on purpose.
