@@ -43,6 +43,12 @@ the line says why, and deleting the file drops it.
 - There is no command yet to send a held handoff on purpose.
 - An older queued entry whose refusal was later overwritten by another kind of failure cannot be recognized as
   refused.
+- The mark of a refused key is the first 16 hex characters of a SHA-256 over a fixed prefix and the key. It sits
+  in the queued file, which only your user can read. It is not salted and not slow to compute. For a key Remembra
+  generated that gives nothing away; a short key you made up yourself could be guessed from it by someone who can
+  read that file.
+- After a refusal the client still prints that the handoff "will be sent by the next brief or close". That is
+  only true while the same key stays configured.
 
 ## [0.16.1] - 2026-09-26
 
