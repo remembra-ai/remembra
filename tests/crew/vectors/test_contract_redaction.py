@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
+from tests.crew.vectors import build_corpora
 from tests.crew.vectors.loader import load, run_redaction_corpus
 
 CORPUS = load("redaction/corpus.json")
+# The Stripe secret-key shape GitHub push protection blocks: 24+ alphanumerics after the prefix.
+PUSH_PROTECTION_STRIPE = re.compile(r"(?:sk|rk)_live_[0-9A-Za-z]{24,}")
 
 
 def test_corpus_covers_every_outbound_payload_type() -> None:
@@ -54,6 +59,15 @@ def test_corpus_covers_the_required_secret_forms() -> None:
         "datadogApiKey",
     ):
         assert form in blob, form
+
+
+def test_no_corpus_value_has_the_stripe_shape_push_protection_blocks() -> None:
+    """A committed value of that shape blocks every push of the corpus; the fake stays short of it
+    (tests/crew/test_redact.py proves the product's stripe_key rule still redacts it)."""
+    blob = json.dumps(CORPUS, ensure_ascii=False)
+    assert "sk_live_" in blob  # the Stripe case is still in the corpus
+    assert not PUSH_PROTECTION_STRIPE.search(blob)
+    assert not PUSH_PROTECTION_STRIPE.search(Path(build_corpora.__file__).read_text(encoding="utf-8"))
 
 
 def test_runner_reports_leaks_for_an_identity_redactor() -> None:

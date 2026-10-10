@@ -102,6 +102,7 @@ def test_rewake_verb_runs_the_wake_waiter(tmp_path, monkeypatch):
 def test_connect_installs_the_packaged_gate_that_verifies_and_runs(crew_env):
     home: Path = crew_env["home"]
     layout = gate.Layout(home)
+    (home / ".claude").mkdir()  # Claude Code installed: connect writes an agent's hooks only when it is detected
 
     code, out = _connect(crew_env, apply=False)
     assert code == 0
