@@ -32,6 +32,10 @@ class SQLiteContractStore:
     def conn(self):
         return self.db.conn
 
+    @property
+    def in_transaction(self):
+        return self.db.in_transaction
+
     async def setup(self):
         await self.conn.executescript("""
             CREATE TABLE test_approvals (
@@ -55,6 +59,8 @@ class SQLiteContractStore:
 
     @asynccontextmanager
     async def transaction(self):
+        if self.db.in_transaction:
+            raise RuntimeError("approval_transaction_must_own_commit")
         async with self.db.transaction():
             yield self
             self.fail("before_commit")

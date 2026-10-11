@@ -57,6 +57,16 @@ swap, a unique requester-scoped idempotency key, append-only audit and a durable
 deduplicated notification written with every transition. A process-local lock or
 an in-memory production adapter cannot satisfy this contract.
 
+Each approval call must own its commit. The service and adapter reject an already
+active transaction, including one opened directly on the Crew database. Results
+leave the context only after that commit; nesting into a caller-owned transaction
+could otherwise expose a claim that a later outer rollback undoes. A caller that
+hits a busy connection retries using the same request identity after the other
+transaction finishes. Independent connections still serialize through SQLite.
+Expiry is rechecked after awaited revision and host-policy work, immediately
+before creating the decision/claim. Executors must still check expiry at the
+actual effect boundary; a claim does not extend its request's lifetime.
+
 The tests add synthetic tables only to isolated temporary databases and reuse
 `CrewDatabase` transactions and `CrewStore.enqueue_outbox`. The synthetic adapter
 is a conformance harness, not a production migration. It does not register an

@@ -556,3 +556,98 @@ async def test_real_http_auth_rejects_agents_and_forged_stale_expired_tokens(h, 
         )
         assert result.status_code == 200, result.text
         assert result.json()["decision"]["user_id"] == owner_id
+
+
+@pytest.mark.parametrize("stage", ["request", "get", "decide", "consume_first_lookup", "consume_final_lookup"])
+async def test_expiry_crossed_while_awaiting_revision_never_grants(h, stage):
+    record = None if stage == "request" else await h.request()
+    if stage.startswith("consume"):
+        record = await h.decide(record)
+    original = h.policy.current_revision
+    calls = 0
+
+    async def delayed_revision(tx, request):
+        nonlocal calls
+        calls += 1
+        if calls == (2 if stage == "consume_final_lookup" else 1):
+            h.now = request.expires_at_ms
+        return await original(tx, request)
+
+    h.policy.current_revision = delayed_revision
+    if stage == "request":
+        with pytest.raises(ApprovalError, match="invalid_expiry"):
+            await h.request()
+        assert await h.db.fetchall("SELECT * FROM test_approvals") == []
+        assert await h.db.fetchall("SELECT * FROM test_approval_audit") == []
+        assert await h.db.fetchall("SELECT * FROM crew_outbox") == []
+        return
+    if stage == "get":
+        result = await h.get(record)
+    elif stage == "decide":
+        result = await h.decide(record)
+        assert result.decision is None
+    else:
+        consumed = await h.consume(record)
+        assert not consumed.acquired and consumed.record.consumption is None
+        result = consumed.record
+    assert result.invalidation.reason == "expired"
+    persisted = await h.get(record)
+    assert persisted.invalidation == result.invalidation
+    assert persisted.decision == record.decision
+    assert (await h.store.history(record.id))[-1]["kind"] == "expired"
+
+
+async def test_step_up_crossed_during_revision_lookup_needs_fresh_login(h):
+    record = await h.request(expires_at_ms=NOW + 3_600_000)
+    original = h.policy.current_revision
+
+    async def delayed_revision(tx, request):
+        h.now = NOW + 900_001
+        return await original(tx, request)
+
+    h.policy.current_revision = delayed_revision
+    with pytest.raises(HTTPException) as exc:
+        await h.decide(record, auth_time_ms=NOW)
+    assert exc.value.status_code == 401
+    assert (await h.get(record)).decision is None
+
+
+@pytest.mark.parametrize("stage", ["request", "get", "decide", "revoke", "consume"])
+async def test_outer_transaction_cannot_expose_uncommitted_approval_results(h, stage):
+    record = await h.request()
+    if stage in {"consume", "revoke"}:
+        record = await h.decide(record)
+    before = await h.store.history(record.id)
+    with pytest.raises(RuntimeError, match="outer rollback"):
+        async with h.db.transaction():
+            with pytest.raises(RuntimeError, match="approval_transaction_must_own_commit"):
+                if stage == "request":
+                    await h.request(idempotency_key="nested")
+                elif stage == "get":
+                    await h.get(record)
+                elif stage == "decide":
+                    await h.decide(record)
+                elif stage == "consume":
+                    await h.consume(record)
+                else:
+                    await h.service.revoke(
+                        crew_id=h.crew_id,
+                        approval_id=record.id,
+                        user=OWNER,
+                        auth_time_ms=NOW,
+                        expected_version=record.version,
+                        request_digest=record.request.digest,
+                    )
+            raise RuntimeError("outer rollback")
+    assert await h.store.history(record.id) == before
+    assert await h.get(record) == record
+    if stage == "consume":
+        assert (await h.consume(record)).acquired
+        assert not (await h.consume(record)).acquired
+
+
+async def test_storage_adapter_itself_rejects_joining_outer_transaction(h):
+    async with h.db.transaction():
+        with pytest.raises(RuntimeError, match="approval_transaction_must_own_commit"):
+            async with h.store.transaction():
+                pytest.fail("adapter yielded an uncommitted result context")

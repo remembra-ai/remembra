@@ -8,13 +8,13 @@ Crew membership/session/step-up checks are repeated inside the transaction.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from remembra.auth.middleware import AuthenticatedUser
-from remembra.crew.access import HUMAN_CREDENTIAL_ID, CrewAccess, load_crew, not_found
+from remembra.crew.access import HUMAN_CREDENTIAL_ID, CrewAccess, load_crew, not_found, require_human
 from remembra.crew.approval_contracts import (
     ApprovalRecord,
     ApprovalRequest,
@@ -64,7 +64,18 @@ class ApprovalTransaction(Protocol):
 
 
 class ApprovalStore(Protocol):
-    """Fail-closed storage port; there is intentionally no default implementation."""
+    """Fail-closed storage port; there is intentionally no default implementation.
+
+    Approval calls own their commit. transaction() MUST reject joining an outer
+    transaction, including one opened outside this store, and MUST commit before
+    its context exits normally. Exposing a result before an outer commit allows
+    rollback followed by a second claim. Adapters must not suppress exceptions.
+    """
+
+    @property
+    def in_transaction(self) -> bool:
+        """Whether the backing connection already has an explicit transaction."""
+        ...
 
     def transaction(self) -> AbstractAsyncContextManager[ApprovalTransaction]: ...
 
@@ -104,6 +115,15 @@ class CrewApprovals:
         self.store = store
         self.policy = policy
         self.clock = clock or (lambda: time.time_ns() // 1_000_000)
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncIterator[ApprovalTransaction]:
+        # Fail closed before exposing any row/result from a joined transaction.
+        # The adapter repeats this guard when acquiring its commit-owning context.
+        if self.store.in_transaction:
+            raise RuntimeError("approval_transaction_must_own_commit")
+        async with self.store.transaction() as tx:
+            yield tx
 
     async def _access(
         self,
@@ -164,11 +184,13 @@ class CrewApprovals:
         reason: Literal["expired", "stale_candidate"] | None = None
         if self.clock() >= record.request.expires_at_ms:
             reason = "expired"
-        elif await self.policy.current_revision(tx, record.request) != (
-            record.request.operation.base_revision,
-            record.request.operation.candidate_revision,
-        ):
-            reason = "stale_candidate"
+        else:
+            revision = await self.policy.current_revision(tx, record.request)
+            # A policy/revision read can cross the deadline while suspended.
+            if self.clock() >= record.request.expires_at_ms:
+                reason = "expired"
+            elif revision != (record.request.operation.base_revision, record.request.operation.candidate_revision):
+                reason = "stale_candidate"
         if reason is None:
             return record
         changed = record.model_copy(
@@ -194,7 +216,7 @@ class CrewApprovals:
         This increment deliberately restricts execution to the requesting session
         and credential; cross-agent delegation needs a separately reviewed binding.
         """
-        async with self.store.transaction() as tx:
+        async with self._transaction() as tx:
             access = await self._access(tx, crew_id, user, write=True)
             principal = await _principal(tx, access, session_token)
             self.policy.validate(operation)
@@ -215,11 +237,13 @@ class CrewApprovals:
                 raise ApprovalError("invalid_expiry")
             if await self.policy.current_revision(tx, request) != (operation.base_revision, operation.candidate_revision):
                 raise ApprovalError("stale_candidate")
+            if self.clock() >= expires_at_ms:
+                raise ApprovalError("invalid_expiry")
             return await self._save(tx, ApprovalRecord(id=f"apr_{uuid4().hex}", request=request), "requested", user.user_id)
 
     async def get(self, *, crew_id: str, approval_id: str, user: AuthenticatedUser) -> ApprovalRecord:
         """Authoritative lookup; membership and tenant/project scope are rechecked."""
-        async with self.store.transaction() as tx:
+        async with self._transaction() as tx:
             access = await self._access(tx, crew_id, user)
             return await self._fresh(tx, await self._record(tx, access, approval_id))
 
@@ -237,7 +261,7 @@ class CrewApprovals:
         """Fresh authenticated human owner/admin decision with optimistic concurrency."""
         if type(approve) is not bool:
             raise ApprovalError("invalid_decision")
-        async with self.store.transaction() as tx:
+        async with self._transaction() as tx:
             access = await self._access(tx, crew_id, user, human=True, auth_time_ms=auth_time_ms)
             assert auth_time_ms is not None  # require_human(step_up=True) checked the authenticated JWT time
             record = await self._record(tx, access, approval_id)
@@ -248,6 +272,10 @@ class CrewApprovals:
             fresh = await self._fresh(tx, record)
             if fresh.invalidation:
                 return fresh  # Commit expiry/staleness; never roll it back via an exception.
+            decision_at = self.clock()
+            if decision_at >= record.request.expires_at_ms:
+                return await self._fresh(tx, record)
+            require_human(user, step_up=True, auth_time_ms=auth_time_ms, now_ms=decision_at)
             state: Literal[DecisionState.APPROVED, DecisionState.DENIED]
             state = DecisionState.APPROVED if approve else DecisionState.DENIED
             changed = record.model_copy(
@@ -257,7 +285,7 @@ class CrewApprovals:
                         state=state,
                         user_id=user.user_id,
                         auth_time_ms=auth_time_ms,
-                        at_ms=self.clock(),
+                        at_ms=decision_at,
                         request_digest=record.request.digest,
                     ),
                 }
@@ -275,7 +303,7 @@ class CrewApprovals:
         request_digest: str,
     ) -> ApprovalRecord:
         """Invalidate unconsumed authority while retaining the original decision."""
-        async with self.store.transaction() as tx:
+        async with self._transaction() as tx:
             access = await self._access(tx, crew_id, user, human=True, auth_time_ms=auth_time_ms)
             record = await self._record(tx, access, approval_id)
             if record.version != expected_version or record.request.digest != request_digest:
@@ -284,10 +312,12 @@ class CrewApprovals:
                 raise ApprovalError("already_consumed")
             if record.invalidation:
                 return record
+            revoked_at = self.clock()
+            require_human(user, step_up=True, auth_time_ms=auth_time_ms, now_ms=revoked_at)
             changed = record.model_copy(
                 update={
                     "version": record.version + 1,
-                    "invalidation": Invalidation(reason="revoked", actor_id=user.user_id, at_ms=self.clock()),
+                    "invalidation": Invalidation(reason="revoked", actor_id=user.user_id, at_ms=revoked_at),
                 }
             )
             return await self._save(tx, changed, "revoked", user.user_id, previous=record)
@@ -307,7 +337,7 @@ class CrewApprovals:
         a committed claim returns acquired=False and the stable receipt, requiring
         host reconciliation instead of blind replay. No action is executed here.
         """
-        async with self.store.transaction() as tx:
+        async with self._transaction() as tx:
             access = await self._access(tx, crew_id, user, write=True)
             principal = await _principal(tx, access, session_token)
             record = await self._record(tx, access, approval_id)
@@ -339,12 +369,15 @@ class CrewApprovals:
                     changed = record.model_copy(update={"version": record.version + 1, "block": block})
                     record = await self._save(tx, changed, "blocked", user.user_id, previous=record)
                 return ConsumeResult(record=record)
+            claim_at = self.clock()
+            if claim_at >= record.request.expires_at_ms:
+                return ConsumeResult(record=await self._fresh(tx, record))
             changed = record.model_copy(
                 update={
                     "version": record.version + 1,
                     "block": None,
                     "consumption": Consumption(
-                        id=f"apc_{uuid4().hex}", request_digest=record.request.digest, executor=principal, at_ms=self.clock()
+                        id=f"apc_{uuid4().hex}", request_digest=record.request.digest, executor=principal, at_ms=claim_at
                     ),
                 }
             )
