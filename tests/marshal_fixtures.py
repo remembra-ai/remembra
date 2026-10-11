@@ -15,7 +15,9 @@ import os
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 
@@ -144,14 +146,19 @@ class FakeHome:
         attempts: int = 2,
         queued_ts: float | None = None,
     ) -> Path:
-        path = outbox.enqueue(
-            self.home,
-            {"agent_id": agent, "session_id": session, "facts": {"branch": "main"}},
-            url=url,
-            config_source=source if source is not None else f"credentials:{self.home / '.remembra' / 'credentials'}",
-            error=error,
-            http_status=status,
-        )
+        # enqueue prunes older entries. Use the same clock as the fixture data
+        # so another queued entry does not expire when the calendar advances.
+        # Replace only outbox's module reference; never change shared time.time.
+        clock = SimpleNamespace(**{**vars(outbox.time), "time": lambda: NOW})
+        with patch.object(outbox, "time", clock):
+            path = outbox.enqueue(
+                self.home,
+                {"agent_id": agent, "session_id": session, "facts": {"branch": "main"}},
+                url=url,
+                config_source=source if source is not None else f"credentials:{self.home / '.remembra' / 'credentials'}",
+                error=error,
+                http_status=status,
+            )
         assert path is not None
         data = json.loads(path.read_text())
         data["attempts"] = attempts
