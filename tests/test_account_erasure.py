@@ -194,6 +194,8 @@ def _seed_value(owner: str, email: str, column: str, declared: str, table: str =
         return email
     if column == "account_key":
         return security_state.account_key("login", email)
+    if column == "state":
+        return "held"  # marshal_reservations.state has a CHECK (held/settled/released/expired); other state columns take any text
     if any(t in declared for t in ("INT", "REAL", "BOOL", "NUM", "FLOAT")):
         return 2 if owner == BYSTANDER else 1  # distinct integer primary keys per account
     return owner  # ids, user ids, foreign keys and text all carry the owner's id

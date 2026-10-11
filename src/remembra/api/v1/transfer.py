@@ -11,6 +11,7 @@ from remembra.auth.middleware import (
     AuthenticatedUser,
     CurrentUser,
     enforce_agent_scope_header,
+    refuse_delegated_principal,
     require_memory_recall,
     require_memory_store,
     resolve_project_or_default,
@@ -35,7 +36,7 @@ from remembra.security.secrets import scrub_memory_record
 from remembra.services.memory import MemoryService
 from remembra.services.relay import strip_reserved_metadata
 
-router = APIRouter(prefix="/transfer", tags=["import/export"])
+router = APIRouter(prefix="/transfer", tags=["import/export"], dependencies=[Depends(refuse_delegated_principal)])
 
 log = structlog.get_logger(__name__)
 

@@ -4,6 +4,7 @@ import { ApiKeyForm } from './components/ApiKeyForm';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { RelayDataProvider } from './components/relay/RelayDataProvider';
+import { MarshalDeskProvider } from './components/marshal/DeskProvider';
 import { CrewProvider } from './lib/crew/CrewProvider';
 import { CrewRoutes } from './lib/crew/CrewRoutes';
 import { Dashboard } from './pages/Dashboard';
@@ -452,6 +453,7 @@ function App() {
   return (
     <div className={darkMode ? 'dark' : ''}>
       <CrewProvider key={currentUser?.id ?? 'api-key'}>
+      <MarshalDeskProvider>
       <RelayDataProvider userKey={currentUser?.id ?? 'api-key'}>
         <AuthenticatedShell
           activeTab={activeTab}
@@ -483,6 +485,7 @@ function App() {
           setShowNewMemoryModal(true);
         }}
       />
+      </MarshalDeskProvider>
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </CrewProvider>
     </div>

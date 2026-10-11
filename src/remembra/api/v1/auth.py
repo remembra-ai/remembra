@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth import account_review
-from remembra.auth.middleware import authenticate_jwt, get_client_ip
+from remembra.auth.middleware import authenticate_jwt, get_client_ip, refuse_delegated_principal
 from remembra.auth.superadmin import account_is_owner_now
 from remembra.auth.users import PENDING_ERASURE_PREFIX, UserManager, email_verified_on_another_account
 from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
@@ -28,7 +28,7 @@ except ImportError:
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(refuse_delegated_principal)])
 
 # HTTP Bearer token security
 bearer_scheme = HTTPBearer(auto_error=False)

@@ -23,6 +23,7 @@ LIST_SETTINGS = (
     "superadmin_user_ids",
     "connector_redirect_uris",
     "pii_exclusions",
+    "marshal_allow_users",
 )
 
 
@@ -630,6 +631,34 @@ class Settings(BaseSettings):
     connector_access_token_ttl_seconds: int = Field(3600, ge=60, le=86400, description="Connector access-token lifetime.")
     connector_refresh_token_ttl_days: int = Field(30, ge=1, le=365, description="Connector refresh-token lifetime (sliding).")
 
+    # -----------------------------------------------------------------------
+    # Marshal desk (the dashboard's read-only copilot on Remembra's own model)
+    # -----------------------------------------------------------------------
+    marshal_enabled: bool = Field(
+        False,
+        description="Serve the Marshal desk (/api/v1/marshal/*) to dashboard logins. Off: every desk route answers 404.",
+    )
+    marshal_allow_users: EnvList = Field(
+        default_factory=list,
+        description=(
+            "User ids the desk is open to (comma-separated or a JSON array). "
+            "Unset allows every account; explicitly empty allows none."
+        ),
+    )
+    marshal_openai_api_key: str | None = Field(
+        None,
+        description="OpenAI key for the desk's model. Unset: the desk uses openai_api_key; neither set: the desk is offline.",
+    )
+    marshal_openai_base_url: str | None = Field(
+        None, description="OpenAI-compatible base URL for the desk's model (http(s)://; for a local stub). Unset: OpenAI."
+    )
+    marshal_model: str = Field("gpt-4o-mini", description="The desk's chat model")
+    marshal_daily_usd: float = Field(5.0, gt=0, description="Desk model spend cap per UTC day, for the whole platform (USD)")
+    marshal_monthly_usd: float = Field(
+        100.0, gt=0, description="Desk model spend cap per UTC calendar month, for the whole platform (USD)"
+    )
+    marshal_user_daily_asks: int = Field(40, ge=1, description="Desk questions per account per UTC day")
+
     # Input Sanitization
     sanitization_enabled: bool = Field(True, description="Enable input sanitization and trust scoring")
     trust_score_threshold: float = Field(0.5, description="Content below this trust score is flagged as suspicious")
@@ -837,12 +866,29 @@ class Settings(BaseSettings):
         parse_ttl_seconds(value)
         return value.strip()
 
-    @field_validator("public_url", "memory_cap_notice_effective_at", "unverified_credit_cap_effective_at", mode="before")
+    @field_validator(
+        "public_url",
+        "memory_cap_notice_effective_at",
+        "unverified_credit_cap_effective_at",
+        "marshal_openai_api_key",
+        "marshal_openai_base_url",
+        mode="before",
+    )
     @classmethod
     def blank_is_unset(cls, value: Any) -> Any:
         """A variable present but empty (REMEMBRA_PUBLIC_URL=) means unset, not an invalid value."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("marshal_openai_base_url")
+    @classmethod
+    def http_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value.lower().startswith(("http://", "https://")):
+            raise ValueError("marshal_openai_base_url must start with http:// or https://")
         return value
 
     @model_validator(mode="after")

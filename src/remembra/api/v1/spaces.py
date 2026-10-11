@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from remembra.auth.middleware import (
     AuthenticatedUser,
     CurrentUser,
+    refuse_delegated_principal,
     require_memory_recall,
     require_memory_store,
     resolve_project_access,
@@ -23,7 +24,7 @@ from remembra.models.memory import RecallResponse
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
 
-router = APIRouter(prefix="/spaces", tags=["spaces"])
+router = APIRouter(prefix="/spaces", tags=["spaces"], dependencies=[Depends(refuse_delegated_principal)])
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser, get_user_from_jwt_or_api_key
+from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser, get_user_from_jwt_or_api_key, refuse_delegated_principal
 from remembra.cloud import notify
 from remembra.cloud.billing_paddle import DEFAULT_DASHBOARD_ORIGIN
 from remembra.cloud.metering import FoundingHoldLimitError
@@ -28,7 +28,7 @@ from remembra.cloud.plans import (
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 
-router = APIRouter(prefix="/billing", tags=["billing"])
+router = APIRouter(prefix="/billing", tags=["billing"], dependencies=[Depends(refuse_delegated_principal)])
 
 log = structlog.get_logger(__name__)
 

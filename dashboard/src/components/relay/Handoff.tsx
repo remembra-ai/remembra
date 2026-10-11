@@ -206,7 +206,11 @@ export function TrailNode({
   const checkpoint = item.memory_type === 'checkpoint';
   const pickup = pickupLine(item.picked_up_by, (id) => agentMeta(id).name);
   return (
-    <li id={`trail-${item.id}`} className="relative grid scroll-mt-12 grid-cols-[32px_minmax(0,1fr)] gap-x-3">
+    <li
+      id={`trail-${item.id}`}
+      data-marshal-ref={`entry:${item.id}`}
+      className="relative grid scroll-mt-12 grid-cols-[32px_minmax(0,1fr)] gap-x-3"
+    >
       <span className="relative flex justify-center pt-4" aria-hidden="true">
         <span
           className={clsx(

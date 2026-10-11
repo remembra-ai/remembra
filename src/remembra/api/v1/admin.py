@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import AuthenticatedUser, CurrentUser
+from remembra.auth.middleware import AuthenticatedUser, CurrentUser, refuse_delegated_principal
 from remembra.auth.rbac import ROLE_LEVEL, ROLE_PERMISSIONS, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 from remembra.auth.scopes import RequireAdmin, RequireAuditExport, RequireAuditRead
 from remembra.auth.superadmin import RequireSuperadmin, RequireSuperadminSession, is_superadmin
@@ -32,7 +32,7 @@ from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(refuse_delegated_principal)])
 
 
 def _parse_audit_action(action: str | None) -> AuditAction | None:

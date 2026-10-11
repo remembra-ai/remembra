@@ -6,6 +6,8 @@ import { ProjectSwitcher } from './ProjectSwitcher';
 import { SettingsPanel } from './SettingsPanel';
 import { BrandMark } from '../brand/Brand';
 import { NotificationBell } from './crew/notify/NotificationBell';
+import { MarshalDesk } from './marshal/MarshalDesk';
+import { useMarshalDesk } from '../hooks/marshalDesk';
 import { TABS, hrefFor, sectionOf, type TabType } from '../lib/nav';
 
 interface AppLayoutProps {
@@ -34,6 +36,8 @@ export function AppLayout({
   inboxUnread,
 }: AppLayoutProps) {
   const [connectionOpen, setConnectionOpen] = useState(false);
+  // Under 640px the folded Marshal bar floats above the tab bar: the page keeps its last lines clear of it.
+  const { barVisible } = useMarshalDesk();
   const section = sectionOf(activeTab);
   const meta = TABS[activeTab];
   const subTabs = section.tabs.length > 1 && section.subnav !== false ? section.tabs : [];
@@ -122,7 +126,16 @@ export function AppLayout({
           </div>
         )}
 
-        <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-[calc(76px+env(safe-area-inset-bottom))] outline-none md:pb-0">
+        <main
+          id="main"
+          tabIndex={-1}
+          className={clsx(
+            'min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-none md:pb-0',
+            barVisible
+              ? 'pb-[calc(108px+env(safe-area-inset-bottom))] sm:pb-[calc(76px+env(safe-area-inset-bottom))]'
+              : 'pb-[calc(76px+env(safe-area-inset-bottom))]',
+          )}
+        >
           <div
             key={activeTab}
             className={clsx('page-enter', wide ? 'px-3 py-4 md:px-4' : 'mx-auto max-w-6xl px-4 py-5 md:px-6 md:py-6')}
@@ -130,6 +143,8 @@ export function AppLayout({
             {children}
           </div>
         </main>
+
+        <MarshalDesk />
       </div>
 
       <MobileNav {...navProps} />

@@ -20,7 +20,6 @@ import {
   Shield,
   ArrowRight,
   Loader2,
-  Sparkles,
   Command,
   House,
   GitCommitVertical,
@@ -64,6 +63,18 @@ import {
 } from '../lib/crew/commands';
 import { useCrewList } from '../lib/crew/hooks';
 import { useCrewRoute } from '../lib/crew/routes';
+import { TrailMark } from '../brand/TrailMark';
+import { useMarshalDesk } from '../hooks/marshalDesk';
+import { marshalPaletteItem } from '../lib/marshalDesk';
+
+/** Marshal's 12px mark, centred in the palette's 16px icon slot so its pixels stay whole. */
+function MarshalIcon({ className }: { className?: string }) {
+  return (
+    <span className={clsx(className, 'inline-flex items-center justify-center')} aria-hidden="true">
+      <TrailMark />
+    </span>
+  );
+}
 
 const CREW_ICONS: Record<CrewCommandId, ElementType> = {
   go: Navigation,
@@ -160,6 +171,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
   })();
   const crewReady = crewList.status === 'ready' || crewList.items.length > 0;
   const humanLogin = api.getAuthMode() === 'jwt';
+  const desk = useMarshalDesk();
+  const deskOn = desk.available && !desk.optedOut;
 
   const resetFlow = () => {
     setFlow(null);
@@ -251,6 +264,9 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     { id: 'search-memories', label: 'Search memories', description: 'Semantic search across all memories', icon: Search, section: 'Actions', action: () => { setMode('search'); setQuery(''); }, keywords: ['find', 'recall', 'query'], shortcut: '/' },
     { id: 'new-memory', label: 'Store a memory', description: 'Create a new memory entry', icon: Plus, section: 'Actions', action: () => { onNewMemory(); onClose(); }, keywords: ['add', 'create', 'store'] },
     ...(onShowShortcuts ? [{ id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard, section: 'Actions', action: () => onShowShortcuts(), keywords: ['keys', 'help'], shortcut: '?' }] : []),
+    ...(deskOn
+      ? [{ id: 'ask-marshal', label: 'Ask Marshal', description: 'Questions about your relay, answered from your records', icon: MarshalIcon, section: 'Actions', action: () => { desk.open({ source: 'palette' }); onClose(); }, keywords: ['marshal', 'why', 'doctor'] }]
+      : []),
     // Relay
     { id: 'nav-home', label: 'Home', description: 'Mission control', icon: House, section: 'Relay', action: go('home'), keywords: ['mission', 'dashboard', 'overview'], shortcut: 'g h' },
     { id: 'nav-crews', label: 'Crews', description: 'Every project with agents on it', icon: HardHat, section: 'Relay', action: go('crews'), keywords: ['crew', 'site', 'board', 'projects', 'live'] },
@@ -288,8 +304,25 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
       : []),
   ];
 
+  // `?why is codex waiting`: one item, which opens the Marshal desk and asks it (a bare `?` just opens it).
+  const marshalItem = mode === 'commands' ? marshalPaletteItem(query, desk) : null;
+  const marshalCommand: CommandItem | null = marshalItem
+    ? {
+        id: 'marshal-ask',
+        label: marshalItem.label,
+        icon: MarshalIcon,
+        section: 'Marshal',
+        action: () => {
+          desk.open({ question: marshalItem.question || undefined, ask: marshalItem.ask, source: 'palette' });
+          onClose();
+        },
+      }
+    : null;
+
   // Filter commands based on query
-  const filteredCommands = query.trim()
+  const filteredCommands = marshalCommand
+    ? [marshalCommand]
+    : query.trim()
     ? commands.filter(cmd => {
         const q = query.toLowerCase();
         return (
@@ -439,7 +472,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
             {/* Search Input */}
             <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[hsl(var(--border)/0.4)]">
               {mode === 'search' ? (
-                <Sparkles className="w-4 h-4 text-[hsl(var(--primary))] flex-shrink-0" />
+                <MarshalIcon className="w-4 h-4 text-ink flex-shrink-0" />
               ) : mode === 'crew' ? (
                 <HardHat className="w-4 h-4 text-signal-ink flex-shrink-0" />
               ) : (
@@ -535,7 +568,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
                           >
                             <Icon className="w-4 h-4 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                              <span className="text-sm">{item.label}</span>
+                              <span className={clsx('text-sm', item.id === 'marshal-ask' && 'block truncate')}>{item.label}</span>
                               {item.description && (
                                 <span className="ml-2 hidden text-xs text-[hsl(var(--muted-foreground))] sm:inline">
                                   {item.description}
@@ -614,6 +647,12 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
                 <kbd className="px-1.5 py-0.5 rounded bg-[hsl(var(--muted)/0.5)] border border-[hsl(var(--border)/0.5)]">esc</kbd>
                 close
               </span>
+              {deskOn && mode === 'commands' && (
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1 py-0.5 rounded bg-[hsl(var(--muted)/0.5)] border border-[hsl(var(--border)/0.5)]">?</kbd>
+                  ask Marshal
+                </span>
+              )}
             </div>
           </motion.div>
         </motion.div>

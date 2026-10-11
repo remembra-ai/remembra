@@ -499,6 +499,34 @@ body {
   }
 }
 
+/* Marshal desk: the resize handle is a 2px checker dither of the cloud tone over the rule. */
+.rr-desk-handle {
+  height: 6px;
+  background-color: var(--rule);
+  background-image: repeating-conic-gradient(var(--cloud-lo) 0 25%, transparent 0 50%);
+  background-size: 4px 4px;
+  cursor: row-resize;
+  touch-action: none;
+}
+/* The prompt's block cursor while the line is empty. */
+.rr-desk-cursor {
+  display: block;
+  width: 0.6em;
+  height: 1.2em;
+  background: var(--ink);
+  animation: rr-desk-blink 1.06s steps(1, end) infinite;
+}
+@keyframes rr-desk-blink {
+  50% {
+    opacity: 0;
+  }
+}
+/* A page row an evidence chip points at. */
+[data-marshal-outline] {
+  outline: 2px solid var(--signal-ink);
+  outline-offset: 2px;
+}
+
 /* Terminal command block with an offset signal shadow */
 .rr-cmd {
   background: var(--head);
@@ -694,7 +722,8 @@ body {
     scroll-behavior: auto !important;
   }
   .rr-skeleton,
-  .rr-win-line {
+  .rr-win-line,
+  .rr-desk-cursor {
     animation: none;
   }
 }

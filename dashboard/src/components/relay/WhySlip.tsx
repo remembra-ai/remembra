@@ -3,7 +3,8 @@
 // (=, proven [!!] or inferred [??]), the one fix and the doctor lines to copy.
 // Rules only (lib/marshal.ts): no model, nothing written. Text only: no HTML
 // is ever injected, so nothing a key name or trail entry holds can render as
-// markup.
+// markup. Where the account has the Marshal desk, `ask Marshal about this`
+// opens it with the question in the prompt (sent only on Enter).
 
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -22,6 +23,8 @@ import {
   type Verdict,
 } from '../../lib/marshal';
 import type { AgentActivity } from '../../lib/relay';
+import { useMarshalDesk } from '../../hooks/marshalDesk';
+import { SlipAskButton } from '../marshal/SlipAskButton';
 import { CopyCommand } from './ui';
 
 const LABEL_WIDTH = 'w-[8ch]';
@@ -164,6 +167,7 @@ export function SlipView({
   const meta = agentMeta(agentId);
   const adapter = meta.adapter ?? canonicalAgentId(agentId);
   const outcome = slipOutcome(state, { agentId, summaryAgent, now, serverUrl });
+  const desk = useMarshalDesk();
   return (
     <section id={id} aria-label={`Exchange check for ${meta.name}`} className="rr-win mt-1 mb-3 min-w-0 text-[11px]">
       <div className="rr-win-bar">
@@ -197,6 +201,7 @@ export function SlipView({
           </p>
         )}
         {!outcome.pending && <p className="mt-2 text-ink-3">{SLIP_FOOTER}</p>}
+        {!outcome.pending && desk.available && !desk.optedOut && <SlipAskButton agentId={agentId} open={desk.open} />}
       </div>
     </section>
   );

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import openai
 import pytest
 
 from remembra.core.circuit_breaker import CircuitState
@@ -146,3 +147,27 @@ def test_classify_llm_exception_from_sdk_errors() -> None:
     assert classify_llm_exception(rate) == "rate_limited"
     assert classify_llm_exception(openai.APITimeoutError(request=req)) == "unavailable"
     assert classify_llm_exception(ValueError("x")) == "internal"
+
+
+async def test_a_client_built_with_its_own_breaker_feeds_that_breaker_and_not_llm() -> None:
+    from remembra.core.circuit_breaker import CircuitBreaker
+
+    own = CircuitBreaker("llm_test_own", failure_threshold=1, reset_timeout=30.0)
+    upstream = Upstream(429, {"error": {"code": "insufficient_quota", "message": "You exceeded your current quota"}})
+    client = make_llm_client("t", inner_transport=upstream.transport(), breaker=own, max_retries=0)
+    with pytest.raises(openai.RateLimitError):
+        await client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "hi"}])
+    assert upstream.calls == 1
+    assert own.state == CircuitState.OPEN
+    assert get_llm_breaker().state == CircuitState.CLOSED  # the enrichment circuit never saw it
+    with pytest.raises(openai.APIConnectionError):
+        await client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "hi"}])
+    assert upstream.calls == 1  # the open breaker refused it locally
+
+
+async def test_the_default_client_still_feeds_the_shared_llm_breaker() -> None:
+    upstream = Upstream(429, {"error": {"code": "insufficient_quota", "message": "You exceeded your current quota"}})
+    client = make_llm_client("t", inner_transport=upstream.transport(), max_retries=0)
+    with pytest.raises(openai.RateLimitError):
+        await client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": "hi"}])
+    assert get_llm_breaker().state == CircuitState.OPEN

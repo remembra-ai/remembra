@@ -135,14 +135,21 @@ def make_llm_client(
     timeout: float | None = None,
     max_retries: int | None = None,
     inner_transport: httpx.AsyncBaseTransport | None = None,
+    breaker: CircuitBreaker | None = None,
 ) -> Any:
-    """Build an ``AsyncOpenAI`` client wired to the shared LLM breaker."""
+    """Build an ``AsyncOpenAI`` client wired to a circuit breaker.
+
+    ``breaker`` defaults to the shared ``"llm"`` breaker (extraction and
+    consolidation). A caller with its own budget and failure domain (the
+    Marshal desk's ``"llm_marshal"``) passes its own, so its failures never
+    open the enrichment circuit and the other way round.
+    """
     from openai import AsyncOpenAI
 
     t = timeout if timeout is not None else float(_settings_value("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT))
     retries = max_retries if max_retries is not None else int(_settings_value("llm_max_retries", DEFAULT_LLM_MAX_RETRIES))
     http_client = httpx.AsyncClient(
-        transport=BreakerTransport(get_llm_breaker(), inner_transport),
+        transport=BreakerTransport(breaker if breaker is not None else get_llm_breaker(), inner_transport),
         timeout=httpx.Timeout(t, connect=min(5.0, t)),
     )
     return AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=t, max_retries=retries, http_client=http_client)

@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.datastructures import FormData
 
 from remembra.api.v1.auth import CurrentUser as DashboardUser
+from remembra.auth.middleware import refuse_delegated_principal
 from remembra.auth.users import UserManager
 from remembra.config import Settings, get_settings
 from remembra.connector import pages
@@ -66,7 +67,8 @@ _GRANT_TYPES = ["authorization_code", "refresh_token"]
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 router = APIRouter(include_in_schema=False)
-connections_router = APIRouter(prefix="/connector", tags=["connector"])
+# The dashboard's list of connected apps: never reachable by a connector grant or the Marshal desk.
+connections_router = APIRouter(prefix="/connector", tags=["connector"], dependencies=[Depends(refuse_delegated_principal)])
 
 
 # ---------------------------------------------------------------------------

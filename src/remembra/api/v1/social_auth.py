@@ -19,13 +19,13 @@ import time
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Body, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from remembra.api.v1.auth import CurrentUser, get_user_manager, refuse_until_review_done
 from remembra.auth import account_review, social
-from remembra.auth.middleware import get_client_ip
+from remembra.auth.middleware import get_client_ip, refuse_delegated_principal
 from remembra.auth.superadmin import account_is_owner_now
 from remembra.cloud import notify
 from remembra.config import get_settings
@@ -34,7 +34,7 @@ from remembra.security import state as security_state
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(refuse_delegated_principal)])
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
 

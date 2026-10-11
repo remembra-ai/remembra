@@ -47,7 +47,12 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword, footer }: L
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Login failed');
+        const detail = data.detail;
+        const message = typeof detail === 'string' ? detail
+          : typeof detail?.message === 'string' ? detail.message
+          : Array.isArray(detail) ? detail.map((item) => typeof item?.msg === 'string' ? item.msg : 'Invalid input').join(', ')
+          : 'Login failed';
+        throw new Error(message);
       }
 
       onLogin(data.access_token, data.user);

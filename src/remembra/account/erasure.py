@@ -266,6 +266,9 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("cloud_credit_periods"),
     _by_user("cloud_usage_daily"),
     _by_user("founding_holds"),
+    _by_user("marshal_user_day"),
+    _by_user("marshal_reservations"),
+    _by_user("marshal_prefs"),
     _by_user("cloud_tenants"),
     TableRule("users", deletes=("id = :uid",)),
 )
@@ -273,6 +276,7 @@ ERASURE_RULES: tuple[TableRule, ...] = (
 # Tables that hold no row of any one account (with the reason).
 EXEMPT_TABLES: dict[str, str] = {
     "cloud_ai_spend_monthly": "platform AI spend per month and group, no account column",
+    "marshal_budget": "platform Marshal spend per UTC day and month, no account column",
     "cloud_revenue_events": "net revenue per Paddle transaction id, the accounting record (no account column)",
     "paddle_webhook_events": "Paddle event ids already processed, for dedupe (no account column)",
     "paddle_subscription_events": "per Paddle subscription id, the newest event time and when it ended (no account column)",

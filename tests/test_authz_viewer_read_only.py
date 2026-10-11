@@ -27,7 +27,7 @@ from remembra.auth.middleware import AuthenticatedUser, has_permission
 from remembra.auth.rbac import Permission, Role
 from remembra.cloud.metering import UsageMeter
 from remembra.teams.manager import TeamManager
-from tests.security_harness import secure_app
+from tests.security_harness import make_settings, secure_app
 
 ROOT = Path(__file__).resolve().parents[1]
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -95,7 +95,9 @@ async def _insert_memory(db, user_id: str, memory_id: str = MEMORY_ID) -> None:
 
 
 async def test_viewer_key_is_refused_on_every_write_route(tmp_path):
-    async with secure_app(tmp_path, [api_router], prefix="") as h:
+    # Exercise Marshal's credential gate, not its earlier feature-off 404.
+    # A disabled feature does not establish that viewer authorization works.
+    async with secure_app(tmp_path, [api_router], prefix="", settings=make_settings(marshal_enabled=True)) as h:
         # Cloud routes answer 503 without a meter, before any credential check.
         h.app.state.usage_meter = UsageMeter(h.db)
         uid = await h.create_user("viewer-owner@example.com", verified=True)

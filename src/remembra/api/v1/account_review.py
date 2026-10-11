@@ -14,18 +14,18 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 import structlog
-from fastapi import APIRouter, Body, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from remembra.api.v1.auth import CurrentUser, get_user_manager
 from remembra.auth import account_review
-from remembra.auth.middleware import get_client_ip
+from remembra.auth.middleware import get_client_ip, refuse_delegated_principal
 from remembra.core.limiter import limiter
 from remembra.security import state as security_state
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(refuse_delegated_principal)])
 
 _METHOD = "dashboard_session"
 

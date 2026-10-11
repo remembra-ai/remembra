@@ -229,7 +229,7 @@ async def test_scheduled_create_with_keep_covers_crew_db_and_prunes_only_old_sna
     applied = sorted(await main_migrations().applied_versions(db.conn))
     await crew_db.close()
     await db.close()
-    assert applied == list(range(1, 14))  # Includes claim fences, durable erasure and v13 persistent open work.
+    assert applied == list(range(1, 15))  # Includes v11 claim fences and v12 durable erasure.
     monkeypatch.setenv("REMEMBRA_DATABASE_URL", f"sqlite+aiosqlite:///{volume / 'remembra.db'}")
     import remembra.config as config_module
 
@@ -253,7 +253,7 @@ async def test_scheduled_create_with_keep_covers_crew_db_and_prunes_only_old_sna
 
     assert [r["crew_included"] for r in runs] == [True] * 4
     by_role = {d["role"]: d for d in runs[-1]["databases"]}
-    assert by_role["main"]["schema_version"] == 13 and by_role["crew"]["counts"]["crews"] == 1
+    assert by_role["main"]["schema_version"] == 14 and by_role["crew"]["counts"]["crews"] == 1
     assert [len(r["pruned"]) for r in runs] == [0, 0, 1, 1]
     assert [Path(p).name for r in runs for p in r["pruned"]] == [
         "remembra-snapshot-20260926T030000Z",
