@@ -14,6 +14,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  crewai:
+    name: Current CrewAI adapter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install actual optional framework
+        run: pip install -e ".[server,cloud,dev,mcp,encryption,crewai]"
+      - name: Type-check and exercise actual Tool.run adapters
+        run: |
+          mypy src/remembra/integrations/crewai.py
+          pytest tests/test_crewai_integration.py -q -p no:cacheprovider --no-cov
+
+  frontend:
+    name: Node audit, test and build (${{ matrix.path }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path: [dashboard, sdk/typescript]
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Audit the complete locked Node dependency set
+        run: npm audit --audit-level=low
+      - name: Test without competing worker CPU affecting graph timing
+        run: npm test -- --maxWorkers=1
+      - run: npm run build
+      - if: matrix.path == 'dashboard'
+        run: npm run lint
+      - if: matrix.path == 'sdk/typescript'
+        run: npm run typecheck
+
   # ---------------------------------------------------------------------------
   # Lint & type-check
   # ---------------------------------------------------------------------------

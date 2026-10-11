@@ -40,6 +40,15 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "deps(dashboard)"
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    groups:
+      sdk:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(sdk)"
   # CTR-1: every Dockerfile names its base image by tag and @sha256 digest
   # (tests/test_container_images.py). These keep the digests current: "/"
   # covers Dockerfile, Dockerfile.cloud and docs.Dockerfile.
