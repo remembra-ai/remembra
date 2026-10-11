@@ -15,11 +15,12 @@ These run the real ``create_app()`` stack with auth on and no key.
 
 from __future__ import annotations
 
+import gc
 import json
 import time
 import tomllib
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -58,6 +59,52 @@ async def api_client() -> AsyncIterator[httpx.AsyncClient]:
         config_module._settings = previous
 
 
+async def prepare_request_budget(client: httpx.AsyncClient) -> None:
+    """Complete lazy fixture startup and collect old app graphs before measuring.
+
+    The deadline covers a request to a serving worker. Keep cyclic GC enabled
+    during that request, including collections triggered by its own allocations.
+    Prepare the upload route too: a root GET can leave FastAPI included-router
+    contexts cold when the global rate limiter is disabled. This measures a
+    serving worker; cold route construction remains a separate startup concern.
+    """
+    assert (await client.get("/")).status_code == 200
+    prepared = await client.post(
+        "/api/v1/transfer/import/file", content=b"", headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    assert prepared.status_code == 401
+    gc.collect()
+    assert gc.isenabled()
+
+
+@contextmanager
+def request_timing() -> Iterator[SimpleNamespace]:
+    """Keep wall time authoritative and record CPU, GC and chunk diagnostics."""
+    measured = SimpleNamespace(wall=0.0, cpu=0.0, gc_events=[], chunk_times=[])
+
+    def gc_event(phase: str, info: dict) -> None:
+        measured.gc_events.append(
+            (
+                phase,
+                info["generation"],
+                time.perf_counter() - measured.start,
+                time.thread_time() - measured.cpu_start,
+                info.get("collected", 0),
+            )
+        )
+
+    measured.cpu_start = time.thread_time()
+    measured.start = time.perf_counter()
+    gc.callbacks.append(gc_event)
+    try:
+        yield measured
+    finally:
+        measured.wall = time.perf_counter() - measured.start
+        measured.cpu = time.thread_time() - measured.cpu_start
+        gc.callbacks.remove(gc_event)
+    assert gc.isenabled()
+
+
 # ---------------------------------------------------------------------------
 # 1. The lock pins the fixed releases
 # ---------------------------------------------------------------------------
@@ -90,15 +137,18 @@ def test_pyproject_floors_keep_pip_installs_on_the_fixed_releases() -> None:
 
 async def test_unauthenticated_form_bomb_to_the_upload_route_is_refused_fast() -> None:
     async with api_client() as client:
-        start = time.perf_counter()
-        r = await client.post(
-            "/api/v1/transfer/import/file",
-            content=b"a;" * (MiB // 2),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        elapsed = time.perf_counter() - start
+        await prepare_request_budget(client)
+        with request_timing() as measured:
+            r = await client.post(
+                "/api/v1/transfer/import/file",
+                content=b"a;" * (MiB // 2),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        elapsed = measured.wall
     assert r.status_code in (401, 413), r.text
-    assert elapsed < 0.3, f"took {elapsed:.3f}s"
+    assert elapsed < 0.3, (
+        f"wall={elapsed:.6f}s thread_cpu={measured.cpu:.6f}s gc_events={measured.gc_events} chunk_times={measured.chunk_times}"
+    )
 
 
 async def test_a_streamed_form_bomb_without_content_length_is_cut_off_unread() -> None:
@@ -108,19 +158,23 @@ async def test_a_streamed_form_bomb_without_content_length_is_cut_off_unread() -
         nonlocal sent
         for _ in range(64):  # 4 MiB offered in 64 KiB chunks
             sent += 1
+            measured.chunk_times.append(time.perf_counter() - measured.start)
             yield b"a;" * 32768
 
     async with api_client() as client:
-        start = time.perf_counter()
-        r = await client.post(
-            "/api/v1/transfer/import/file",
-            content=body(),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        elapsed = time.perf_counter() - start
+        await prepare_request_budget(client)
+        with request_timing() as measured:
+            r = await client.post(
+                "/api/v1/transfer/import/file",
+                content=body(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        elapsed = measured.wall
     assert r.status_code == 413, r.text
-    assert elapsed < 0.3, f"took {elapsed:.3f}s"
     assert sent <= 2, f"read {sent} chunks past a {FORM_CAP}-byte cap"
+    assert elapsed < 0.3, (
+        f"wall={elapsed:.6f}s thread_cpu={measured.cpu:.6f}s gc_events={measured.gc_events} chunk_times={measured.chunk_times}"
+    )
 
 
 # ---------------------------------------------------------------------------
