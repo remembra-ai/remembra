@@ -8,7 +8,8 @@ closed. This contract does not make Relay approvals available to customers yet.
 An unregistered `approval_inputs` parser prepares the future HTTP boundary. It
 accepts closed request/decision/revocation/claim bodies, rejects duplicate JSON
 keys and non-JSON constants, and limits input to 32 KiB. Rejections carry one fixed
-message with no original exception chain. Synthetic HTTP tests verify that
+message with no rendered exception chain, including a suppressed caller context.
+Synthetic HTTP tests verify that
 credential-like values and attacker-chosen extra keys appear in neither responses
 nor standard exception logs. Routes must authenticate first, enforce the byte
 limit while streaming, and call these parsers explicitly. Automatic FastAPI body

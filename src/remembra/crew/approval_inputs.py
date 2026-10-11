@@ -21,7 +21,7 @@ INVALID_INPUT = "Invalid approval input."
 
 
 class ApprovalInputError(ValueError):
-    """Safe rejection with no input, validation details or exception chain."""
+    """Safe rejection with no input, validation details or rendered error chain."""
 
     def __init__(self) -> None:
         super().__init__(INVALID_INPUT)
@@ -74,7 +74,8 @@ def _reject_constant(value: str) -> None:
 
 def _parse(body: bytes, model: type[Input]) -> Input:
     # Do not attach or format a caught exception: even .errors() locations can
-    # contain attacker-chosen keys. Raise outside except to discard its context.
+    # contain attacker-chosen keys. Raise outside except to discard its context;
+    # explicitly suppress any exception context inherited from the caller too.
     if len(body) <= MAX_INPUT_BYTES:
         try:
             text = body.decode("utf-8")
@@ -82,7 +83,7 @@ def _parse(body: bytes, model: type[Input]) -> Input:
             return model.model_validate_json(text)
         except (ValueError, ValidationError, RecursionError):
             pass
-    raise ApprovalInputError()
+    raise ApprovalInputError() from None
 
 
 def parse_request(body: bytes) -> RequestInput:

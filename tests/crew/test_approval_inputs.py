@@ -121,6 +121,23 @@ def test_duplicate_nested_operation_key_is_rejected() -> None:
         parse_request(body.encode())
 
 
+def test_active_caller_exception_is_suppressed_in_traceback_and_log(caplog: pytest.LogCaptureFixture) -> None:
+    try:
+        raise ValueError(SECRET)
+    except ValueError:
+        try:
+            parse_consume(b"{}")
+        except ApprovalInputError as error:
+            assert error.__suppress_context__ is True
+            assert str(error) == INVALID_INPUT
+            assert SECRET not in "".join(traceback.format_exception(error))
+            logging.getLogger("approval-input-test").exception("approval_input_rejected")
+        else:
+            pytest.fail("invalid input was accepted")
+    assert "approval_input_rejected" in caplog.text
+    assert SECRET not in caplog.text
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("location", ["field", "extra_key", "malformed"])
 async def test_synthetic_http_error_and_standard_exception_log_never_echo_input(
