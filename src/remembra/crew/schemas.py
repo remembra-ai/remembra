@@ -2447,6 +2447,15 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
         "ALLOW / DENY <reason> (advisory pre-edit check for MCP-only agents).",
     ),
     McpToolSpec(
+        "crew_collision",
+        (
+            McpParam("action", "str", default="list", enum=("list", "ack", "resolve")),
+            McpParam("collision", "str"),
+            McpParam("resolution", "str"),
+        ),
+        "List your unresolved collisions; acknowledge or resolve one you are party to after verifying the overlap.",
+    ),
+    McpToolSpec(
         "crew_task",
         (
             McpParam("action", "str", default="list", enum=("list", "create", "start", "update", "block", "release")),

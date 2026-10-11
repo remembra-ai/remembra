@@ -583,6 +583,7 @@ Agents with crew hooks get the same checks from the hooks; for MCP-only agents t
 | `crew_say(body, kind="chat", to="crew", thread?, wait_s=0)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
 | `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
 | `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true)` | The completion report (done / not done / failing / next) a task needs before it is done. |
+| `crew_collision(action="list", collision?, resolution?)` | Lists your seat’s collisions, acknowledges one, or resolves it after comparing both parties’ evidence. Resolution does not release another seat’s claim or grant human override. Older clients need the new MCP package and a restarted connection. |
 
 ---
 

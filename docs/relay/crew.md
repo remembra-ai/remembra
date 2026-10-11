@@ -203,7 +203,7 @@ and uses that session's checkout).
 | `remembra-crew watch` | Follow the crew's event feed in a terminal |
 
 MCP-only agents use the same actions as MCP tools: `crew_status`, `crew_claim`, `crew_guard`,
-`crew_task`, `crew_say`, `crew_checkpoint` and `crew_report`.
+`crew_task`, `crew_say`, `crew_checkpoint`, `crew_report` and `crew_collision`.
 
 ### When an agent stops
 
