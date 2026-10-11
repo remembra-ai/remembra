@@ -238,6 +238,13 @@ def _shrink(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def key_mark(api_key: str | None) -> str | None:
+    """A short one-way mark of an API key: it tells "the same key" from "another key" and is never the key."""
+    if not api_key:
+        return None
+    return hashlib.sha256(b"remembra-relay-outbox:" + api_key.encode()).hexdigest()[:16]
+
+
 def enqueue(
     home: Path,
     payload: dict[str, Any],
@@ -246,8 +253,13 @@ def enqueue(
     config_source: str | None,
     error: str,
     http_status: int | None = None,
+    api_key: str | None = None,
 ) -> Path | None:
-    """Queue a close body that could not be delivered. Returns the entry path, or None when it was not kept."""
+    """Queue a close body that could not be delivered. Returns the entry path, or None when it was not kept.
+
+    ``api_key`` is the key the close was tried with. It is never stored: when the server refused the close
+    (403), the entry keeps that key's :func:`key_mark` as ``refused_key_fp`` until it is delivered or dropped.
+    """
     agent_id = str(payload.get("agent_id") or "unknown-agent")
     session_id = str(payload.get("session_id") or "")
     if not session_id:
@@ -265,6 +277,9 @@ def enqueue(
             "attempts": (previous.attempts if previous else 0) + 1,
             "url": clean_url(url),
             "config_source": config_source,
+            "refused_key_fp": key_mark(api_key)
+            if http_status == 403
+            else (previous.data.get("refused_key_fp") if previous else None),
             "last_error": str(redact(error))[:300],
             "last_status": http_status,
             "payload": _redacted_payload(payload),
@@ -363,8 +378,20 @@ def claim(entry: Entry) -> Path | None:
     return target
 
 
-def finish(entry: Entry, claimed: Path, *, sent: bool, error: str | None = None, http_status: int | None = None) -> None:
-    """After a send: delete the claim when delivered, else put it back (a newer queued close wins)."""
+def finish(
+    entry: Entry,
+    claimed: Path,
+    *,
+    sent: bool,
+    error: str | None = None,
+    http_status: int | None = None,
+    api_key: str | None = None,
+) -> None:
+    """After a send: delete the claim when delivered, else put it back (a newer queued close wins).
+
+    A 403 records the :func:`key_mark` of ``api_key``, the key that was refused; a later failure of
+    another kind does not clear it.
+    """
     try:
         if sent or entry.path.exists():
             claimed.unlink()
@@ -374,6 +401,8 @@ def finish(entry: Entry, claimed: Path, *, sent: bool, error: str | None = None,
         if error:
             data["last_error"] = str(redact(error))[:300]
         data["last_status"] = http_status
+        if http_status == 403:
+            data["refused_key_fp"] = key_mark(api_key)
         data["last_try_at"] = _now_iso()
         atomic_write_private(claimed, json.dumps(data, default=str))
         os.replace(claimed, entry.path)
