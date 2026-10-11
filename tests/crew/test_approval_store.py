@@ -7,16 +7,16 @@ import sqlite3
 from dataclasses import replace
 
 import pytest
+from tests.crew.approval_store_harness import APPROVAL_DDL, SCHEMA_OBJECTS, inject_failure
 from tests.crew.approval_store_harness import base_h as base_h
 from tests.crew.approval_store_harness import h as h
-from tests.crew.approval_store_harness import inject_failure
 from tests.crew.test_approval_http import http as http
 from tests.crew.test_approvals import AGENT, NOW, OWNER, Harness, operation
 
 from remembra.crew import schemas
 from remembra.crew.approval_contracts import ApprovalRecord, AuditEvent, Block
 from remembra.crew.approval_events import EVENT_TYPE, NOTIFICATION_KIND, event_spec
-from remembra.crew.approval_schema import APPROVAL_DDL, SCHEMA_OBJECTS
+from remembra.crew.approval_schema import SCHEMA_FINGERPRINTS, schema_fingerprint
 from remembra.crew.approval_store import SQLiteApprovalStore
 from remembra.crew.approvals import ApprovalError
 from remembra.crew.db import CrewDatabase
@@ -514,3 +514,26 @@ async def test_http_owner_flow_uses_real_chain_and_scaffold_store_without_execut
     assert len((await rows(http.h))[1]) == 2
     assert len(http.h.seen) == 2
     assert (await http.client.post(url + "/consume", headers=http.worker_headers, json={})).status_code == 404
+
+
+def test_schema_contract_matches_reviewed_synthetic_ddl():
+    assert dict(SCHEMA_FINGERPRINTS) == {name: schema_fingerprint(sql) for name, sql in SCHEMA_OBJECTS.items()}
+
+
+@pytest.mark.parametrize("object_name", tuple(SCHEMA_OBJECTS))
+async def test_changed_schema_object_fingerprint_fails_closed(base_h, object_name):
+    async with base_h.db.transaction():
+        for name, sql in SCHEMA_OBJECTS.items():
+            if name == object_name:
+                # Change the actual installed type or trigger behavior while
+                # retaining the expected object name and every other object.
+                sql = sql.replace(" TEXT ", " BLOB ", 1) if "CREATE TABLE" in sql else sql.replace("RAISE(ABORT", "RAISE(FAIL")
+                assert schema_fingerprint(sql) != SCHEMA_FINGERPRINTS[name]
+            await base_h.db.conn.execute(sql)
+    store = SQLiteApprovalStore(base_h.db, event_log=CrewEventLog(base_h.db))
+    with pytest.raises(ApprovalError, match="approval_schema_unavailable"):
+        async with store.transaction():
+            pytest.fail("changed schema yielded a usable transaction")
+    assert not base_h.db.in_transaction
+    assert await base_h.db.fetchall("SELECT * FROM crew_approval_records") == []
+    assert await base_h.db.fetchall("SELECT * FROM crew_approval_versions") == []

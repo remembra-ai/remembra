@@ -8,12 +8,16 @@ integration in this increment runs against synthetic temporary databases.
 
 ## Storage and atomic notification
 
-`crew/approval_schema.py` contains proposed additive DDL, not a migration runner.
-The proposal has a current-record table and append-only version snapshots, with
+`crew/approval_schema.py` contains immutable fingerprints of the five reviewed
+SQLite objects, with no installable DDL or runtime DDL builder. Full proposal SQL
+lives only in `tests/crew/approval_store_harness.py`. The synthetic proposal has a current-record table and append-only version snapshots, with
 requester/credential/session/tenant-scoped idempotency, immutable identity and
 decision constraints, and links to existing Crew event and outbox rows.
 `crew/approval_store.py` never creates these objects. Absent or changed proposal
-DDL and disabled foreign keys fail closed.
+definitions and disabled foreign keys fail closed. Fingerprints preserve the
+previous exact-definition check and whitespace normalization; moving proposal
+SQL out of production keeps the existing account-erasure source inventory intact.
+This does not exempt future installed tables from Crew erasure or retention.
 
 Each approval call owns its outer Crew transaction. Both coordinator-owned and
 raw external transactions are rejected, including an outer transaction that
@@ -63,7 +67,7 @@ unavailable schema/policy/rate setup must not be advertised as a working feature
 
 | Path | Minimal proposed change and review |
 | --- | --- |
-| `src/remembra/crew/db.py` (frozen) | Import the reviewed DDL, append a new version after the existing immutable migrations, and include the two new tables in `CREW_TABLES`. No transaction-coordinator changes. |
+| `src/remembra/crew/db.py` (frozen) | Carry the full reviewed SQL in the Crew migration, append a new version after the existing immutable migrations, and include the two new tables in `CREW_TABLES`. No transaction-coordinator changes. |
 | `tests/crew/test_storage_migrations.py` (frozen) | Advance Crew-only latest-version expectations, retaining all main-DB expectations and assertions; cover upgrade, second startup, concurrent upgrade and rollback. |
 | `src/remembra/main.py` (frozen) | Add an explicit optional router injection seam to existing Crew registration, with the default call unchanged. Passing an instantiated router requires separately reviewed lifecycle, authoritative policy and rate mapping; no automatic default adapter. |
 | `src/remembra/crew/schemas.py` | Register the exact server-only event, always-moment rule, route/access catalog and approved snapshot/view shapes. No import-time mutation by the new modules. |

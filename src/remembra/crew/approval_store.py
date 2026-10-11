@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from remembra.crew.approval_contracts import ApprovalRecord, ApprovalRequest, AuditEvent, Boundary, DecisionState
 from remembra.crew.approval_events import append_notification
-from remembra.crew.approval_schema import SCHEMA_OBJECTS
+from remembra.crew.approval_schema import SCHEMA_FINGERPRINTS, schema_fingerprint
 from remembra.crew.approvals import ApprovalError
 from remembra.crew.db import CrewDatabase
 from remembra.crew.events import CrewEventLog, EventTx
@@ -98,8 +98,8 @@ class SQLiteApprovalStore:
 
     async def _check_schema(self) -> None:
         rows = await self.db.fetchall("SELECT name, sql FROM sqlite_master WHERE name LIKE 'crew_approval_%'")
-        actual = {r["name"]: " ".join((r["sql"] or "").split()) for r in rows}
-        if any(actual.get(name) != " ".join(sql.split()) for name, sql in SCHEMA_OBJECTS.items()):
+        actual = {r["name"]: schema_fingerprint(r["sql"] or "") for r in rows}
+        if any(actual.get(name) != digest for name, digest in SCHEMA_FINGERPRINTS.items()):
             raise ApprovalError("approval_schema_unavailable")
         foreign_keys = await self.db.fetchone("PRAGMA foreign_keys")
         if foreign_keys is None or next(iter(foreign_keys.values())) != 1:
