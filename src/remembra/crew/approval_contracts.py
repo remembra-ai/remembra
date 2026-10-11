@@ -11,12 +11,26 @@ import json
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 from remembra.crew.schemas import clip_item
 from remembra.security.secrets import redact_secrets
 
-Identifier = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$")]
+
+def _nonsecret_identifier(value: str) -> str:
+    # References/ids can be random; reject named credential formats without
+    # applying the high-entropy fallback to legitimate ids or revision digests.
+    # Do not silently redact an authority-bearing value and change its meaning.
+    if redact_secrets(value, fallback=False).text != value:
+        raise ValueError("identifiers must use references, never credentials")
+    return value
+
+
+Identifier = Annotated[
+    str,
+    Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$"),
+    AfterValidator(_nonsecret_identifier),
+]
 Revision = Annotated[str, Field(pattern=r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$")]
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 

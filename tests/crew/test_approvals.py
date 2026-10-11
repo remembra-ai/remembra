@@ -651,3 +651,10 @@ async def test_storage_adapter_itself_rejects_joining_outer_transaction(h):
         with pytest.raises(RuntimeError, match="approval_transaction_must_own_commit"):
             async with h.store.transaction():
                 pytest.fail("adapter yielded an uncommitted result context")
+
+
+@pytest.mark.parametrize("field", ["action", "resource_type", "resource_id", "scope"])
+def test_named_credentials_cannot_enter_authority_identifiers(field):
+    token = "sk_live_" + "AbC1" * 12
+    with pytest.raises(ValidationError):
+        operation(**{field: (token,) if field == "scope" else token})
