@@ -1,0 +1,66 @@
+name: Crew latency diagnostic (bounded)
+
+# Proposal: manual only, one attempt, four fixed cells. This is not a required
+# release check and cannot replace unchanged Crew E2E acceptance. GitHub may
+# require this workflow on the default branch before dispatch; do not add a
+# push/PR trigger or merge it merely to work around that execution boundary.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crew-latency-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: github.run_attempt == '1'
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: Check out reviewed diagnostic
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic
+          persist-credentials: false
+      - name: Check out exact baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: cb6c2f4447972a6fd976c38c63256f741aff76a2
+          path: baseline
+          persist-credentials: false
+      - name: Check out exact credential fix
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: 8d6481dd90c48d3a2b4ae6e717d34cceaf19fcaf
+          path: fixed
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11.9'
+      - name: Install the recorded dependency versions once for both lanes
+        shell: bash
+        env:
+          PIP_CONSTRAINT: ${{ runner.temp }}/latency-constraints.txt
+        run: |
+          python diagnostic/tests/crew/diagnostics/latency_runner.py requirements > "$RUNNER_TEMP/latency-constraints.txt"
+          python -m pip install -e './fixed[server,cloud,dev,mcp,encryption]'
+      - name: Check observer behavior without running the load
+        run: python diagnostic/tests/crew/diagnostics/latency_runner.py self-test
+      - name: Run the four planned cells once
+        shell: bash
+        run: |
+          python diagnostic/tests/crew/diagnostics/latency_runner.py compare \
+            --baseline baseline --fixed fixed --output "$RUNNER_TEMP/crew-latency-evidence"
+      - name: Preserve numeric diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crew-latency-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/crew-latency-evidence
+          if-no-files-found: warn
+          retention-days: 7
