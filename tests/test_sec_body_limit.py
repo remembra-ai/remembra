@@ -64,9 +64,15 @@ async def prepare_request_budget(client: httpx.AsyncClient) -> None:
 
     The deadline covers a request to a serving worker. Keep cyclic GC enabled
     during that request, including collections triggered by its own allocations.
-    Use the local root route; /health probes an unrelated, unstarted Qdrant.
+    Prepare the upload route too: a root GET can leave FastAPI included-router
+    contexts cold when the global rate limiter is disabled. This measures a
+    serving worker; cold route construction remains a separate startup concern.
     """
     assert (await client.get("/")).status_code == 200
+    prepared = await client.post(
+        "/api/v1/transfer/import/file", content=b"", headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    assert prepared.status_code == 401
     gc.collect()
     assert gc.isenabled()
 
