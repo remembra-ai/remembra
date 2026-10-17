@@ -7,7 +7,7 @@
 #
 # Base images are pinned by digest (CTR-1); Dependabot (docker, /) proposes
 # updates. The build tools are pinned by hash (.github/docs-requirements.txt).
-FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS build
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS build
 WORKDIR /src
 COPY .github/docs-requirements.txt ./docs-requirements.txt
 RUN pip install --no-cache-dir --require-hashes --no-deps -r docs-requirements.txt
