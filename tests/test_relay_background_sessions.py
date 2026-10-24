@@ -28,6 +28,7 @@ import http.server
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -362,8 +363,10 @@ def _main(monkeypatch, capsys, argv: list[str], stdin: str) -> tuple[int, str, s
 
 
 def _log(home: Path) -> list[str]:
+    """The relay log's decision lines (without the "started" and "sent" lines every hook close writes)."""
     path = outbox.log_path(home)
-    return [line.split(" ", 2)[2] for line in path.read_text().splitlines()] if path.exists() else []
+    lines = [line.split(" ", 2)[2] for line in path.read_text().splitlines()] if path.exists() else []
+    return [line for line in lines if not re.match(r"close --hook \S+: started |close: sent the handoff of ", line)]
 
 
 def _transcript(kind: str, tmp_path: Path) -> Path:
@@ -691,3 +694,25 @@ def test_real_entry_point_skips_an_automation_and_serves_a_user_session(stub_ser
     )
     assert opted_in.returncode == 0 and opted_in.stdout.strip() == BRIEF_TEXT
     assert seen[-1] == ("GET", "/api/v1/session/brief")
+
+
+def test_a_claude_code_close_logs_that_it_started_and_that_it_sent(relay_env, monkeypatch, capsys, tmp_path):
+    """A hook close that fires always leaves a line, so "the hook never ran" can be told from "it ran"."""
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text("")
+    end = json.dumps(
+        {
+            "session_id": "busy-claude",
+            "transcript_path": str(transcript),
+            "cwd": str(relay_env["work"]),
+            "hook_event_name": "SessionEnd",
+            "reason": "exit",
+        }
+    )
+    argv = ["close", "--hook", "claude-code", "--agent", "claude-code", "--next", "carry on"]
+    assert _main(monkeypatch, capsys, argv, end)[0] == 0
+    path = outbox.log_path(relay_env["home"])
+    lines = [line.split(" ", 2)[2] for line in path.read_text().splitlines()]
+    assert lines[0] == "close --hook claude-code: started (SessionEnd, session busy-claude)"
+    assert lines[-1] == "close: sent the handoff of claude-code session busy-claude"
+    assert relay_env["http"].calls()[-1] == ("POST", "/api/v1/session/close")

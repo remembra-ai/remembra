@@ -87,10 +87,19 @@ import httpx
 from remembra.client.project import normalize_project_id, parse_project_aliases
 from remembra.relay import background, hosts, outbox, projects
 from remembra.relay import facts as factlib
-from remembra.relay.adapters import REGISTRY, Adapter, Change, agents_md, backup_and_write, get_adapter, relay_command
+from remembra.relay.adapters import (
+    REGISTRY,
+    Adapter,
+    Change,
+    agents_md,
+    backup_and_write,
+    crew_hooks_installed,
+    get_adapter,
+    relay_command,
+)
 from remembra.relay.adapters.base import OUTPUT_MODES, AdapterSpec, RefusedEdit
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
-from remembra.relay.handoff import build_sections, sections_have_substance
+from remembra.relay.handoff import CREW_FOOTER, build_sections, crew_footer_off, sections_have_substance
 from remembra.relay.identity import HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS
 from remembra.security.untrusted import neutralize_encoded, strip_controls
 
@@ -731,6 +740,20 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
 # ---------------------------------------------------------------------------
 
 
+def crew_footer_here(ctx: Context, rendered: str) -> str:
+    """The server writes the crew block's "Crew mode is automatic" line without knowing this
+    machine; where the reading agent's crew hooks are not installed, it says so instead."""
+    if CREW_FOOTER not in rendered or not ctx.agent:
+        return rendered
+    try:
+        installed = crew_hooks_installed(ctx.home, ctx.agent, ctx.repo.toplevel or str(ctx.cwd))
+    except Exception:
+        installed = None
+    if installed is not False:
+        return rendered
+    return "\n".join(crew_footer_off(ctx.agent) if line == CREW_FOOTER else line for line in rendered.split("\n"))
+
+
 def _emit_brief(
     mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None, event: str = "SessionStart"
 ) -> None:
@@ -952,6 +975,8 @@ def cmd_brief(args: argparse.Namespace) -> int:
             return 0
         outbox.record(ctx.home, agent_id=ctx.agent, command="brief", ok=True, config_source=ctx.config.source)
         brief = response.json()
+        if isinstance(brief.get("rendered"), str):
+            brief["rendered"] = crew_footer_here(ctx, brief["rendered"])
         if _claim_print(home, once_key, hook_session, event, exclusive):
             _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay), event=event)
     except Exception as e:  # never break the agent's session start
@@ -1236,11 +1261,21 @@ def cmd_close(args: argparse.Namespace) -> int:
                 if not args.dry_run:
                     _hook_ack(adapter)
                 return 0
+            live = not args.dry_run and not args.foreground
+            if live:  # every hook close leaves a line, so "never fired" and "fired, then stopped" differ
+                fields = adapter.spec.payload.extract(hook_payload) if hook_payload else {}
+                outbox.log(
+                    _home(),
+                    f"close --hook {adapter.spec.name}: started"
+                    f" ({fields.get('event') or 'no event'}, session {str(fields.get('session_id') or '?')[:40]})",
+                )
             # 2. A hook another agent runs is filed under that agent, or does nothing.
             routed, reader = route_hook(args, adapter, hook_payload, closing=True)
             if not args.dry_run:
                 _hook_ack(reader)  # before any slow work; the detached child's stdout goes nowhere
             if routed is None:
+                if live:
+                    outbox.log(_home(), f"close --hook {adapter.spec.name}: run by another agent, not filed")
                 return 0
             if routed is not adapter and _skip_background_close(args, routed, hook_payload):
                 return 0  # the agent that runs it has such threads too (Codex running Claude Code's hooks)
@@ -1304,6 +1339,7 @@ def cmd_close(args: argparse.Namespace) -> int:
             return 0
         result = response.json()
         mark_close_sent(ctx.home, *own)
+        outbox.log(ctx.home, f"close: sent the handoff of {own[0]} session {own[1][:40]}")
         outbox.record(ctx.home, agent_id=str(payload.get("agent_id")), command="close", ok=True, config_source=ctx.config.source)
         # This close supersedes a queued copy of the same session; then send what is still waiting.
         replay_outbox(ctx, skip=own)

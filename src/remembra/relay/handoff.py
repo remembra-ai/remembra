@@ -1331,6 +1331,17 @@ MAX_CREW_BLOCK_CHARS = 1500  # brief 4,500 + crew block 1,500 = MAX_BRIEF_CHARS 
 MAX_BRIEF_WITH_CREW_CHARS = MAX_BRIEF_CHARS - MAX_CREW_BLOCK_CHARS - 1
 CREW_DATA_ITEM_CLIP = 140
 CREW_FOOTER = "Crew mode is automatic: claims, checkpoints and reports happen by hook."
+
+
+def crew_footer_off(agent: str) -> str:
+    """The crew block's last line for an agent whose crew hooks are not installed here."""
+    name = _SAFE_ID_RE.sub("_", agent)[:64] or "this agent"
+    return (
+        f"Crew hooks are NOT installed for {name} here: nothing is claimed, checkpointed or reported "
+        f"automatically. Install them with: remembra-crew connect --agent {name}"
+    )
+
+
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9._:/@+-]+")
 _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
 _CALLSIGN_RE = re.compile(r"[a-z][a-z0-9-]{0,31}-[1-9][0-9]{0,3}")
