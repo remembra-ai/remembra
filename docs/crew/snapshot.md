@@ -37,6 +37,17 @@ Everything above plus:
 Written by crewd with an atomic rename. The gate never writes it. `toplevel` paths never leave the
 host (they are not in any server payload).
 
+`checkouts[]` is local knowledge, so it never waits for the server. The gate treats a path in no
+listed checkout as outside crew control (rule 0), so a session that joins is in `checkouts[]` before
+its join returns, also when the server read fails: `GET /crews/{id}/snapshot` is limited to one read
+per 10 s per API key, agent and crew, which every session of that agent on the host shares. crewd then
+writes its current checkouts over the last read, keeping that read's `synced_at` and `skew_s` (so the
+snapshot's age stays true), and reads again after the 429's `Retry-After`. The gate also adds the
+caller's own checkout from its session file if a snapshot lacks it. With no snapshot at all (the
+host's first session of the crew, its read refused), the gate asks the server's guard
+(`POST /crews/{id}/guard`, through crewd, inside the 900 ms claim budget) about file edits; only when
+no answer comes in time is the edit allowed unchecked.
+
 ## WebSocket (`/ws`)
 
 Subscribe (`WsCrewSubscribe`):

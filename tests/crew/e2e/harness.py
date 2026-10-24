@@ -169,11 +169,14 @@ class Payloads:
 
 
 class ServerProc:
-    def __init__(self, workdir: Path, *, webhook_forward: str | None = None, seed_users: int = 0) -> None:
+    def __init__(
+        self, workdir: Path, *, webhook_forward: str | None = None, seed_users: int = 0, crew_rate_limits: bool = False
+    ) -> None:
         self.workdir = workdir
         self.port = free_port()
         self.webhook_forward = webhook_forward
         self.seed_users = seed_users
+        self.crew_rate_limits = crew_rate_limits
         self.proc: subprocess.Popen[str] | None = None
         self.info: dict[str, Any] = {}
         self.log_path = workdir / "server.log"
@@ -192,6 +195,8 @@ class ServerProc:
             argv += ["--webhook-forward", self.webhook_forward]
         if self.seed_users:
             argv += ["--seed-users", str(self.seed_users)]
+        if self.crew_rate_limits:
+            argv.append("--crew-rate-limits")
         self.proc = subprocess.Popen(argv, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         log = self.log_path.open("w", encoding="utf-8")
         deadline = time.monotonic() + 90
@@ -717,8 +722,9 @@ def git(cwd: Path | str, *args: str, env: dict[str, str] | None = None, check: b
 class World:
     """Temp HOME, repos, server, receiver and installed hooks for one E2E run."""
 
-    def __init__(self, tmp: Path, *, zones: str | None = ZONES_YML) -> None:
+    def __init__(self, tmp: Path, *, zones: str | None = ZONES_YML, crew_rate_limits: bool = False) -> None:
         self.tmp = tmp
+        self.crew_rate_limits = crew_rate_limits  # the server's crew rate limiter on, as in production
         self.home = tmp / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.layout = Layout(self.home)
@@ -820,7 +826,9 @@ class World:
     # -- services ----------------------------------------------------------------------------
     def start_server(self) -> ServerProc:
         self.receiver = WebhookReceiver()
-        self.server = ServerProc(self.tmp / "server", webhook_forward=self.receiver.url).start()
+        self.server = ServerProc(
+            self.tmp / "server", webhook_forward=self.receiver.url, crew_rate_limits=self.crew_rate_limits
+        ).start()
         return self.server
 
     def connect(self, *extra: str, global_settings: bool = True) -> str:
