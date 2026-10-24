@@ -129,9 +129,13 @@ remembra-crew connect --git-hooks --repo ~/code/yaadbooks --apply
 ### 2. Turn Crew mode on for a repository and declare zones
 
 A repository is a crew repository when it has a `.remembra/` folder (or when its project already has a
-crew). Declare zones in `.remembra/zones.yml` and **commit it on the default branch**: the daemon only
-uploads the committed version, or one you push yourself with `remembra-crew zones push` at a terminal
-while a crew session is live.
+crew). A crew belongs to one project, and a repository joins the crew of the project Relay gives it (see
+[Which project a repository uses](../guides/relay.md#which-project-a-repository-uses)): a repository seen
+before keeps its project, and a new git repository gets its own project, and so its own crew, even with
+`REMEMBRA_PROJECT` set; only `REMEMBRA_RELAY_PROJECT` puts every new repository in one project and one crew.
+Declare zones in `.remembra/zones.yml` and **commit it on the default branch**: the daemon only uploads the
+committed version, or one you push yourself with `remembra-crew zones push` at a terminal while a crew
+session is live.
 
 ```yaml
 version: 1
