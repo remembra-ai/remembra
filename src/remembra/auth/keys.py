@@ -1,9 +1,11 @@
 """API key generation and management."""
 
+import asyncio
 import hashlib
 import os
 import re
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -20,6 +22,11 @@ log = structlog.get_logger(__name__)
 # TTL is managed by clearing on key changes
 _key_cache: dict[str, dict[str, Any]] = {}
 _KEY_CACHE_MAX_SIZE = 1000
+
+# Cancellation of an await cannot stop native bcrypt. The executor itself keeps
+# running verifications bounded, including work whose requester was cancelled.
+_KEY_VERIFY_WORKERS = 2
+_key_verify_pool = ThreadPoolExecutor(max_workers=_KEY_VERIFY_WORKERS, thread_name_prefix="remembra-key-verify")
 
 # Key format: rem_<32 bytes base64> = rem_abc123...
 KEY_PREFIX = "rem_"
@@ -128,6 +135,55 @@ class APIKeyManager:
             return bcrypt.checkpw(key.encode(), key_hash.encode())
         except Exception:
             return False
+
+    async def _verify_key_offloop(self, raw_key: str, key_hash: str) -> bool:
+        # The worker receives immutable strings and returns a boolean only;
+        # database access and authorization stay on the requesting event loop.
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_key_verify_pool, self.verify_key, raw_key, key_hash)
+
+    async def _finish_verified_key(
+        self, observed: dict[str, Any], cache_key: str, *, record_use: bool, backfill: bool = False
+    ) -> dict[str, Any] | None:
+        # Open this method's writer only after crypto. Re-read authority under
+        # the existing coordinator, and commit metadata before
+        # publishing a cache entry. Never reuse pre-worker roles or a new hash.
+        async with self.db.transaction():
+            cursor = await self.db.conn.execute(
+                """
+                SELECT k.*, COALESCE(r.role, 'editor') AS role, r.scopes, r.project_ids
+                FROM api_keys k
+                LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+                WHERE k.id = ? AND k.active = TRUE
+                """,
+                (observed["id"],),
+            )
+            try:
+                row = await cursor.fetchone()
+            finally:
+                await cursor.close()
+            if row is None:
+                return None
+            current = dict(row)
+            if any(current.get(field) != observed.get(field) for field in ("id", "user_id", "key_hash")):
+                return None
+            if current.get("key_lookup") not in (None, "", cache_key) or cache_key in revoked_key_lookups():
+                return None
+            if backfill and not current.get("key_lookup"):
+                await self.db.set_api_key_lookup(current["id"], cache_key)
+                current["key_lookup"] = cache_key
+            if record_use:
+                await self.db.update_api_key_last_used(current["id"])
+        # A runtime denylist update can happen while metadata commits. Keep the
+        # final check synchronous, with no policy await before cache publication.
+        if cache_key in revoked_key_lookups():
+            return None
+        key_data = self._normalize_key_data(current)
+        # A nested caller still owns its uncommitted state. Return its result
+        # under existing transaction semantics, but do not cache that snapshot.
+        if not self.db.in_transaction:
+            self._cache_put(cache_key, key_data)
+        return key_data
 
     @staticmethod
     def generate_key_id() -> str:
@@ -252,12 +308,10 @@ class APIKeyManager:
         # 2) O(1) indexed lookup by deterministic hash, then bcrypt verify
         lookup_row = await self.db.get_active_api_key_by_lookup(cache_key)
         if lookup_row:
-            if self.verify_key(raw_key, lookup_row["key_hash"]):
-                key_data = self._normalize_key_data(lookup_row)
-                if record_use:
-                    await self.db.update_api_key_last_used(key_data["id"])
-                self._cache_put(cache_key, key_data)
-                log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
+            if await self._verify_key_offloop(raw_key, lookup_row["key_hash"]):
+                key_data = await self._finish_verified_key(lookup_row, cache_key, record_use=record_use)
+                if key_data is not None:
+                    log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
                 return key_data
             # lookup collision without bcrypt match is effectively impossible; treat as invalid
             log.warning("api_key_lookup_bcrypt_mismatch")
@@ -266,13 +320,10 @@ class APIKeyManager:
         # 3) Bounded legacy fallback for keys predating the key_lookup column
         unmigrated = await self.db.get_unmigrated_active_api_keys()
         for legacy_row in unmigrated:
-            if self.verify_key(raw_key, legacy_row["key_hash"]):
-                await self.db.set_api_key_lookup(legacy_row["id"], cache_key)  # backfill → O(1) next time
-                key_data = self._normalize_key_data(legacy_row)
-                if record_use:
-                    await self.db.update_api_key_last_used(key_data["id"])
-                self._cache_put(cache_key, key_data)
-                log.info("api_key_lookup_backfilled", key_id=key_data["id"])
+            if await self._verify_key_offloop(raw_key, legacy_row["key_hash"]):
+                key_data = await self._finish_verified_key(legacy_row, cache_key, record_use=record_use, backfill=True)
+                if key_data is not None:
+                    log.info("api_key_lookup_backfilled", key_id=key_data["id"])
                 return key_data
 
         log.warning("api_key_validation_failed")
@@ -285,14 +336,22 @@ class APIKeyManager:
         row = await self.db.get_active_api_key_by_lookup(cache_key)
         if row is None:
             for legacy_row in await self.db.get_unmigrated_active_api_keys():
-                if self.verify_key(raw_key, legacy_row["key_hash"]):
+                if await self._verify_key_offloop(raw_key, legacy_row["key_hash"]):
                     row = legacy_row
                     break
         if row is None:
             log.warning("api_key_published_refused")
             return
-        await self.db.conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (row["id"],))
+        cursor = await self.db.conn.execute(
+            "UPDATE api_keys SET active = 0 WHERE id = ? AND user_id = ? AND key_hash = ? AND active = TRUE",
+            (row["id"], row["user_id"], row["key_hash"]),
+        )
+        changed = cursor.rowcount
+        await cursor.close()
         await self.db.conn.commit()
+        if not changed:
+            log.warning("api_key_published_refused")
+            return
         log.warning("api_key_published_deactivated", key_id=row["id"], user_id=row.get("user_id"))
         if row.get("user_id"):
             await _close_dead_sockets(row["user_id"])
