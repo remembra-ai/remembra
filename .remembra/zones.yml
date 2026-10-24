@@ -1,0 +1,78 @@
+# Remembra Crew zones for Remembra itself. Paths in no zone are not claimed.
+version: 1
+zones:
+  crew:
+    title: Crew mode (server, daemon, gate)
+    include:
+      - "src/remembra/crew/**"
+      - "src/remembra/relay/crew/**"
+      - "src/remembra/api/v1/crew*.py"
+      - "tests/crew/**"
+      - "docs/relay/crew.md"
+      - "docs/crew/**"
+  relay:
+    title: Relay client, doctor and handoffs
+    include:
+      - "src/remembra/relay/**"
+      - "src/remembra/marshal/**"
+      - "src/remembra/services/relay*.py"
+      - "src/remembra/api/v1/relay.py"
+      - "tests/test_relay*.py"
+    exclude:
+      - "src/remembra/relay/crew/**"
+  server-api:
+    title: API, auth, cloud, billing and security
+    include:
+      - "src/remembra/api/**"
+      - "src/remembra/auth/**"
+      - "src/remembra/cloud/**"
+      - "src/remembra/security/**"
+      - "src/remembra/account/**"
+      - "src/remembra/teams/**"
+      - "src/remembra/spaces/**"
+      - "src/remembra/inbox/**"
+      - "src/remembra/webhooks/**"
+      - "src/remembra/main.py"
+    exclude:
+      - "src/remembra/api/v1/crew*.py"
+      - "src/remembra/api/v1/relay.py"
+  memory-core:
+    title: Memory engine (storage, extraction, retrieval, temporal)
+    include:
+      - "src/remembra/core/**"
+      - "src/remembra/storage/**"
+      - "src/remembra/extraction/**"
+      - "src/remembra/retrieval/**"
+      - "src/remembra/temporal/**"
+      - "src/remembra/ingestion/**"
+      - "src/remembra/models/**"
+      - "src/remembra/brain/**"
+      - "src/remembra/io/**"
+      - "src/remembra/services/**"
+    exclude:
+      - "src/remembra/services/relay*.py"
+  dashboard:
+    title: Dashboard (app.remembra.dev)
+    include: ["dashboard/**"]
+  site-docs:
+    title: Landing site and docs
+    include: ["landing/**", "docs/**", "mkdocs.yml", "README.md"]
+    exclude: ["docs/relay/crew.md", "docs/crew/**"]
+  sdks-integrations:
+    title: SDKs, MCP, connectors and integrations
+    include:
+      - "sdk/**"
+      - "packages/**"
+      - "integrations/**"
+      - "extension/**"
+      - "src/remembra/client/**"
+      - "src/remembra/mcp/**"
+      - "src/remembra/connector/**"
+      - "src/remembra/plugins/**"
+      - "src/remembra/tools/**"
+  ci-release:
+    title: CI, Docker and release
+    include: [".github/**", "Dockerfile*", "docker-compose*.yml", "fly.toml", "scripts/**", "pyproject.toml"]
+commons:
+  "CHANGELOG.md": plain
+  "uv.lock": serialize
