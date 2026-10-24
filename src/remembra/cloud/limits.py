@@ -648,10 +648,18 @@ async def record_store_usage(request: Request, user_id: str, count: int = 1) -> 
 
 
 async def record_relay_usage(request: Request, user_id: str, count: int = 1) -> None:
-    """Record relay events (handoff / checkpoint / status / inbox). Never consumes credits."""
+    """Record relay events (handoff / checkpoint / status / inbox). Never consumes credits.
+
+    Callers record after their write has committed, so a metering failure is
+    logged, not raised: raising would report a stored write as failed, and a
+    resend would store it twice.
+    """
     meter = _get_meter_or_none(request)
     if meter is not None and count > 0:
-        await meter.record_relay_event(user_id, count)
+        try:
+            await meter.record_relay_event(user_id, count)
+        except Exception as e:
+            logger.warning("relay_usage_record_failed", user_id=user_id, count=count, error=type(e).__name__)
 
 
 async def record_recall_usage(request: Request, user_id: str, count: int = 1) -> None:
