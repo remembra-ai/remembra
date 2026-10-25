@@ -1,0 +1,20 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "deny",
+  "event": "PreToolUse",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "session_id": "01a17073-65c7-7c71-a4ee-c82f04c571e9",
+    "tool_input": {
+      "command": "printf 'edited' > held/scratch.txt"
+    },
+    "tool_name": "Bash",
+    "tool_use_id": "exec-285ba891-d4fa-4557-b11c-824ff5feea35",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-26-13-01a17073-65c7-7c71-a4ee-c82f04c571e9.jsonl",
+    "turn_id": "01a17073-6660-7de2-8bfc-a2222ade75a5"
+  },
+  "verb": "pretool"
+}

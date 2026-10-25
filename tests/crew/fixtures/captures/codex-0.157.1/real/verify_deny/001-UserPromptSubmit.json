@@ -1,0 +1,16 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "",
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "UserPromptSubmit",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "prompt": "This is a hook test. Do not call any remembra or crew tools. Use your apply_patch tool (not a shell command) to replace the line in held/scratch.txt with the word edited. If blocked, quote the message and stop.",
+    "session_id": "01a17073-252f-7bc2-a698-ec2601e5c9d8",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-25-56-01a17073-252f-7bc2-a698-ec2601e5c9d8.jsonl",
+    "turn_id": "01a17073-2650-7953-92b2-06a5cb986af9"
+  },
+  "verb": "turn"
+}

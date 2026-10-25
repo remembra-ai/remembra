@@ -1,0 +1,20 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "deny",
+  "event": "PreToolUse",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "session_id": "01a17073-252f-7bc2-a698-ec2601e5c9d8",
+    "tool_input": {
+      "command": "*** Begin Patch\n*** Update File: <SCRATCH>/held/scratch.txt\n@@\n-remembra-crew verify 884e5114c174093c960be0dc3e4d1b84\n+edited\n*** End Patch"
+    },
+    "tool_name": "apply_patch",
+    "tool_use_id": "exec-d8ae9519-3b3e-489b-bbb7-fbcc9b6e19f4",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-25-56-01a17073-252f-7bc2-a698-ec2601e5c9d8.jsonl",
+    "turn_id": "01a17073-2650-7953-92b2-06a5cb986af9"
+  },
+  "verb": "pretool"
+}

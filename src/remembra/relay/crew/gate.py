@@ -45,7 +45,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -66,6 +66,10 @@ STDIN_WAIT_S: Final = 1.0
 STDIN_MAX_CHARS: Final = 64 * 1024 * 1024
 SOCKET_PATH_MAX: Final = 100  # macOS sun_path is 104 bytes
 EDIT_TOOLS: Final = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
+# Codex edits files with apply_patch: its input is patch text naming each file it adds, updates, deletes or moves to.
+APPLY_PATCH_TOOL: Final = "apply_patch"
+_PATCH_PATH_RE: Final = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)[ \t]*$", re.MULTILINE)
+APPLY_PATCH_MAX_PATHS: Final = 200
 COMPLETION_RE: Final = re.compile(
     r"\b(?:all (?:tests|checks) pass(?:ed|ing)?|(?:task|work|feature|implementation|fix) (?:is )?(?:done|complete|finished)|"
     r"i(?:'ve| have) (?:finished|completed|implemented)|(?:done|finished|completed)[.!]?\s*$)",
@@ -784,8 +788,35 @@ def _server_guard(
     return out, info
 
 
+def apply_patch_paths(tool_input: Any) -> list[str]:
+    """The files a Codex ``apply_patch`` call writes, in patch order, from its patch text (the whole input, or
+    its ``command`` / ``input`` / ``patch`` field)."""
+    if isinstance(tool_input, str):
+        text = tool_input
+    else:
+        fields = _as_dict(tool_input)
+        text = next((v for k in ("command", "input", "patch") if isinstance(v := fields.get(k), str)), "")
+    paths = [m.group(1) for m in _PATCH_PATH_RE.finditer(text)]
+    return list(dict.fromkeys(p for p in paths if p))[:APPLY_PATCH_MAX_PATHS]
+
+
+def _evaluate_apply_patch(ctx: HookContext, session: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """Each file of an ``apply_patch`` call is decided as a ``Write`` to it; the first deny or ask answers."""
+    answer: tuple[str, dict[str, Any] | None] = ("", None)
+    for path in apply_patch_paths(ctx.payload.get("tool_input")):
+        one = replace(ctx, payload={**ctx.payload, "tool_name": "Write", "tool_input": {"file_path": path}})
+        out, info = evaluate_pretool(one, session)
+        if info is not None and info.get("decision") in ("deny", "ask"):
+            return out, info
+        if out or info is not None:
+            answer = (out, info)
+    return answer
+
+
 def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     """Decide one PreToolUse call. Returns ``(stdout, verdict dict or None)``."""
+    if ctx.payload.get("tool_name") == APPLY_PATCH_TOOL:
+        return _evaluate_apply_patch(ctx, session)
     from remembra.crew import gatecore as G
     from remembra.crew import schemas as S
     from remembra.relay.crew.snapshot import ASYNC_REFRESH_S, FRESH_S, age_s
@@ -1804,6 +1835,108 @@ def gate_command(layout: Layout, sub: str, *, python: str | None = None, hook: s
 # main
 # ===========================================================================
 
+# ===========================================================================
+# `remembra-crew verify` round trip (the gate's half of the contract in verify.py)
+# ===========================================================================
+
+VERIFY_EVENTS: Final = {
+    "pretool": "PreToolUse",
+    "posttool": "PostToolUse",
+    "turn": "UserPromptSubmit",
+    "stop": "Stop",
+    "precompact": "PreCompact",
+    "wake": "Stop",
+    "rewake": "Stop",
+}
+VERIFY_MAX_CAPTURES: Final = 200
+
+
+def _within(path: str, root: str) -> bool:
+    real, top = os.path.realpath(path), os.path.realpath(root)
+    return real == top or real.startswith(top.rstrip(os.sep) + os.sep)
+
+
+def verify_round_trip(layout: Layout, adapter: str, sub: str, payload: Mapping[str, Any]) -> int | None:
+    """While ``remembra-crew verify --agent <adapter>`` is armed and this hook runs in its scratch repo: record
+    the payload in ``captures/<adapter>/NN-<event>.json`` and decide a pre-tool call against the armed synthetic
+    snapshot as its probe session, in enforce mode. ``None`` for every other hook (the normal path runs).
+
+    The scratch repo is never a crew session (no session file), so without this the gate's fast exit would
+    let the probe's write through unseen and the round trip could never pass.
+    """
+    capdir = layout.captures / adapter
+    armed = read_json(capdir / "armed.json")
+    if not armed or not isinstance(armed.get("scratch_root"), str) or not isinstance(armed.get("nonce"), str):
+        return None
+    try:
+        if time.time() > float(armed.get("expires_at") or 0):
+            return None
+    except (TypeError, ValueError):
+        return None
+    cwd = str(payload.get("cwd") or os.getcwd())
+    if not _within(cwd, armed["scratch_root"]):
+        return None
+    decision, out = "", ""
+    if sub == "pretool":
+        decision, out = _verify_pretool(layout, payload, armed, cwd, capdir)
+    captured = sorted(capdir.glob("[0-9]*-*.json"))
+    if len(captured) < VERIFY_MAX_CAPTURES:
+        event = str(payload.get("hook_event_name") or VERIFY_EVENTS.get(sub, sub))
+        record = {
+            "event": event,
+            "verb": sub,
+            "adapter": adapter,
+            "nonce": armed["nonce"],
+            "payload": dict(payload),
+            "decision": decision,
+            "received_at": time.time(),
+        }
+        safe_event = re.sub(r"[^A-Za-z0-9_-]", "_", event)[:40] or "event"
+        write_json(capdir / f"{len(captured) + 1:03d}-{safe_event}.json", record)
+    if out:
+        sys.stdout.write(out)
+        sys.stdout.flush()
+    return 0
+
+
+def _verify_pretool(
+    layout: Layout, payload: Mapping[str, Any], armed: Mapping[str, Any], cwd: str, capdir: Path
+) -> tuple[str, str]:
+    """``(decision, stdout)`` for a probe's pre-tool call: the real decision core over the synthetic snapshot."""
+    from datetime import UTC, datetime
+
+    from remembra.crew import gatecore as G
+
+    snap = read_json(capdir / "snapshot.json")
+    if snap is None:
+        return "", ""
+    tool = str(payload.get("tool_name") or "")
+    calls: list[tuple[str, dict[str, Any]]] = [(tool, _as_dict(payload.get("tool_input")))]
+    if tool == APPLY_PATCH_TOOL:
+        calls = [("Write", {"file_path": p}) for p in apply_patch_paths(payload.get("tool_input"))]
+    decision, out = "allow", ""
+    for name, tool_input in calls:
+        try:
+            verdict = G.evaluate(
+                name,
+                tool_input,
+                snapshot=snap,
+                caller=str(armed.get("probe_session") or ""),
+                cwd=cwd,
+                home=str(layout.home),
+                now=datetime.now(UTC),
+                mode="enforce",
+                permission_mode=str(payload.get("permission_mode") or "default"),
+            )
+        except Exception as e:  # recorded as an error decision: the round trip then fails, never passes
+            _err(f"verify: pretool evaluation failed ({e.__class__.__name__})")
+            return "error", ""
+        decision, out = str(verdict.decision), verdict.hook_stdout()
+        if decision in ("deny", "ask"):
+            break
+    return decision, out
+
+
 HOOK_COMMANDS: Final = {
     "pretool": cmd_pretool,
     "posttool": cmd_posttool,
@@ -1846,6 +1979,13 @@ def main(argv: Sequence[str] | None = None, *, layout: Layout | None = None) -> 
             # never a silent skip (§10.3): recover the session and the fields the checks need
             payload = salvage_payload(raw)
             degraded = "oversized" if oversized else "unparseable"
+        try:
+            verified = verify_round_trip(layout, hook, sub, payload)
+        except Exception as e:  # never brick the agent (§10.3): the normal path decides
+            _err(f"verify capture error ({e.__class__.__name__}); ignored")
+            verified = None
+        if verified is not None:
+            return verified
         sid = payload.get("session_id")
         if not isinstance(sid, str) or not sid or not layout.session_file(session_key(hook, sid)).exists():
             if degraded:

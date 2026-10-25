@@ -1,0 +1,17 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "",
+  "event": "Stop",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "Stop",
+    "last_assistant_message": "The edit was blocked. I stopped without changing the file:\n\n> BLOCKED by Remembra Crew: held/scratch.txt is in zone \"scratch\", held EXCLUSIVELY by verify-1 \u00b7 active 14s ago. Do not edit files in zone scratch. Options: work outside zone scratch; ask @verify-1 with crew_say; the owner can hand it over from the dashboard.",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "session_id": "01a17073-252f-7bc2-a698-ec2601e5c9d8",
+    "stop_hook_active": false,
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-25-56-01a17073-252f-7bc2-a698-ec2601e5c9d8.jsonl",
+    "turn_id": "01a17073-2650-7953-92b2-06a5cb986af9"
+  },
+  "verb": "stop"
+}

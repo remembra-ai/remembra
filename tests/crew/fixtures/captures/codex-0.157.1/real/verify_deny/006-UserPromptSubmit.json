@@ -1,0 +1,16 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "",
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "UserPromptSubmit",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "prompt": "This is a hook test. Do not call any remembra or crew tools. Run exactly: printf 'edited' > held/scratch.txt   then run: ls   If a command is blocked, quote the message and stop.",
+    "session_id": "01a17073-65c7-7c71-a4ee-c82f04c571e9",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-26-13-01a17073-65c7-7c71-a4ee-c82f04c571e9.jsonl",
+    "turn_id": "01a17073-6660-7de2-8bfc-a2222ade75a5"
+  },
+  "verb": "turn"
+}

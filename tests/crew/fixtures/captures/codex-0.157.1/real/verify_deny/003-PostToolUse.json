@@ -1,0 +1,21 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "",
+  "event": "PostToolUse",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "PostToolUse",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "session_id": "01a17073-252f-7bc2-a698-ec2601e5c9d8",
+    "tool_input": {
+      "command": "cat held/scratch.txt"
+    },
+    "tool_name": "Bash",
+    "tool_response": "<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\n<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\nremembra-crew verify 884e5114c174093c960be0dc3e4d1b84\n",
+    "tool_use_id": "exec-5dd4fec0-484f-498a-8a7e-779e508bb1bc",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-25-56-01a17073-252f-7bc2-a698-ec2601e5c9d8.jsonl",
+    "turn_id": "01a17073-2650-7953-92b2-06a5cb986af9"
+  },
+  "verb": "posttool"
+}

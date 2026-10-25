@@ -1,0 +1,21 @@
+{
+  "adapter": "codex",
+  "decision_at_capture": "",
+  "event": "PostToolUse",
+  "payload": {
+    "cwd": "<SCRATCH>",
+    "hook_event_name": "PostToolUse",
+    "model": "gpt-6-sol",
+    "permission_mode": "bypassPermissions",
+    "session_id": "01a17073-65c7-7c71-a4ee-c82f04c571e9",
+    "tool_input": {
+      "command": "remembra-relay close"
+    },
+    "tool_name": "Bash",
+    "tool_response": "<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\n<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\nremembra-relay: close failed: ConnectError: [Errno 8] nodename nor servname provided, or not known\n",
+    "tool_use_id": "exec-f5f8918f-4113-4898-b4d0-45aae7f1af22",
+    "transcript_path": "<HOME>/.codex/sessions/2026/10/24/rollout-2026-10-24T20-26-13-01a17073-65c7-7c71-a4ee-c82f04c571e9.jsonl",
+    "turn_id": "01a17073-6660-7de2-8bfc-a2222ade75a5"
+  },
+  "verb": "posttool"
+}

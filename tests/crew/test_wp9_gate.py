@@ -197,6 +197,27 @@ async def test_pretool_decisions_through_the_real_gate(tmp_path, sleeper):
         assert '"allow"' not in res.stdout
         assert (wt_b / "src/app/pos/split.ts").read_text() == "export const split = 1;\n"
 
+        # B edits pos with Codex's apply_patch (the files are named in the patch text): denied the same way
+        held_patch = (
+            f"*** Begin Patch\n*** Update File: {wt_b / 'src/app/pos/split.ts'}\n@@\n"
+            "-export const split = 1;\n+export const split = 2;\n*** End Patch"
+        )
+        res = await arun_gate(layout, "pretool", pretool("sess-b", wt_b, "apply_patch", {"command": held_patch}), cwd=wt_b)
+        assert S.validate_hook_stdout("PreToolUse", res.stdout) == [], res.stdout
+        out = json.loads(res.stdout)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and 'zone "pos"' in out["permissionDecisionReason"]
+        # a patch that adds a free file and updates a held one: the held file still denies it
+        mixed_patch = (
+            "*** Begin Patch\n*** Add File: notes/b.md\n+b\n"
+            "*** Update File: src/app/pos/split.ts\n@@\n-export const split = 1;\n+export const split = 3;\n*** End Patch"
+        )
+        res = await arun_gate(layout, "pretool", pretool("sess-b", wt_b, "apply_patch", {"command": mixed_patch}), cwd=wt_b)
+        assert json.loads(res.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        # a patch that only touches a file in no zone is allowed (empty stdout)
+        free_patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-# t\n+# t2\n*** End Patch"
+        res = await arun_gate(layout, "pretool", pretool("sess-b", wt_b, "apply_patch", {"command": free_patch}), cwd=wt_b)
+        assert res.returncode == 0 and '"deny"' not in res.stdout, res.stdout
+
         # B writes into A's checkout directly: foreign checkout (rule 4)
         res = await arun_gate(
             layout,

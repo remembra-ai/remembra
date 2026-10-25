@@ -563,7 +563,10 @@ def main(argv: list[str] | None = None, *, home: Path | None = None, out: Any = 
         record_verified(home, armed, checks)
         print(f"Verified: {agent} now runs in enforce mode (adapters.json).", file=out)
         return 0
-    print(f"Not verified: {agent} stays in observe mode.", file=out)
+    if adapter_enforcement(home, agent) == "enforced":
+        print(f"Not verified this time: {agent} keeps its earlier verification and still runs in enforce mode.", file=out)
+    else:
+        print(f"Not verified: {agent} stays in observe mode.", file=out)
     return 1
 
 
