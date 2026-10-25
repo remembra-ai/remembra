@@ -23,6 +23,7 @@ Stdlib only.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
@@ -190,6 +191,46 @@ def local_entries(toplevel: str | Path) -> list[tuple[str, str]]:
 
 def _path_key(path: str) -> str:
     return unicodedata.normalize("NFC", unicodedata.normalize("NFD", path).casefold()).rstrip("/")
+
+
+def _same_as_saved(top: str, path: str, commit: str, changed: Sequence[str]) -> bool:
+    """True when ``path`` is a regular file holding exactly the bytes the restore would write there (the blob as
+    checkout writes it: filters and line endings applied) with the same executable bit: writing it changes
+    nothing (two sessions of one agent usually have the same untracked ``.claude/settings.json``)."""
+    if path not in changed or path.endswith("/"):
+        return False
+    return _holds_saved(top, path, commit)
+
+
+def _holds_saved(top: str, path: str, commit: str) -> bool:
+    full = os.path.join(top, path)
+    if os.path.islink(full) or not os.path.isfile(full):
+        return False
+    mode = try_out(["ls-tree", commit, "--", path], top) or ""
+    if not mode.startswith(("100644", "100755")) or mode.startswith("100755") != os.access(full, os.X_OK):
+        return False
+    try:
+        wanted = git(["cat-file", "--filters", f"{commit}:{path}"], top, timeout=30.0).stdout
+        with open(full, "rb") as fh:
+            return fh.read() == wanted
+    except (GitError, OSError):
+        return False
+
+
+def work_present(toplevel: str | Path, ref: str) -> bool:
+    """True when the checkout already holds a baton's saved work: every file it writes has exactly those bytes
+    and every file it deletes is gone. A session taking its own claim back then has nothing to restore."""
+    top = os.path.realpath(str(toplevel))
+    commit = try_out(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], top)
+    if not commit:
+        return False
+    try:
+        parent = out(["rev-parse", f"{commit}^"], top)
+        changed = z_paths(["diff", "--name-only", "-z", "--diff-filter=d", parent, commit], top)
+        deleted = z_paths(["diff", "--name-only", "-z", "--diff-filter=D", parent, commit], top)
+    except GitError:
+        return False
+    return all(_holds_saved(top, p, commit) for p in changed) and not any(os.path.lexists(os.path.join(top, p)) for p in deleted)
 
 
 def files_in_the_way(entries: Sequence[tuple[str, str]], touched: Iterable[str]) -> list[str]:
@@ -458,7 +499,18 @@ def restore_baton(
     touched = set(changed) | set(deleted)
     if orig_head and orig_head != parent:
         touched |= set(z_paths(["diff", "--name-only", "-z", "--no-renames", orig_head, parent], top))
-    if any(st not in ("??", "!!") for st, _ in entries) or files_in_the_way(entries, touched):
+    if any(st not in ("??", "!!") for st, _ in entries):
+        return RestoreResult(False, "dirty_tree", ref, next_command=retry_command)
+    # An identical file does not block, but only without a move to another commit (its .gitattributes may change
+    # what checkout writes); its bytes are kept aside and put back if the restore fails part-way.
+    same_commit = bool(orig_head) and orig_head == parent
+    in_the_way = files_in_the_way(entries, touched)
+    allowed = [p for p in in_the_way if same_commit and _same_as_saved(top, p, commit, changed)]
+    if len(allowed) != len(in_the_way):
+        return RestoreResult(False, "dirty_tree", ref, next_command=retry_command)
+    try:
+        kept = _keep(top, allowed)
+    except OSError:  # cannot keep a copy: never write over it
         return RestoreResult(False, "dirty_tree", ref, next_command=retry_command)
     existed = {p for p in changed if os.path.lexists(os.path.join(top, p))}
     created_branch: str | None = None
@@ -494,6 +546,10 @@ def restore_baton(
     except (GitError, OSError) as e:
         detail = str(e)[:300] or e.__class__.__name__
         rolled_back = _roll_back(top, orig_head, orig_branch, created_branch, changed, existed)
+        lost = _put_back(top, kept)
+        if lost:  # never silent: the same bytes are in the baton (git cat-file --filters <ref>:<path>)
+            rolled_back = False
+            detail = f"{detail}; could not put back {', '.join(lost[:5])} (its exact content is in {ref})"[:500]
         return RestoreResult(
             False,
             "restore_failed",
@@ -504,6 +560,47 @@ def restore_baton(
             rolled_back=rolled_back,
         )
     return RestoreResult(True, "restored", ref, files=changed, deleted=deleted, branch=branch)
+
+
+def _keep(top: str, paths: Sequence[str]) -> dict[str, tuple[bytes, int]]:
+    """The bytes and mode of files a restore allowed in its way, to put back exactly after a failed restore."""
+    kept: dict[str, tuple[bytes, int]] = {}
+    for p in paths:
+        full = os.path.join(top, p)
+        with open(full, "rb") as fh:
+            kept[p] = (fh.read(), os.stat(full).st_mode & 0o7777)
+    return kept
+
+
+def _put_back(top: str, kept: Mapping[str, tuple[bytes, int]]) -> list[str]:
+    """Write each kept file back exactly (a temp file swapped in, so it is never left half-written).
+    Returns the paths that could not be put back; something else now at a path is never removed."""
+    lost: list[str] = []
+    for p, (data, mode) in kept.items():
+        full = os.path.join(top, p)
+        if os.path.lexists(full) and (os.path.islink(full) or not os.path.isfile(full)):
+            lost.append(p)
+            continue
+        if os.path.isfile(full):
+            try:
+                with open(full, "rb") as fh:
+                    if fh.read() == data and (os.stat(full).st_mode & 0o7777) == mode:
+                        continue  # still exactly as it was
+            except OSError:
+                pass
+        tmp = f"{full}.restore-{secrets.token_hex(4)}"
+        try:
+            os.makedirs(os.path.dirname(full) or top, exist_ok=True)
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            os.chmod(tmp, mode)
+            os.replace(tmp, full)
+        except OSError:
+            lost.append(p)
+            if os.path.lexists(tmp):
+                with contextlib.suppress(OSError):
+                    os.remove(tmp)
+    return lost
 
 
 def _roll_back(

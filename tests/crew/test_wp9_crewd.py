@@ -649,3 +649,179 @@ def test_path_lists_keep_leading_spaces_and_names_compare_as_on_macos():
     assert B.files_in_the_way(entries, [unicodedata.normalize("NFC", "café/plan.md")]) == [entries[0][1]]
     assert B.files_in_the_way(entries, [" report"]) == [" report"]
     assert B.files_in_the_way(entries, ["report"]) == []
+
+
+async def test_an_identical_untracked_file_does_not_block_a_restore(tmp_path):
+    """Found live: the stopped session's baton held its untracked .claude/settings.json, and the adopter has the
+    same file; writing identical bytes changes nothing, so it does not block the restore."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    settings = '{"hooks": {}}\n'
+    ref = _baton_with(repo, {".claude/settings.json": settings, "docs/plan.md": "the plan\n"}, "T-12")
+    (wt_c / ".claude").mkdir()
+    (wt_c / ".claude/settings.json").write_text(settings)
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is True, result
+    assert (wt_c / "docs/plan.md").read_text() == "the plan\n" and (wt_c / ".claude/settings.json").read_text() == settings
+
+
+async def test_a_different_or_differently_executable_file_still_blocks_a_restore(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    ref = _baton_with(repo, {".claude/settings.json": '{"a": 1}\n', "run.sh": "echo hi\n"}, "T-13")
+    (wt_c / ".claude").mkdir()
+    (wt_c / ".claude/settings.json").write_text('{"a": 2}\n')
+    assert B.restore_baton(wt_c, ref).reason == "dirty_tree"
+    assert (wt_c / ".claude/settings.json").read_text() == '{"a": 2}\n'
+    (wt_c / ".claude/settings.json").write_text('{"a": 1}\n')  # now identical
+    (wt_c / "run.sh").write_text("echo hi\n")
+    os.chmod(wt_c / "run.sh", 0o755)  # same bytes, but executable where the saved file is not
+    assert B.restore_baton(wt_c, ref).reason == "dirty_tree"
+    os.chmod(wt_c / "run.sh", 0o644)
+    assert B.restore_baton(wt_c, ref).restored is True
+
+
+async def test_taking_back_your_own_reserved_claim_restores_nothing(tmp_path):
+    """Found live: a session's own claims, reserved while it was blocked, retaken with adopt --zone, tried to restore
+    its own saved work over its own checkout (refused as dirty). A retake restores nothing."""
+    repo = make_repo(tmp_path / "repo")
+    layout = Layout(tmp_path / "home")
+    async with crew_server(tmp_path) as srv:
+        d = new_crewd(layout, srv, alive={A_PID})
+        a = await d.join(peer(A_PID), _join_args("sess-a", repo, A_PID))
+        crew_id = a["crew_id"]
+        pos = next(z for z in d.snapshots[crew_id]["zones"] if z["slug"] == "pos")
+        assert (await d.claim(peer(A_PID), {"key": a["key"], "zone_id": pos["id"]}))["result"] == "granted"
+        (repo / "src/app/pos/split.ts").write_text("my work in progress\n")
+        baton = B.create_baton_ref(repo, "T-1")
+        assert baton is not None
+
+        async def reserve() -> None:
+            async with srv.h.app.state.crew_db.transaction():
+                await srv.h.app.state.crew_db.conn.execute(
+                    "UPDATE crew_claims SET state = 'reserved', reserved_for = ?, baton_ref = ? WHERE zone_id = ?",
+                    (a["session_id"], baton.ref, pos["id"]),
+                )
+
+        await reserve()
+        res = await d.adopt(peer(A_PID), {"key": a["key"], "zone": "pos"})
+        assert res["ok"] and res["restore"] is None, res  # the work is still here: nothing to restore
+        assert (repo / "src/app/pos/split.ts").read_text() == "my work in progress\n"
+
+        # Codex review P1: the checkout was cleaned while the claim was reserved: the retake restores the work
+        git(repo, "checkout", "--", "src/app/pos/split.ts")
+        await reserve()
+        res = await d.adopt(peer(A_PID), {"key": a["key"], "zone": "pos"})
+        assert res["ok"] and res["restore"] and res["restore"]["restored"] is True, res
+        assert (repo / "src/app/pos/split.ts").read_text() == "my work in progress\n"
+
+
+async def test_an_untracked_file_equal_to_the_raw_blob_but_not_to_what_checkout_writes_blocks_a_restore(tmp_path):
+    """Codex review P1: with eol=crlf the restore writes CRLF; an LF file equal to the raw blob is not "identical"."""
+    from tests.crew.wp9_support import git
+
+    repo = make_repo(tmp_path / "repo")
+    (repo / ".gitattributes").write_text("*.txt text eol=crlf\n")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-qm", "crlf for txt")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    ref = _baton_with(repo, {"notes/a.txt": "one\ntwo\n"}, "T-14")
+    (wt_c / "notes").mkdir()
+    (wt_c / "notes/a.txt").write_bytes(b"one\ntwo\n")  # the blob's bytes, not what checkout writes
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "notes/a.txt").read_bytes() == b"one\ntwo\n"
+    (wt_c / "notes/a.txt").write_bytes(b"one\r\ntwo\r\n")  # exactly what checkout writes: identical
+    assert B.restore_baton(wt_c, ref).restored is True
+
+
+async def test_an_identical_file_does_not_pass_when_the_restore_moves_to_another_commit(tmp_path):
+    """Codex review P1: moving to the baton's commit can change .gitattributes and so what checkout writes."""
+    from tests.crew.wp9_support import git
+
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")  # at the old HEAD
+    (repo / ".gitattributes").write_text("*.txt text eol=crlf\n")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-qm", "crlf for txt")
+    ref = _baton_with(repo, {"notes/a.txt": "one\n"}, "T-15")
+    (wt_c / "notes").mkdir()
+    (wt_c / "notes/a.txt").write_bytes(b"one\n")  # identical under this checkout's attributes, not the baton's
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "notes/a.txt").read_bytes() == b"one\n"
+
+
+async def test_an_identical_file_survives_a_restore_that_fails_part_way(tmp_path):
+    """Codex review P1: a failed restore's rollback must leave an allowed identical file exactly as it was."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    settings = '{"hooks": {}}\n'
+    ref = _baton_with(repo, {".claude/settings.json": settings, "locked/plan.md": "the plan\n"}, "T-16")
+    (wt_c / ".claude").mkdir()
+    (wt_c / ".claude/settings.json").write_text(settings)
+    os.chmod(wt_c / ".claude/settings.json", 0o600)
+    (wt_c / "locked").mkdir()
+    os.chmod(wt_c / "locked", 0o555)  # the restore cannot write here: it fails part-way and rolls back
+    try:
+        result = B.restore_baton(wt_c, ref)
+    finally:
+        if (wt_c / "locked").exists():  # git's cleanup after the failed write may remove the empty folder
+            os.chmod(wt_c / "locked", 0o755)
+    assert result.restored is False and result.reason == "restore_failed" and result.rolled_back, result
+    assert (wt_c / ".claude/settings.json").read_text() == settings
+    assert os.stat(wt_c / ".claude/settings.json").st_mode & 0o777 == 0o600
+    assert not (wt_c / "locked/plan.md").exists()
+
+
+async def test_an_identical_file_does_not_pass_in_a_checkout_without_commits(tmp_path):
+    """Codex review P1: an unborn checkout still moves to the baton's commit, whose .gitattributes may differ."""
+    from tests.crew.wp9_support import git
+
+    repo = make_repo(tmp_path / "repo")
+    ref = _baton_with(repo, {"notes/a.txt": "one\n"}, "T-17")
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    git(fresh, "init", "-q")
+    git(fresh, "fetch", "-q", str(repo), f"{ref}:{ref}")
+    (fresh / "notes").mkdir()
+    (fresh / "notes/a.txt").write_text("one\n")
+    result = B.restore_baton(fresh, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (fresh / "notes/a.txt").read_text() == "one\n"
+
+
+async def test_a_file_that_cannot_be_put_back_is_reported_never_silently_lost(tmp_path, monkeypatch):
+    """Codex review P1: a failed put-back after a failed restore is reported, and the rollback is not "clean"."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    settings = '{"hooks": {}}\n'
+    ref = _baton_with(repo, {".claude/settings.json": settings, "locked/plan.md": "the plan\n"}, "T-18")
+    (wt_c / ".claude").mkdir()
+    (wt_c / ".claude/settings.json").write_text(settings)
+    (wt_c / "locked").mkdir()
+    os.chmod(wt_c / "locked", 0o555)
+    real_roll_back = B._roll_back
+
+    def roll_back_and_lose(top, *a, **kw):  # the worst case: the kept file is gone after the rollback
+        ok = real_roll_back(top, *a, **kw)
+        gone = os.path.join(top, ".claude/settings.json")
+        if os.path.lexists(gone):  # reset --hard already removes it when the failed checkout had staged it
+            os.remove(gone)
+        return ok
+
+    def no_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(B, "_roll_back", roll_back_and_lose)
+    monkeypatch.setattr(B.os, "replace", no_replace)
+    try:
+        result = B.restore_baton(wt_c, ref)
+    finally:
+        monkeypatch.undo()
+        if (wt_c / "locked").exists():
+            os.chmod(wt_c / "locked", 0o755)
+    assert result.restored is False and result.rolled_back is False, result
+    assert "could not put back .claude/settings.json" in (result.error or "") and ref in (result.error or ""), result
+    leftovers = [f for f in os.listdir(wt_c / ".claude")] if (wt_c / ".claude").exists() else []
+    assert not [f for f in leftovers if ".restore-" in f], leftovers  # no half-written temp files left behind
