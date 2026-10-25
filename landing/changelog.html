@@ -97,8 +97,15 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
     <div class="releases">
-      <article class="rel now" id="v0.17.5" aria-labelledby="v0-17-5-t">
-        <p class="when"><span class="ver">v0.17.5</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+      <article class="rel now" id="v0.17.6" aria-labelledby="v0-17-6-t">
+        <p class="when"><span class="ver">v0.17.6</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+        <div>
+          <h2 id="v0-17-6-t">Security updates</h2>
+          <p>Four dependencies with known vulnerabilities are updated (certifi, filelock, Pillow and setuptools); a dependency audit of the server now finds none.</p>
+        </div>
+      </article>
+      <article class="rel" id="v0.17.5" aria-labelledby="v0-17-5-t">
+        <p class="when"><span class="ver">v0.17.5</span><time>October 25, 2026</time></p>
         <div>
           <h2 id="v0-17-5-t">A stopped agent's work restores into a real checkout</h2>
           <p>Restoring a stopped agent's saved work no longer refuses because of unrelated untracked files such as Claude Code's <code>.claude/</code> folder. It still refuses, and says so, when a tracked file has changes or a file of yours is where the saved work goes, including ignored files and names that differ only in case or accent form on macOS.</p>

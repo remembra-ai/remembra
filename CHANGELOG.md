@@ -5,6 +5,22 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.6] - 2026-10-25
+
+**Security updates and a green CI.**
+
+### Security
+- Dependencies with known vulnerabilities updated in `uv.lock` (42 advisories in four indirect dependencies):
+  certifi 2026.10.23, filelock 4.2.4, Pillow 13.0.0 and setuptools 84.2.1. `pip-audit` over the production
+  dependency set reports no known vulnerabilities.
+
+### Fixed
+- Type errors from 0.17.3 and 0.17.4 (`mypy src/remembra` is clean again): the local crew HTTP client is a
+  `CrewHttp`, and three loose types are tightened. No behaviour change.
+- Tests: the streamed form-bomb test's wall-clock bound was 0.3 s and failed at 0.31-0.32 s on shared CI
+  runners; its guarantee is the chunk count (the server stops after at most 2 chunks), and the clock bound is
+  now 2 s.
+
 ## [0.17.5] - 2026-10-25
 
 **A baton restores into a real checkout.**

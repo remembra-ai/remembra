@@ -90,7 +90,7 @@ NO_SETTINGS_HINT = (
 )
 
 
-def sanitize_error_message(e: BaseException) -> str:
+def sanitize_error_message(e: Exception) -> str:
     """The sanitized error, with :data:`NO_SETTINGS_HINT` when a refused local connection is the likely cause."""
     text = _sanitize_error_message(e)
     if NO_SETTINGS and _is_connect_error(e):
