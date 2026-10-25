@@ -73,6 +73,8 @@ def build_codex_mcp_block(
         "# MCP Servers - Remembra Shared Memory",
         "[mcp_servers.remembra]",
         f"command = {json.dumps(command)}",
+        # the Codex app's remote exec-server drops the env below; --client reads it from this file
+        'args = ["--client", "codex"]',
         "",
         "[mcp_servers.remembra.env]",
         f"REMEMBRA_URL = {json.dumps(url)}",

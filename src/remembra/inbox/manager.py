@@ -35,10 +35,11 @@ session brief uses to withhold low-trust messages.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -173,6 +174,44 @@ def _recipient_sql(recipient: str | None) -> tuple[str, list[Any]]:
 
 def _new_inbox_id() -> str:
     return f"inbox_{uuid4().hex[:16]}"
+
+
+# A blind re-send of an identical, still unread message within this window returns the first one.
+RESEND_WINDOW_SECONDS = 600
+
+
+def idempotent_inbox_id(owner_user_id: str, from_agent: str, key: str) -> str:
+    """The inbox id an ``Idempotency-Key`` stands for: one per account, sender and key."""
+    digest = hashlib.sha256(f"{owner_user_id}\x1f{from_agent}\x1f{key}".encode()).hexdigest()
+    return f"inbox_{digest[:16]}"
+
+
+def same_message(
+    row: dict[str, Any],
+    *,
+    to_agent: str,
+    subject: str,
+    body: str,
+    project_id: str | None,
+    metadata: dict[str, Any] | None,
+    kind: str | None,
+    expires_at: datetime | None,
+) -> bool:
+    """True when ``row`` stores exactly this message: recipient, texts (as stored: cleaned), project,
+    every metadata field, kind and expiry."""
+    meta = dict(row.get("metadata")) if isinstance(row.get("metadata"), dict) else {}
+    stored_project = row.get("project_id") or meta.pop("project_id", None) or None
+    meta.pop("project_id", None)
+    wanted = _scrub_deep({k: v for k, v in (metadata or {}).items() if k != "project_id"})
+    return (
+        row.get("to_agent") == (to_agent or "").strip()
+        and row.get("subject") == _clean((subject or "").strip())
+        and row.get("body") == _clean(body or "")
+        and stored_project == ((project_id or "").strip() or None)
+        and json.dumps(meta, sort_keys=True, default=str) == json.dumps(wanted, sort_keys=True, default=str)
+        and (row.get("kind") or "directive") == ((kind or "directive").strip().lower())
+        and (row.get("expires_at") or None) == (expires_at.isoformat() if expires_at else None)
+    )
 
 
 def _clean(text: str) -> str:
@@ -456,6 +495,57 @@ class InboxManager:
         cursor = await self._db.conn.execute(query, (owner_user_id, agent_id, now_iso, *scope_params, limit))
         rows = await cursor.fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    async def recent_duplicate(
+        self,
+        owner_user_id: str,
+        from_agent: str,
+        to_agent: str,
+        subject: str,
+        body: str,
+        *,
+        project_id: str | None,
+        metadata: dict[str, Any] | None = None,
+        kind: str | None = None,
+        expires_at: datetime | None = None,
+        window_seconds: float = RESEND_WINDOW_SECONDS,
+    ) -> dict[str, Any] | None:
+        """The same sender's identical message, still unread and sent within ``window_seconds``, if any.
+
+        An agent whose send timed out cannot tell whether it arrived; sending it again must not
+        leave the recipient two copies. A message already read or answered is not matched: sending
+        it again then is a new message.
+        """
+        now = datetime.now(UTC)
+        since = (now - timedelta(seconds=window_seconds)).isoformat()
+        cursor = await self._db.conn.execute(
+            "SELECT * FROM agent_inbox WHERE owner_user_id = ? AND from_agent = ? AND to_agent = ? AND subject = ?"
+            " AND body = ? AND status = 'unread' AND created_at >= ? AND (expires_at IS NULL OR expires_at > ?)"
+            " ORDER BY created_at DESC LIMIT 5",
+            (
+                owner_user_id,
+                (from_agent or "").strip(),
+                (to_agent or "").strip(),
+                _clean((subject or "").strip()),
+                _clean(body or ""),
+                since,
+                now.isoformat(),
+            ),
+        )
+        for raw in await cursor.fetchall():
+            row = _row_to_dict(raw)
+            if same_message(
+                row,
+                to_agent=to_agent,
+                subject=subject,
+                body=body,
+                project_id=project_id,
+                metadata=metadata,
+                kind=kind,
+                expires_at=expires_at,
+            ):
+                return row
+        return None
 
     async def get_one(
         self,

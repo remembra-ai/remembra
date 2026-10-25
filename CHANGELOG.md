@@ -5,6 +5,44 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.3] - 2026-10-25
+
+**Picking up another agent's work: the Codex app connects without setup, a lost agent's path can be taken
+over, and retries and repeats no longer pile up.**
+
+### Fixed
+- **The Codex app reaches Remembra.** In a cloud-connected chat the Codex app starts MCP servers without the
+  `env` from `~/.codex/config.toml`, so `remembra-mcp` tried `localhost` and every tool failed with "Connection
+  refused". `remembra-mcp --client codex` now reads any setting missing from its environment from the `remembra`
+  entry in that client's own config file (`claude`, `codex`, `gemini`, `qwen` and `cursor` are known). Settings
+  that do arrive still win, and a key read from the file always brings that file's URL, so a key is never sent
+  to a server configured elsewhere. `remembra-install` writes `args = ["--client", "codex"]`; a Codex config
+  written before this release still works, because `remembra-mcp` started by Codex with no settings at all
+  reads the same file. With no settings and no client, the error now says so and how to fix it instead of a
+  bare "Connection refused".
+- **A lost agent's path can be taken over.** A claim on a path outside every zone (artwork, a single file) that
+  a lost session left reserved was offered as "a reserved claim" with `remembra-crew adopt clm_…`, which the CLI
+  read as a task name and refused; `crew_claim` adopt took no paths. Now the brief names the path and the
+  command (`remembra-crew adopt --path <path>`, or `crew_claim(action="adopt", paths=[…])`), the refusal an
+  agent gets when it touches the path says the same, `remembra-crew adopt` takes `--path` and `--zone` and still
+  accepts the claim-id form older offers named, and the saved uncommitted work is restored as for a task baton.
+  A directory names the claims under it (crew glob rules: `*` stays within one folder). One adopt takes one lost
+  session's saved work: when several match, it names each path to adopt on its own. A claimed name that is not
+  a plain path (spaces, prose) is never quoted inside an instruction.
+- **No repeat handoffs from one session.** The Codex app ends a long-lived thread after every turn and on
+  reopen; each end stored another copy of the same handoff, burying the useful ones. A close that would store
+  exactly what this session already sent is now skipped (logged in `relay.log`); a close with anything new is
+  sent and supersedes the earlier one. A handoff that could not be sent and was queued is still delivered, and a
+  skipped close still sends other sessions' queued handoffs.
+- **A retried message is not delivered twice.** `POST /inbox/send` honours `Idempotency-Key` (the same key
+  returns the first message with `200` and `Idempotent-Replayed: true`; reused for a different message it is a
+  `409`; keys are per account and sender). Without a key, the same sender's identical message that is still
+  unread from the last 10 minutes is returned instead of stored again; a message that differs in any field
+  (metadata, kind, expiry) or has expired is new. The Python SDK's `send_to_inbox` takes `idempotency_key`.
+- Reviewed by Codex in four passes before release; each finding has a test.
+- Tests: a red-team test committed "as a human" under the suite's own environment, so run inside an agent's crew
+  session it got that session's `Remembra-Member` trailer; it now commits with the test machine's HOME.
+
 ## [0.17.2] - 2026-10-25
 
 **Each agent sends with its own key, and a reply lands where the conversation is.**

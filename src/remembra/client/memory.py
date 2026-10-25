@@ -233,15 +233,16 @@ class Memory:
         path: str,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Make an HTTP request to the Remembra server."""
         url = f"{self.base_url}{path}"
 
         kwargs: dict[str, Any] = {"method": method, "url": url, "json": json, "params": params}
         agent = _header_agent_id(getattr(self, "agent_id", None))
-        if agent:
+        if agent or headers:
             # Declared identity; an agent-scoped API key overrides it server-side.
-            kwargs["headers"] = {"X-Remembra-Agent-Id": agent}
+            kwargs["headers"] = {**({"X-Remembra-Agent-Id": agent} if agent else {}), **(headers or {})}
         response = self._client.request(**kwargs)
 
         if response.status_code >= 400:
@@ -1104,6 +1105,7 @@ class Memory:
         metadata: dict[str, Any] | None = None,
         from_agent: str | None = None,
         expires_at: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Send a targeted message to another agent's inbox.
 
@@ -1115,6 +1117,8 @@ class Memory:
             from_agent: Optional sender id. Defaults to the client's ``agent_id``,
                 then 'unknown' server-side.
             expires_at: Optional ISO-8601 expiry timestamp.
+            idempotency_key: Optional key: sending again with the same key returns the first message
+                instead of storing a second one (safe to retry after a lost response).
 
         Returns:
             Dict with `inbox_id`, `status`, and `created_at`.
@@ -1130,6 +1134,8 @@ class Memory:
             payload["from_agent"] = sender
         if expires_at:
             payload["expires_at"] = expires_at
+        if idempotency_key:
+            return self._request("POST", "/api/v1/inbox/send", json=payload, headers={"Idempotency-Key": idempotency_key})
         return self._request("POST", "/api/v1/inbox/send", json=payload)
 
     def get_inbox(

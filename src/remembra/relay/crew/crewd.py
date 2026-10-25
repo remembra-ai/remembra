@@ -47,6 +47,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import signal
 import socket
 import struct
@@ -61,6 +62,7 @@ from typing import Any, Final
 
 import httpx
 
+from remembra.crew import gatecore as G
 from remembra.crew import schemas as S
 from remembra.crew.redact import outbound
 from remembra.relay.config import RelayConfig, load_config
@@ -2662,6 +2664,15 @@ class Crewd:
         """``remembra-crew adopt T-n``: server adopt (D33 authorisation), then restore the baton ref (D30)."""
         sess = self.require(peer, args.get("key"))
         ref_arg = str(args.get("task") or "")
+        claim_id = ref_arg if re.fullmatch(r"clm_[A-Za-z0-9]{8,64}", ref_arg) else ""  # an offer for a claim with no task
+        if claim_id or (not ref_arg and (args.get("path") or args.get("zone"))):
+            return await self.adopt_reserved(
+                sess,
+                path=str(args.get("path") or ""),
+                zone=str(args.get("zone") or ""),
+                claim_id=claim_id,
+                restore_only=bool(args.get("restore_only")),
+            )
         task = await self.find_task(sess, ref_arg)
         key = str(sess["key"])
         baton_ref = None
@@ -2695,23 +2706,9 @@ class Crewd:
             restore: dict[str, Any] | None = None
             if baton_ref:
                 label = f"T-{task.get('number')}"
-                retry = f"remembra-crew adopt {label} --restore-only"
-                # The adopter now holds the task's zones: lift this checkout's read-only fence before the
-                # restore writes into them (the next snapshot sync re-fences whatever still applies).
-                self.lift_fence(str(sess["toplevel"]), why=f"{sess.get('callsign')} adopted {label}")
-                try:
-                    result = await asyncio.to_thread(
-                        B.restore_baton, str(sess["toplevel"]), str(baton_ref), remote=sess.get("remote"), retry_command=retry
-                    )
-                except B.GitError as e:  # git itself failed before anything was changed (a timeout, git missing)
-                    result = B.RestoreResult(False, "restore_failed", str(baton_ref), next_command=retry, error=str(e)[:300])
-                restore = result.as_dict()
-                if baton_id:
-                    restore["reported"] = await self.report_restore(sess, str(baton_id), result)
-                if result.restored:
-                    rec = self.batons.setdefault(str(baton_ref), {"crew_id": sess["crew_id"], "toplevel": str(sess["toplevel"])})
-                    rec["closed_at"] = self.clock()
-                    self.save_batons()
+                restore = await self.restore_adopted(
+                    sess, str(baton_ref), baton_id, label, f"remembra-crew adopt {label} --restore-only"
+                )
             sess["current_task_id"] = task["id"]
             sess["task_ref"] = f"T-{task.get('number')}"
             self.persist(key)
@@ -2725,6 +2722,126 @@ class Crewd:
             "claims": [c.get("id") for c in (adopted.get("claims") or []) if isinstance(c, dict)]
             if isinstance(adopted, dict)
             else [],
+        }
+
+    async def restore_adopted(
+        self, sess: dict[str, Any], baton_ref: str, baton_id: str | None, label: str, retry: str
+    ) -> dict[str, Any]:
+        """Restore an adopted baton's saved work into this checkout and report how it went (D30)."""
+        # The adopter now holds the baton's zones: lift this checkout's read-only fence before the
+        # restore writes into them (the next snapshot sync re-fences whatever still applies).
+        self.lift_fence(str(sess["toplevel"]), why=f"{sess.get('callsign')} adopted {label}")
+        try:
+            result = await asyncio.to_thread(
+                B.restore_baton, str(sess["toplevel"]), baton_ref, remote=sess.get("remote"), retry_command=retry
+            )
+        except B.GitError as e:  # git itself failed before anything was changed (a timeout, git missing)
+            result = B.RestoreResult(False, "restore_failed", baton_ref, next_command=retry, error=str(e)[:300])
+        restore = result.as_dict()
+        if baton_id:
+            restore["reported"] = await self.report_restore(sess, str(baton_id), result)
+        if result.restored:
+            rec = self.batons.setdefault(baton_ref, {"crew_id": sess["crew_id"], "toplevel": str(sess["toplevel"])})
+            rec["closed_at"] = self.clock()
+            self.save_batons()
+        return restore
+
+    async def adopt_reserved(
+        self, sess: dict[str, Any], *, path: str, zone: str, restore_only: bool, claim_id: str = ""
+    ) -> dict[str, Any]:
+        """``remembra-crew adopt --path P`` / ``--zone Z``: adopt a lost session's reserved claim that is not
+        tied to a task (a path or a zone it held), then restore its saved work like a task baton."""
+        key = str(sess["key"])
+        plain = bool(G.SAFE_CLAIM_PATH_RE.fullmatch(path)) and ".." not in path.split("/")
+        label = (f"path {path}" if plain else "the named path") if path else f"zone {zone}" if zone else f"claim {claim_id}"
+        flag = f"--path {shlex.quote(path)}" if path else f"--zone {shlex.quote(zone)}" if zone else claim_id
+        zone_id: str | None = None
+        if zone:
+            snap = self.snapshots.get(str(sess["crew_id"])) or {}
+            zone_id = next((str(z["id"]) for z in snap.get("zones") or () if zone in (z.get("slug"), z.get("id"))), None)
+            if zone_id is None:
+                return {"ok": False, "error": "zone_not_found", "message": f"no zone {zone} in this crew"}
+        async with self.lock(key):
+            resp = await self.request(
+                self.api_for(sess), "GET", f"/crews/{sess['crew_id']}/claims", session_token=self.tokens.get(key)
+            )
+            if not resp.ok:
+                return {"ok": False, "status": resp.status, "error": resp.error(), "message": resp.detail().get("message")}
+
+            def covers(c: Mapping[str, Any]) -> bool:
+                return bool(
+                    (claim_id and c.get("id") == claim_id)
+                    or (zone_id and c.get("zone_id") == zone_id)
+                    or (path and G.claim_covers_path(path, str(c.get("path_glob") or "")))
+                )
+
+            rows = [c for c in (resp.body or {}).get("claims") or () if isinstance(c, dict) and covers(c)]
+            adopted: list[dict[str, Any]] = []
+            refused: list[str] = []
+            if restore_only:  # adopted earlier, the restore did not finish
+                adopted = [c for c in rows if c.get("state") == "active" and c.get("holder_session_id") == sess.get("session_id")]
+            else:
+                reserved = [c for c in rows if c.get("state") == "reserved"]
+                # One adopt restores one set of saved work into this checkout: several lost sessions'
+                # batons under one name are adopted one by one, by their own paths.
+                saved = sorted({str(c["baton_ref"]) for c in reserved if c.get("baton_ref")})
+                if len(saved) > 1:
+                    names = sorted(
+                        {
+                            f"--path {shlex.quote(str(c['path_glob']))}"
+                            if G.SAFE_CLAIM_PATH_RE.fullmatch(str(c.get("path_glob") or ""))
+                            and ".." not in str(c["path_glob"]).split("/")
+                            else str(c.get("id"))
+                            for c in reserved
+                            if c.get("baton_ref")
+                        }
+                    )
+                    return {
+                        "ok": False,
+                        "error": "several_batons",
+                        "message": f"{len(saved)} batons with saved work match {label}; adopt one at a time: "
+                        + ", ".join(names[:5]),
+                    }
+                done: set[str] = set()
+                for c in reserved:
+                    if str(c.get("id")) in done:
+                        continue
+                    r = await self.request(
+                        self.api_for(sess), "POST", f"/claims/{c['id']}/adopt", json_body={}, session_token=self.tokens.get(key)
+                    )
+                    if not r.ok:  # not offered to this session, say: the others are still taken and restored
+                        name = str(c.get("path_glob") or "")
+                        name = name if G.SAFE_CLAIM_PATH_RE.fullmatch(name) else str(c.get("id"))
+                        refused.append(f"{name}: {r.error()}")
+                        continue
+                    body = r.body or {}
+                    got = [x for x in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(x, dict)]
+                    for x in got or [c]:
+                        adopted.append(
+                            {**x, "baton_ref": x.get("baton_ref") or c.get("baton_ref"), "baton_id": body.get("baton_id")}
+                        )
+                    done |= {str(x.get("id")) for x in got} | {str(c.get("id"))}
+            if not adopted:
+                if refused:
+                    return {"ok": False, "error": "not_adopted", "message": "; ".join(refused)[:500]}
+                return {"ok": False, "error": "nothing_reserved", "message": f"nothing is reserved on {label}"}
+            ref = next((c for c in adopted if c.get("baton_ref")), None)
+            restore = None
+            if ref:
+                restore = await self.restore_adopted(
+                    sess, str(ref["baton_ref"]), ref.get("baton_id"), label, f"remembra-crew adopt {flag} --restore-only"
+                )
+            if any(c.get("task_id") for c in adopted):
+                sess["current_task_id"] = next(c["task_id"] for c in adopted if c.get("task_id"))
+            self.persist(key)
+        self.spawn(self.sync_snapshot(str(sess["crew_id"])))
+        return {
+            "ok": True,
+            "task_ref": label,
+            "baton_ref": ref.get("baton_ref") if ref else None,
+            "restore": restore,
+            "claims": sorted({str(c.get("id")) for c in adopted}),
+            "refused": refused,
         }
 
     async def report_restore(self, sess: Mapping[str, Any], baton_id: str, result: B.RestoreResult) -> bool:

@@ -39,6 +39,7 @@ from typing import Any, Final
 import httpx
 
 from remembra.client.memory import Memory, _header_agent_id
+from remembra.crew import gatecore as G
 from remembra.crew import schemas as S
 from remembra.relay.handoff import CREW_FOOTER, data_line, police_item, render_crew_block
 from remembra.security.error_sanitizer import sanitize_error_message
@@ -837,7 +838,7 @@ class CrewBridge:
         if action == "release":
             return self._release(http, seat, zone=zone, paths=paths, task=task, baton=baton, reason=reason)
         if action == "adopt":
-            return self._adopt(http, seat, zone=zone, task=task)
+            return self._adopt(http, seat, zone=zone, paths=paths, task=task)
         if action == "handover":
             return self._handover(http, seat, zone=zone, paths=paths, task=task, to=to, reason=reason)
         if action in ("accept", "decline"):
@@ -1067,7 +1068,7 @@ class CrewBridge:
             lines.append(f"RELEASED {self._claim_label(http, seat, c)} → {state}")
         return "\n".join(lines)
 
-    def _adopt(self, http: CrewHttp, seat: Seat, *, zone: str | None, task: str | None) -> str:
+    def _adopt(self, http: CrewHttp, seat: Seat, *, zone: str | None, paths: Sequence[str] | None, task: str | None) -> str:
         if task:
             task_row = self._task(http, seat, task)
             try:
@@ -1079,19 +1080,71 @@ class CrewBridge:
             seat.forget("tasks")
             seat.current_task_id = str(task_row["id"])
             return self._adopted(http, seat, task_ref(task_row) or "the task", body or {})
-        if not zone:
-            raise CrewUsageError('Name the baton to adopt: task="T-12" (as offered in your brief) or zone="pos".')
-        z = self._zone(http, seat, zone)
-        reserved = [c for c in self._claims(http, seat) if c.get("zone_id") == z["id"] and c.get("state") == "reserved"]
-        if not reserved:
-            return f"NOT ADOPTED zone {_safe(z.get('slug'))}: nothing is reserved there."
-        try:
-            _, body, _ = http.call("POST", f"/claims/{reserved[0]['id']}/adopt", token=seat.token, json={})
-        except CrewApiError as e:
-            if e.status in (403, 409):
-                return f"NOT ADOPTED zone {_safe(z.get('slug'))}: {e.message}"
-            raise
-        return self._adopted(http, seat, f"zone {_safe(z.get('slug'))}", body or {})
+        if not (zone or paths):
+            raise CrewUsageError(
+                'Name the baton to adopt: task="T-12", zone="pos" or paths=["src/app/cart.ts"] (as offered in your brief).'
+            )
+        reserved = [c for c in self._claims(http, seat) if c.get("state") == "reserved"]
+        picked: list[dict[str, Any]] = []
+        labels: list[str] = []
+        if zone and _is_resource(zone):
+            labels.append(_safe(zone) or "resource")
+            picked += [c for c in reserved if c.get("resource") == zone]
+        elif zone:
+            z = self._zone(http, seat, zone)
+            labels.append(f"zone {_safe(z.get('slug'))}")
+            picked += [c for c in reserved if c.get("zone_id") == z["id"]]
+        if paths:
+            # a lost session's path claim, or the zone a path lies in
+            labels.append(", ".join(_safe(p) or "a path" for p in list(paths)[:3]))
+            targets, _ = self._targets(http, seat, None, paths)
+            zone_ids = {t["zone_id"] for _, t in targets if t.get("zone_id")}
+            picked += [
+                c
+                for c in reserved
+                if c.get("zone_id") in zone_ids or any(G.claim_covers_path(p, str(c.get("path_glob") or "")) for p in paths)
+            ]
+        label = " and ".join(labels)
+        if not picked:
+            return f"NOT ADOPTED {label}: nothing is reserved there."
+        saved = {str(c["baton_ref"]) for c in picked if c.get("baton_ref")}
+        if len(saved) > 1:  # one adopt takes one lost session's saved work, as remembra-crew adopt does
+            names = sorted(
+                {
+                    f'paths=["{c["path_glob"]}"]'
+                    if G.SAFE_CLAIM_PATH_RE.fullmatch(str(c.get("path_glob") or ""))
+                    and ".." not in str(c["path_glob"]).split("/")
+                    else f"zone {self._zone_label(http, seat, c.get('zone_id'))}"
+                    for c in picked
+                    if c.get("baton_ref")
+                }
+            )
+            return f"NOT ADOPTED {label}: {len(saved)} batons with saved work match; adopt one at a time: " + ", ".join(names[:5])
+        claims: list[dict[str, Any]] = []
+        baton: dict[str, Any] | None = None
+        refused: list[str] = []
+        done: set[str] = set()
+        for c in picked:
+            if c["id"] in done:  # adopting a task's baton takes its sibling batons too
+                continue
+            try:
+                _, body, _ = http.call("POST", f"/claims/{c['id']}/adopt", token=seat.token, json={})
+            except CrewApiError as e:
+                if e.status in (403, 409):
+                    what = label if len(picked) == 1 else self._claim_label(http, seat, c)
+                    refused.append(f"NOT ADOPTED {what}: {e.message}")
+                    continue
+                raise
+            body = body or {}
+            got = [x for x in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(x, dict)]
+            claims += got
+            done |= {str(x.get("id")) for x in got} | {str(c["id"])}
+            if baton is None and isinstance(body.get("baton"), dict):
+                baton = body["baton"]
+        if not claims:
+            return "\n".join(refused) or f"NOT ADOPTED {label}: nothing is reserved there."
+        text = self._adopted(http, seat, label, {"claims": claims, **({"baton": baton} if baton else {})})
+        return "\n".join([text, *refused])
 
     def _adopted(self, http: CrewHttp, seat: Seat, what: str, body: Mapping[str, Any]) -> str:
         claims = [c for c in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(c, dict)]

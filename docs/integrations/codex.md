@@ -19,7 +19,7 @@ The fastest way — one command:
 ```bash
 codex mcp add remembra \
   --env REMEMBRA_URL=http://localhost:8787 \
-  -- remembra-mcp
+  -- remembra-mcp --client codex
 ```
 
 ### With Authentication
@@ -29,7 +29,7 @@ codex mcp add remembra \
   --env REMEMBRA_URL=http://localhost:8787 \
   --env REMEMBRA_API_KEY=your_key_here \
   --env REMEMBRA_USER_ID=your_user_id \
-  -- remembra-mcp
+  -- remembra-mcp --client codex
 ```
 
 ## Setup (Config File)
@@ -41,6 +41,7 @@ Alternatively, edit your config directly.
     ```toml
     [mcp_servers.remembra]
     command = "remembra-mcp"
+    args = ["--client", "codex"]
 
     [mcp_servers.remembra.env]
     REMEMBRA_URL = "http://localhost:8787"
@@ -62,6 +63,7 @@ Alternatively, edit your config directly.
 ```toml
 [mcp_servers.remembra]
 command = "remembra-mcp"
+args = ["--client", "codex"]
 
 [mcp_servers.remembra.env]
 REMEMBRA_URL = "http://localhost:8787"
@@ -77,6 +79,14 @@ command = "remembra-mcp"
 startup_timeout_sec = 15
 tool_timeout_sec = 30
 ```
+
+!!! note "Why --client codex"
+    The Codex app can run a chat through its cloud connection. In that mode it starts MCP servers
+    **without the `env` from your config**, so the server would not know your URL or key. With
+    `--client codex`, `remembra-mcp` reads any missing setting from the `remembra` entry in
+    `~/.codex/config.toml`; settings that do arrive in the environment still win. `remembra-install`
+    writes this line for you. Without it, `remembra-mcp` 0.17.3+ still detects that Codex started it
+    with no settings and reads the same file.
 
 !!! note "TOML, not JSON"
     Codex uses TOML configuration, unlike Claude Desktop and Cursor which use JSON. Make sure you're editing a `.toml` file.
@@ -144,7 +154,12 @@ command = "/Users/you/.local/bin/remembra-mcp"
 
 ### "Connection refused"
 
-The Remembra server isn't running:
+If the error says **"No Remembra settings reached this MCP server"**, Codex started the server
+without its `env` (the Codex app does this in cloud-connected chats). Add
+`args = ["--client", "codex"]` under `[mcp_servers.remembra]`, or rerun `remembra-install`, then
+start a new chat.
+
+Otherwise the Remembra server isn't running:
 
 ```bash
 curl http://localhost:8787/health

@@ -21,12 +21,15 @@ Pure functions; everything that ends up stored first goes through
 from __future__ import annotations
 
 import functools
+import json
 import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from remembra.crew.gatecore import SAFE_CLAIM_PATH_RE
 from remembra.relay.identity import repository_key
 from remembra.security.secrets import redact_secrets
 from remembra.security.untrusted import (
@@ -1439,7 +1442,8 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[
     """Template lines (ids only) and data items for one baton offered to the reader (D33: only then the adopt line)."""
     task = _only(baton.get("task"), _TASK_REF_RE)
     zones = [z for z in (baton.get("zones") or []) if _only(z, _SLUG_RE)]
-    what = task or (f"zone {zones[0]}" if zones else "a reserved claim")
+    paths = [p for p in (baton.get("paths") or []) if _only(p, SAFE_CLAIM_PATH_RE) and ".." not in p.split("/")]
+    what = task or (f"zone {zones[0]}" if zones else f"path {paths[0]}" if paths else "a reserved claim")
     frm = _only(baton.get("from"), _CALLSIGN_RE)
     why = [w for w in (_only(baton.get("from_state"), _WORD_RE), _hhmm(baton.get("stopped_at"))) if w]
     for extra in (baton.get("error"), baton.get("source")):
@@ -1468,7 +1472,16 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[
             + ("   (restores the saved work into this checkout)" if ref else "")
         )
     elif zones:
-        lines.append(f'  To continue: crew_claim(action="adopt", zone="{zones[0]}")')
+        lines.append(
+            f'  To continue: crew_claim(action="adopt", zone="{zones[0]}")'
+            + (f"   (to restore the saved work: remembra-crew adopt --zone {zones[0]})" if ref else "")
+        )
+    elif paths:
+        lines.append(
+            f"  To continue: remembra-crew adopt --path {shlex.quote(paths[0])}"
+            + ("   (restores the saved work into this checkout)" if ref else "")
+            + f'   or crew_claim(action="adopt", paths={json.dumps(paths[:5])})'
+        )
     data: list[str] = []
     if task and baton.get("task_title"):
         item = f'{task} title: "{_data_item(baton["task_title"], 80, allowed)}"'

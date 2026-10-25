@@ -618,6 +618,8 @@ class CrewCore:
                     batons[key] = await self._baton_entry(crew_id, claim, holder, task, zone)
                 if zone is not None:
                     batons[key]["zones"].append(zone["slug"])
+                elif claim.get("path_glob"):  # a path claim: the adopt line names it
+                    batons[key]["paths"].append(claim["path_glob"])
                 continue
             if holder is not None and holder["id"] == viewer_session_id:
                 continue  # the reader's own claims
@@ -704,6 +706,7 @@ class CrewCore:
             "task_title": task["title"] if task else None,
             "claim_id": claim["id"],
             "zones": [],
+            "paths": [],
             "from": holder["callsign"] if holder else None,
             "from_state": holder["state"] if holder else None,
             "stopped_at": stopped,

@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -182,6 +182,66 @@ def load_config_from_source(
         return None
     found = loader(Path(path))
     return _build(source or kind, found, agent, env) if found else None
+
+
+# each client's own MCP config file, for ``remembra-mcp --client``
+CLIENT_CONFIG = {
+    "claude": (".claude.json",),
+    "codex": (".codex", "config.toml"),
+    **_OWN_CONFIG,
+}
+
+
+def client_mcp_env(client: str, home: Path, codex_home: str | None = None) -> dict[str, str]:
+    """The ``env`` of the ``remembra`` MCP server in ``client``'s own config file ({} when there is none).
+
+    Unlike the loaders above, a block without a key is returned too: a sandboxed Codex
+    config has only the local bridge URL.
+    """
+    parts = CLIENT_CONFIG.get(client)
+    if parts is None:
+        return {}
+    path = home.joinpath(*parts)
+    if client == "codex" and codex_home:  # Codex reads $CODEX_HOME/config.toml when it is set
+        path = Path(codex_home).expanduser() / "config.toml"
+    try:
+        text = path.read_text()
+        data = tomllib.loads(text) if path.suffix == ".toml" else json.loads(text)
+    except (OSError, ValueError):
+        return {}
+    servers = data.get("mcp_servers" if path.suffix == ".toml" else "mcpServers") if isinstance(data, dict) else None
+    server = servers.get("remembra") if isinstance(servers, dict) else None
+    env = server.get("env") if isinstance(server, dict) else None
+    return {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
+
+
+def fill_env_from_client(client: str, environ: MutableMapping[str, str], home: Path | None = None) -> list[str]:
+    """Add the ``REMEMBRA_*`` settings missing from ``environ`` from ``client``'s own config file.
+
+    The Codex app's remote exec-server starts MCP servers without the env configured for them,
+    so the server fell back to localhost. Values already in ``environ`` win, except that a key
+    taken from the file always brings the file's URL with it, and a key from the environment never
+    takes the file's URL: a key is never sent to a server configured somewhere else. Codex's file is
+    ``$CODEX_HOME/config.toml`` when ``CODEX_HOME`` is set. Returns the names set (never their values).
+    """
+    found = client_mcp_env(client, home or Path(environ.get("HOME") or Path.home()), environ.get("CODEX_HOME"))
+    filled: list[str] = []
+    env_key = bool((environ.get("REMEMBRA_API_KEY") or "").strip())
+    if found.get("REMEMBRA_API_KEY") and not env_key:
+        environ["REMEMBRA_API_KEY"] = found["REMEMBRA_API_KEY"]
+        environ["REMEMBRA_URL"] = found.get("REMEMBRA_URL") or DEFAULT_URL
+        filled += ["REMEMBRA_API_KEY", "REMEMBRA_URL"]
+    for name, value in found.items():
+        if not name.startswith("REMEMBRA_") or name in environ:
+            continue
+        if name == "REMEMBRA_API_KEY" or (name == "REMEMBRA_URL" and env_key):
+            # A key that arrived in the environment keeps the URL that came with it (or the default):
+            # the file's URL belongs to the file's key. A keyless block (a sandboxed Codex's local
+            # bridge) still gives its URL.
+            continue
+        environ[name] = value
+        filled.append(name)
+    return filled
 
 
 def _build(source_name: str, chosen: Mapping[str, str], agent: str | None, env: Mapping[str, str]) -> RelayConfig:

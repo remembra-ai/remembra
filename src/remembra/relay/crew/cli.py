@@ -804,11 +804,21 @@ def cmd_release(args: argparse.Namespace, layout: Layout) -> int:
 
 
 def cmd_adopt(args: argparse.Namespace, layout: Layout) -> int:
+    if bool(args.task) + bool(args.path) + bool(args.zone) != 1:
+        print("remembra-crew adopt: name exactly one of a task (T-12), --path or --zone", file=sys.stderr)
+        return 2
     who = _need_session(layout)
-    res = _call(layout, "adopt", {"key": who["key"], "task": args.task, "restore_only": args.restore_only}, timeout=60.0)
+    res = _call(
+        layout,
+        "adopt",
+        {"key": who["key"], "task": args.task, "path": args.path, "zone": args.zone, "restore_only": args.restore_only},
+        timeout=60.0,
+    )
     if not res.get("ok"):
         return _fail(res)
     print(f"ADOPTED {res.get('task_ref')}" + (f" · claims {', '.join(res.get('claims') or [])}" if res.get("claims") else ""))
+    for line in res.get("refused") or []:
+        print(f"NOT ADOPTED {line}")
     restore = res.get("restore")
     if restore:
         if restore.get("restored"):
@@ -1116,7 +1126,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--baton", action="store_true")
 
     sp = sub.add_parser("adopt", help="take over an offered baton (restores the saved work)")
-    sp.add_argument("task")
+    sp.add_argument("task", nargs="?", help="the task the baton belongs to (T-12)")
+    sp.add_argument("--path", help="a reserved path not tied to a task (as named in the refusal)")
+    sp.add_argument("--zone", help="a reserved zone not tied to a task")
     sp.add_argument("--restore-only", action="store_true", dest="restore_only")
 
     sp = sub.add_parser("task", help="tasks")

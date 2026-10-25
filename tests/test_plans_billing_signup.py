@@ -418,7 +418,11 @@ async def test_relay_burst_and_soft_cap(tmp_path) -> None:
     async with cost_app(tmp_path, rate_limit_enabled=True) as c:
         uid, hdr = await c.account("relayburst@example.com")
         send = {"to_agent": "codex", "subject": "s", "body": "b"}
-        codes = [(await c.h.client.post("/api/v1/inbox/send", json=send, headers=hdr)).status_code for _ in range(31)]
+        # distinct messages: an identical unread re-send is returned, not stored or counted again
+        codes = [
+            (await c.h.client.post("/api/v1/inbox/send", json={**send, "body": f"b{i}"}, headers=hdr)).status_code
+            for i in range(31)
+        ]
         assert codes[:30] == [201] * 30 and codes[30] == 429  # Free relay burst 30/min
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")

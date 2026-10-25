@@ -853,3 +853,64 @@ def test_zone_baton_adopt_needs_an_offer(live, clock):
     assert 'crew_claim(action="adopt", zone="billing")' in status, status
     adopted = call("crew_claim", action="adopt", zone="billing")
     assert adopted.startswith("ADOPTED zone billing: you now hold zone billing (exclusive, active)"), adopted
+
+
+def test_a_path_baton_is_offered_with_a_working_adopt_line_and_adopted_by_path(live, clock):
+    """A lost session's claim on a path outside every zone (artwork, a single file) used to be offered as
+    "a reserved claim" with an adopt command the CLI could not run, and crew_claim adopt took no paths."""
+    project, a, a_sign, b, b_sign = _two_agents(live, "pathbaton")
+    use(a)
+    got = call("crew_claim", paths=["art/lls/cover.psd"])
+    assert "art/lls/cover.psd" in got, got
+    released = call("crew_claim", action="release", paths=["art/lls/cover.psd"], baton=True, reason="out of credits soon")
+    assert "reserved" in released, released
+    use(b)  # joined before the baton existed: never offered it
+    refused = call("crew_claim", action="adopt", paths=["art/lls/cover.psd"])
+    assert refused.startswith("NOT ADOPTED"), refused
+    d = agent(live, "claude-desktop", f"{project}-d", project)
+    use(d)
+    status = call("crew_status", project_id=project)
+    assert "YOUR BATON (offered to you): path art/lls/cover.psd" in status, status
+    assert "To continue: remembra-crew adopt --path art/lls/cover.psd" in status, status
+    assert 'crew_claim(action="adopt", paths=["art/lls/cover.psd"])' in status, status
+    # the directory it lies in names it too
+    adopted = call("crew_claim", action="adopt", paths=["art/lls"])
+    assert adopted.startswith("ADOPTED art/lls: you now hold"), adopted
+    assert "art/lls/cover.psd" in adopted, adopted
+    assert_clean(adopted)
+    holder = live.crew_rows(
+        "SELECT s.callsign, c.state FROM crew_claims c JOIN crew_sessions s ON s.id = c.holder_session_id"
+        " WHERE c.path_glob = 'art/lls/cover.psd' AND c.crew_id = ? AND c.state IN ('active', 'reserved')",
+        (crew_id_of(live, project),),
+    )
+    assert holder == [{"callsign": callsign_in(status), "state": "active"}], holder
+    assert call("crew_claim", action="adopt", paths=["art/lls/cover.psd"]).startswith("NOT ADOPTED")
+
+
+def test_mcp_adopt_takes_one_lost_sessions_saved_work_at_a_time(live, clock):
+    """Codex review P2: two lost sessions' batons with saved work under one folder are not both taken
+    by one adopt (only one could be restored); each is adopted by its own path."""
+    project, a, a_sign, b, b_sign = _two_agents(live, "twobatons")
+    for who, path in ((a, "art/lls/cover.psd"), (b, "art/lls/back.psd")):
+        use(who)
+        call("crew_claim", paths=[path])
+        call("crew_claim", action="release", paths=[path], baton=True, reason="out of credits soon")
+    db = live.app.state.crew_db
+
+    async def give_refs() -> None:  # the CLI's stall saved each session's uncommitted work as a ref
+        async with db.transaction():
+            for i, path in enumerate(("art/lls/cover.psd", "art/lls/back.psd")):
+                await db.conn.execute(
+                    "UPDATE crew_claims SET baton_ref = ? WHERE path_glob = ?", (f"refs/remembra/baton/cs_x{i}/1", path)
+                )
+
+    live.run(give_refs())
+    d = agent(live, "claude-desktop", f"{project}-d", project)
+    use(d)
+    call("crew_status", project_id=project)
+    both = call("crew_claim", action="adopt", paths=["art/lls"])
+    assert both.startswith("NOT ADOPTED art/lls: 2 batons with saved work match; adopt one at a time:"), both
+    assert 'paths=["art/lls/back.psd"]' in both and 'paths=["art/lls/cover.psd"]' in both, both
+    one = call("crew_claim", action="adopt", paths=["art/lls/back.psd"])
+    assert one.startswith("ADOPTED art/lls/back.psd: you now hold"), one
+    assert "refs/remembra/baton/cs_x1/1" in one, one

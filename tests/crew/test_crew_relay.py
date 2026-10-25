@@ -707,3 +707,14 @@ def test_trail_offset_is_bounded_for_every_project(api, crew):
         assert _get(api, "/trail", {"project_id": project, "offset": 10_000})["items"] == []
         for offset in (10_001, 10**6, 2**63 - 1, 2**63):
             _get(api, "/trail", {"project_id": project, "offset": offset}, status=422)
+
+
+def test_a_path_baton_with_a_glob_is_offered_shell_quoted():
+    """Codex review P2: a claim path with * is quoted in the offered command so a shell does not expand it."""
+    from remembra.relay.handoff import _baton_lines
+
+    lines, _ = _baton_lines({"paths": ["src/app/*.py"], "from": "codex-1", "baton_ref": None})
+    assert lines[0].startswith("YOUR BATON (offered to you): path src/app/*.py from codex-1"), lines
+    assert "remembra-crew adopt --path 'src/app/*.py'" in lines[1], lines
+    plain, _ = _baton_lines({"paths": ["art/lls/cover.psd"]})
+    assert "remembra-crew adopt --path art/lls/cover.psd" in plain[1], plain

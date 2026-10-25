@@ -43,6 +43,7 @@ import hashlib
 import json
 import re
 import secrets
+import shlex
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -51,6 +52,7 @@ from typing import Any, Final
 import aiosqlite
 import structlog
 
+from remembra.crew import gatecore as G
 from remembra.crew import schemas
 from remembra.crew.db import CrewDatabase
 from remembra.crew.events import Actor, CrewEventLog, EventTx, format_ts, parse_ts, utc_now
@@ -1485,7 +1487,12 @@ class CrewSessions:
             "from_callsign": holder["callsign"] if holder else None,
             "reserve_reason": claim.get("reserve_reason"),
             "baton_ref": claim.get("baton_ref"),
-            "adopt_command": f"remembra-crew adopt T-{number}" if number else f"remembra-crew adopt {claim['id']}",
+            "adopt_command": f"remembra-crew adopt T-{number}"
+            if number
+            else f"remembra-crew adopt --path {shlex.quote(str(claim['path_glob']))}"
+            if G.SAFE_CLAIM_PATH_RE.fullmatch(str(claim.get("path_glob") or ""))
+            and ".." not in str(claim["path_glob"]).split("/")
+            else f"remembra-crew adopt {claim['id']}",
         }
 
     # -- presence signals (heartbeat, re-join, any authenticated session call) ----------------------

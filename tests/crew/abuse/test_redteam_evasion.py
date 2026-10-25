@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -571,7 +572,9 @@ def test_a_human_commit_into_a_held_zone_is_an_unattributed_change_notice(machin
     _crewd_down_for_good(m)  # even the commits made while crewd was down are found afterwards
     try:
         (m.wb / "src/app/pos/cart.ts").write_text("export const cart = 'by hand';\n")
-        git(m.wb, "commit", "-qam", "hand edit")  # this test process is no agent: allowed, no trailer
+        # a human at a terminal on this test machine: its temp HOME, so the gate asks this machine's crewd
+        # (not the crewd of an agent session the test suite itself may be running under)
+        subprocess.run(["git", "commit", "-qam", "hand edit"], cwd=m.wb, env=m.host.env(), check=True)
         sha = git(m.wb, "rev-parse", "HEAD")
         assert "Remembra-Member" not in git(m.wb, "log", "-1", "--format=%B")
     finally:

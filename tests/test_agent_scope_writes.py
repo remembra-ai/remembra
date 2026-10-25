@@ -219,7 +219,8 @@ def test_scoped_key_inbox_messages_are_sent_as_the_keys_agent(api):
     sent = _call(api, "POST", "/inbox/send", body)
     assert sent.status_code == 201, sent.text
     assert _inbox_row(api, sent.json()["inbox_id"])["from_agent"] == "codex"
-    sent = _call(api, "POST", "/inbox/send", {**body, "from_agent": "codex"}, headers={HEADER: "codex"})
+    # a second, different message (an identical unread re-send would return the first)
+    sent = _call(api, "POST", "/inbox/send", {**body, "body": "and the tests", "from_agent": "codex"}, headers={HEADER: "codex"})
     assert sent.status_code == 201, sent.text
     assert _inbox_row(api, sent.json()["inbox_id"])["from_agent"] == "codex"
 

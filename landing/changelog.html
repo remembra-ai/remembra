@@ -97,8 +97,15 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
     <div class="releases">
-      <article class="rel now" id="v0.17.2" aria-labelledby="v0-17-2-t">
-        <p class="when"><span class="ver">v0.17.2</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+      <article class="rel now" id="v0.17.3" aria-labelledby="v0-17-3-t">
+        <p class="when"><span class="ver">v0.17.3</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+        <div>
+          <h2 id="v0-17-3-t">Picking up where another agent stopped</h2>
+          <p>The Codex app now reaches Remembra in cloud-connected chats with no extra setup: <code>remembra-mcp --client codex</code> reads the settings Codex leaves out from Codex's own config. A file a lost agent was working on can be taken over with <code>remembra-crew adopt --path</code>, and its unfinished work comes back. A long-lived Codex thread no longer stores the same handoff after every turn, and a message re-sent after a timeout is not delivered twice.</p>
+        </div>
+      </article>
+      <article class="rel" id="v0.17.2" aria-labelledby="v0-17-2-t">
+        <p class="when"><span class="ver">v0.17.2</span><time>October 25, 2026</time></p>
         <div>
           <h2 id="v0-17-2-t">Each agent with its own key; replies land where the conversation is</h2>
           <p>A reply to a Relay message now goes to the project of the message it answers. A message the start brief already listed is not shown again on the next prompt. Gemini CLI, Qwen Code and Cursor hooks send with the key in their own MCP config.</p>

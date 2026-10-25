@@ -123,6 +123,7 @@ To share memory, all agents use the same server, keys from the same account and 
 # MCP Servers - Shared Memory Layer
 [mcp_servers.remembra]
 command = "/Users/YOUR_USERNAME/.local/bin/remembra-mcp"
+args = ["--client", "codex"]
 
 [mcp_servers.remembra.env]
 REMEMBRA_URL = "https://api.remembra.dev"

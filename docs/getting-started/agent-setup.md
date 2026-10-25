@@ -226,6 +226,7 @@ If you prefer to configure manually, add this to your agent's MCP config:
     ```toml
     [mcp_servers.remembra]
     command = "remembra-mcp"
+    args = ["--client", "codex"]  # the Codex app may start it without the env below
 
     [mcp_servers.remembra.env]
     REMEMBRA_URL = "https://api.remembra.dev"

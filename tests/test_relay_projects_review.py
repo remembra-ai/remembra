@@ -201,6 +201,94 @@ def test_a_later_empty_close_retires_the_sessions_earlier_handoff(env, monkeypat
     assert code == 0 and "nothing to hand off" in err and ("POST", "/api/v1/session/close") not in env["calls"]
 
 
+def test_a_close_that_repeats_the_sessions_last_handoff_is_not_sent(env, monkeypatch, capsys, tmp_path):
+    """The Codex app ends a long-lived thread after every turn and on reopen: each end used to store
+    another copy of the same handoff. A close that would store exactly what this session last sent
+    is skipped; a close with anything new is sent and supersedes it."""
+    repo = make_repo(tmp_path / "r", "widget", "git@github.com:acme/widget.git")
+    run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo), "--session-id", "thread"])
+    (repo / "notes.txt").write_text("plan\n")
+    args = ["close", "--agent", "codex", "--cwd", str(repo), "--session-id", "thread"]
+    env["calls"].clear()
+    assert run(monkeypatch, capsys, args)[0] == 0
+    assert env["calls"].count(("POST", "/api/v1/session/close")) == 1
+
+    # the thread ends again with nothing new: not sent, and the person running it is told why
+    env["calls"].clear()
+    code, _, err = run(monkeypatch, capsys, args)
+    assert code == 0 and ("POST", "/api/v1/session/close") not in env["calls"]
+    assert "nothing new to hand off" in err
+
+    # new work: sent again
+    (repo / "more.txt").write_text("next\n")
+    env["calls"].clear()
+    assert run(monkeypatch, capsys, args)[0] == 0
+    assert ("POST", "/api/v1/session/close") in env["calls"]
+    current = rows(env, "SELECT id FROM memories WHERE memory_type = 'handoff' AND superseded_by IS NULL")
+    assert len(current) == 1
+
+
+def test_a_queued_handoff_is_still_sent_when_the_same_close_runs_again(env, monkeypatch, capsys, tmp_path):
+    """Codex review P2: a close that could not be sent is queued, not "already sent": running the identical
+    close again (connection back) delivers it instead of answering "nothing new"."""
+    repo = make_repo(tmp_path / "r", "widget", "git@github.com:acme/widget.git")
+    run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo), "--session-id", "offline"])
+    (repo / "notes.txt").write_text("plan\n")
+    args = ["close", "--agent", "codex", "--cwd", str(repo), "--session-id", "offline"]
+    real = cli.Context.request
+
+    def down(self, method, path, **kw):
+        if path == "/api/v1/session/close":
+            raise httpx.ConnectError("network down")
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(cli.Context, "request", down)
+    assert run(monkeypatch, capsys, args)[0] == 0
+    assert rows(env, "SELECT id FROM memories WHERE memory_type = 'handoff'") == []
+    monkeypatch.setattr(cli.Context, "request", real)
+    env["calls"].clear()
+    code, _, err = run(monkeypatch, capsys, args)
+    assert code == 0 and "nothing new" not in err
+    assert ("POST", "/api/v1/session/close") in env["calls"]
+    assert len(rows(env, "SELECT id FROM memories WHERE memory_type = 'handoff' AND superseded_by IS NULL")) == 1
+
+
+def test_an_unchanged_close_still_sends_other_sessions_queued_handoffs(env, monkeypatch, capsys, tmp_path):
+    """Codex review P2: skipping a repeat must not leave another session's queued handoff waiting."""
+    repo = make_repo(tmp_path / "r", "widget", "git@github.com:acme/widget.git")
+    (repo / "notes.txt").write_text("plan\n")
+    for sid in ("sent-before", "offline"):
+        run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo), "--session-id", sid])
+    sent = ["close", "--agent", "codex", "--cwd", str(repo), "--session-id", "sent-before"]
+    assert run(monkeypatch, capsys, sent)[0] == 0
+    real = cli.Context.request
+
+    def down(self, method, path, **kw):
+        if path == "/api/v1/session/close":
+            raise httpx.ConnectError("network down")
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(cli.Context, "request", down)
+    run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--session-id", "offline", "--summary", "queued"])
+    monkeypatch.setattr(cli.Context, "request", real)
+    env["calls"].clear()
+    code, _, err = run(monkeypatch, capsys, sent)  # unchanged: skipped, but the queue is sent
+    assert code == 0 and "nothing new" in err
+    assert ("POST", "/api/v1/session/close") in env["calls"]
+    stored = rows(env, "SELECT content FROM memories WHERE memory_type = 'handoff'")
+    assert any("queued" in str(r[0] if isinstance(r, tuple) else r["content"]) for r in stored), stored
+
+
+def test_the_handoff_fingerprint_ignores_only_timestamps():
+    base = {"agent_id": "codex", "session_id": "t", "facts": {"files_changed": ["a"], "commits": []}, "closed_at": "1"}
+    later = {**base, "closed_at": "2", "facts": {**base["facts"], "checked_at": "x"}}
+    assert cli.handoff_fingerprint(base) == cli.handoff_fingerprint(later)
+    assert cli.handoff_fingerprint(base) != cli.handoff_fingerprint(
+        {**base, "facts": {"files_changed": ["a", "b"], "commits": []}}
+    )
+    assert cli.handoff_fingerprint(base) != cli.handoff_fingerprint({**base, "summary": "decided X"})
+
+
 # ---------------------------------------------------------------------------
 # The brief: notes and summary, folder location lines
 # ---------------------------------------------------------------------------

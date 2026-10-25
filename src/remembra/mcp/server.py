@@ -60,7 +60,7 @@ from remembra.mcp.crew import (
     clean_client_session_id,
 )
 from remembra.mcp.crew import error_text as crew_error_text
-from remembra.security.error_sanitizer import sanitize_error_message
+from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
 from remembra.security.untrusted import dump_untrusted
 
 # ---------------------------------------------------------------------------
@@ -78,6 +78,36 @@ REMEMBRA_AGENT_ID = os.environ.get("REMEMBRA_AGENT_ID", "").strip()
 # One session id per MCP server process (= one stdio client session) unless overridden.
 REMEMBRA_SESSION_ID = os.environ.get("REMEMBRA_SESSION_ID") or uuid.uuid4().hex
 REMEMBRA_KNOWN_AGENTS = os.environ.get("REMEMBRA_KNOWN_AGENTS", "claude-code,claude-desktop,codex,gemini,clawdbot")
+
+# Neither a server URL nor a key reached this process, so it talks to the local default. When
+# that is refused, the client most likely started the server without its configured env.
+NO_SETTINGS = not REMEMBRA_API_KEY and "REMEMBRA_URL" not in os.environ
+NO_SETTINGS_HINT = (
+    "No Remembra settings reached this MCP server (no REMEMBRA_URL or REMEMBRA_API_KEY in its environment), "
+    f"so it tried {REMEMBRA_URL}. Some clients, such as the Codex app, start MCP servers without the env "
+    'in their config: add --client <name> to the server\'s args (e.g. args = ["--client", "codex"]) '
+    "so it reads that client's config file, or rerun remembra-install."
+)
+
+
+def sanitize_error_message(e: BaseException) -> str:
+    """The sanitized error, with :data:`NO_SETTINGS_HINT` when a refused local connection is the likely cause."""
+    text = _sanitize_error_message(e)
+    if NO_SETTINGS and _is_connect_error(e):
+        return f"{text} {NO_SETTINGS_HINT}"
+    return text
+
+
+def _is_connect_error(e: BaseException | None) -> bool:
+    seen = 0
+    while e is not None and seen < 5:
+        if isinstance(e, ConnectionError) or type(e).__name__ in ("ConnectError", "ConnectTimeout"):
+            return True
+        if "connection refused" in str(e).lower() or "connect" in type(e).__name__.lower():
+            return True
+        e, seen = e.__cause__ or e.__context__, seen + 1
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Memory client
@@ -1999,8 +2029,9 @@ async def crew_claim(
     the holder with crew_say(to="@holder", kind="request_release"). wait_s (≤300) waits for the
     grant instead (the call blocks until granted or the time is up).
     release: zone/paths/task you hold (baton=True keeps it reserved for the next pickup).
-    adopt: a baton offered to you in your brief (task="T-12"). handover: give your claim to
-    to="@codex-1". accept/decline: answer a handover offered to you.
+    adopt: a baton offered to you in your brief: task="T-12", zone="pos" or the reserved
+    paths=["src/app/cart.ts"]. handover: give your claim to to="@codex-1".
+    accept/decline: answer a handover offered to you.
 
     Args:
         action: claim | release | adopt | handover | accept | decline.
@@ -2518,6 +2549,9 @@ def main() -> None:
     if not REMEMBRA_URL:
         print("REMEMBRA_URL environment variable is required.", file=sys.stderr)
         sys.exit(1)
+
+    if transport == "stdio" and NO_SETTINGS:
+        print(f"WARNING: {NO_SETTINGS_HINT}", file=sys.stderr)
 
     if transport == "stdio" and not REMEMBRA_AGENT_ID:
         print(

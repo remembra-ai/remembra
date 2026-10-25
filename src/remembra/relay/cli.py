@@ -1123,15 +1123,43 @@ def _sent_marker_path(home: Path, agent: str, session_id: str) -> Path:
     return _state_dir(home) / f"sent-{digest}.json"
 
 
-def mark_close_sent(home: Path, agent: str, session_id: str) -> None:
-    """Record that this session has a handoff on the server (or queued for it)."""
+def handoff_fingerprint(payload: dict[str, Any]) -> str:
+    """A digest of what a close would store, without its timestamps (keys ending in ``_at``).
+
+    Two closes of one session with the same fingerprint store the same handoff: the Codex app
+    ends a long-lived thread after every turn and on reopen, and each end used to add a copy.
+    """
+
+    def clean(o: Any) -> Any:
+        if isinstance(o, dict):
+            return {str(k): clean(v) for k, v in o.items() if not str(k).endswith("_at")}
+        if isinstance(o, list):
+            return [clean(v) for v in o]
+        return o
+
+    return hashlib.sha256(json.dumps(clean(payload), sort_keys=True, default=str).encode()).hexdigest()[:32]
+
+
+def mark_close_sent(home: Path, agent: str, session_id: str, fingerprint: str | None = None) -> None:
+    """Record that this session has a handoff on the server (or queued for it), and what it said."""
     path = _sent_marker_path(home, agent, session_id)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"at": datetime.now(UTC).isoformat()}))
+        path.write_text(json.dumps({"at": datetime.now(UTC).isoformat(), "fingerprint": fingerprint}))
         os.chmod(path, 0o600)
     except OSError as e:
         _err(f"could not record the close ({e.__class__.__name__})")
+
+
+def unchanged_since_sent(home: Path, agent: str, session_id: str, fingerprint: str) -> bool:
+    """True when this session's last handoff (sent or queued, within the state TTL) said exactly this."""
+    path = _sent_marker_path(home, agent, session_id)
+    try:
+        if time.time() - path.stat().st_mtime > STATE_TTL_SECONDS:
+            return False
+        return json.loads(path.read_text()).get("fingerprint") == fingerprint
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def close_sent(home: Path, agent: str, session_id: str) -> bool:
@@ -1177,6 +1205,7 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
         api_key=ctx.config.api_key,
     )
     if path is not None:  # the session has a handoff on its way: a later empty close must retire it
+        # queued, not delivered: no fingerprint, so the same close run again is not skipped and replays it
         mark_close_sent(ctx.home, str(payload.get("agent_id") or ""), str(payload.get("session_id") or ""))
     outbox.record(
         ctx.home,
@@ -1324,6 +1353,14 @@ def cmd_close(args: argparse.Namespace) -> int:
         if empty:
             _skip_empty_close(ctx, payload)
             return 0
+        # 6. A close that would store the same handoff this session already left adds only noise.
+        if unchanged_since_sent(ctx.home, *own, handoff_fingerprint(payload)):
+            outbox.log(ctx.home, f"close: {own[0]} session {own[1][:40]} is unchanged since its last handoff; not sent")
+            if not ctx.adapter:
+                _err("nothing new to hand off: this session's last handoff already says this, so nothing was sent.")
+            if ctx.config.api_key:  # other sessions' queued handoffs still go out
+                replay_outbox(ctx, skip=own)
+            return 0
         if not ctx.config.api_key:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
             _queue_close(ctx, payload, "no API key configured")
@@ -1354,7 +1391,7 @@ def cmd_close(args: argparse.Namespace) -> int:
                 outbox.log(ctx.home, f"close: not queued, the server rejected the body ({detail})")
             return 0
         result = response.json()
-        mark_close_sent(ctx.home, *own)
+        mark_close_sent(ctx.home, *own, handoff_fingerprint(payload))
         outbox.log(ctx.home, f"close: sent the handoff of {own[0]} session {own[1][:40]}")
         outbox.record(ctx.home, agent_id=str(payload.get("agent_id")), command="close", ok=True, config_source=ctx.config.source)
         # This close supersedes a queued copy of the same session; then send what is still waiting.

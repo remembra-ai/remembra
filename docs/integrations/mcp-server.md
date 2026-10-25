@@ -545,6 +545,11 @@ named in the returned memories (`entities_total` holds the unfiltered count).
 `get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
 `ack_inbox(inbox_id, result?, note?)` marks an inbox item read after you act on it, or `done`, `blocked` or `rejected` with an optional note.
 `send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
+Sending again is safe: if the same sender's identical message (same recipient, subject, body, project and
+`in_reply_to`) is still unread from the last 10 minutes, the server returns that message instead of storing a
+second copy. HTTP clients can also send an `Idempotency-Key` header on `POST /api/v1/inbox/send`: the same key
+always returns the first message (`200`, `Idempotent-Replayed: true`), and reusing it for a different message is a
+`409`.
 With an agent-scoped API key it sends as the key's agent; given a `from_agent` that is not the key's agent, it returns
 an error and sends nothing.
 `list_memories` accepts `offset` and returns `next_offset`.

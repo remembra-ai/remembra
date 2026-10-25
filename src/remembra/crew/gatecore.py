@@ -62,6 +62,7 @@ import json
 import os
 import posixpath
 import re
+import shlex
 import stat as _stat
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -3692,6 +3693,24 @@ def glob_match(pattern: str, path: str, *, case_insensitive: bool = False) -> bo
     return compile_glob(pattern, case_insensitive).match(path)
 
 
+# A claimed path that may be quoted inside an instruction (refusal text, the brief's adopt line, an offer).
+SAFE_CLAIM_PATH_RE: Final = re.compile(r"[A-Za-z0-9._@+-][A-Za-z0-9._@+/*-]{0,199}")
+
+
+def claim_covers_path(path: str, glob: str) -> bool:
+    """True when a claim on ``glob`` covers ``path``, or lies under it (a directory named for adopt).
+
+    Crew glob semantics (:func:`glob_match`: ``*`` stays within one path segment), not ``fnmatch``.
+    """
+    path, glob = (path or "").strip().strip("/"), (glob or "").strip().strip("/")
+    if not glob or not path:
+        return False
+    if path == glob or glob.startswith(path + "/") or glob_match(glob, path):
+        return True
+    base = glob[: -len("/**")] if glob.endswith("/**") else None
+    return base is not None and path == base
+
+
 # ===========================================================================
 # Command-pattern trie (D38)
 # ===========================================================================
@@ -5150,13 +5169,30 @@ def render_deny_reason(
             f"Options: work outside zone {slug}; ask {at} with crew_say; {human} can hand it over from the dashboard."
         )
     elif rule == 10:
+        # a reserved file's name may have been chosen by the lost session: quote it only when it is a plain path
+        path = path if SAFE_CLAIM_PATH_RE.fullmatch(str(path)) and ".." not in str(path).split("/") else "this file"
         holder_s = idx.sessions.get(holder_sid) or {}
         when = _clock(holder_s.get("last_activity_at"), tz)
         why = claim.get("reserve_reason") if claim else None
         stopped = ", ".join(x for x in (f"{holder} stopped {when}" if when else f"{holder} stopped", why) if x)
-        pickup = f"the next pickup of {task}" if task else f"the next pickup of zone {slug}"
+        glob = str(claim.get("path_glob") or "") if claim else ""
+        # the claimed path is quoted in the instruction only when it is a plain path (no spaces or prose)
+        glob = glob if SAFE_CLAIM_PATH_RE.fullmatch(glob) and ".." not in glob.split("/") else ""
+        held = f"path {glob}" if glob and zone is None else f"zone {slug}" if zone is not None else "a reserved path"
+        pickup = f"the next pickup of {task}" if task else f"the next pickup of {held}"
         if variant == "reserved_offered":
-            adopt = f" If you are continuing {task}, run: remembra-crew adopt {task}." if task else ""
+            if task:
+                adopt = f" If you are continuing {task}, run: remembra-crew adopt {task}."
+            elif glob and zone is None:
+                adopt = (
+                    f" If you are continuing that work, run: remembra-crew adopt --path {shlex.quote(glob)}"
+                    f' (or crew_claim action="adopt" paths=[{json.dumps(glob)}]).'
+                )
+            else:
+                adopt = (
+                    f" If you are continuing that work, run: remembra-crew adopt --zone {shlex.quote(str(slug))}"
+                    f' (or crew_claim action="adopt" zone={json.dumps(str(slug))}).'
+                )
             text = (
                 f"{head}{path} is RESERVED for {pickup} ({stopped}). "
                 f"This baton was offered to you in your session brief.{adopt} Otherwise work elsewhere."

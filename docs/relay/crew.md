@@ -205,7 +205,7 @@ and uses that session's checkout).
 | `remembra-crew status` / `whereami` | Who holds what, your own claims and task, unread items |
 | `remembra-crew claim <zone\|path> [--wait N]` | Claim before starting on a new area; `--wait` queues behind the holder |
 | `remembra-crew release <zone> [--baton]` | Release, or hand the zone on with the saved work |
-| `remembra-crew adopt <T-n>` | Take a baton that was **offered to this session** and restore its saved work |
+| `remembra-crew adopt <T-n>` / `adopt --path <path>` / `adopt --zone <zone>` | Take a baton that was **offered to this session** and restore its saved work; a lost session's claim on a path or zone with no task is adopted by `--path` or `--zone` (the brief and the refusal name the exact command) |
 | `remembra-crew task list\|create\|start\|update\|block\|unblock\|release` | Tasks; `start` claims the task's zones together |
 | `remembra-crew checkpoint` | Record progress now (it also happens after commits and pushes) |
 | `remembra-crew report <T-n> --done … --not-done … --failing … --next …` | The completion report a task needs |

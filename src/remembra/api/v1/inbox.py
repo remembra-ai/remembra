@@ -53,7 +53,9 @@ from remembra.inbox.manager import (
     TERMINAL_STATUSES,
     InboxManager,
     ReservedSenderError,
+    idempotent_inbox_id,
     is_reserved_sender,
+    same_message,
     sender_label,
 )
 
@@ -306,9 +308,54 @@ async def send_to_inbox(
             raise _reserved_422(f"kind '{payload.kind}' is reserved for the server")
     project_id = _send_project(current_user, _requested_project(payload))
     metadata = {k: v for k, v in payload.metadata.items() if k != "project_id"}
+    # A retried send returns the first message instead of storing a second copy: by Idempotency-Key, or,
+    # without one, when the same sender's identical message is still unread from the last few minutes.
+    key = request.headers.get("Idempotency-Key")
+    inbox_id: str | None = None
+    if key is not None:
+        key = key.strip()
+        if not key or len(key) > 200 or not key.isprintable():
+            raise HTTPException(status_code=422, detail="Idempotency-Key must be 1 to 200 printable characters.")
+        inbox_id = idempotent_inbox_id(current_user.user_id, from_agent, key)
+        earlier = await inbox.get_one(current_user.user_id, inbox_id)
+    else:
+        earlier = await inbox.recent_duplicate(
+            current_user.user_id,
+            from_agent,
+            payload.to_agent,
+            payload.subject,
+            payload.body,
+            project_id=project_id,
+            metadata=metadata,
+            kind=payload.kind,
+            expires_at=payload.expires_at,
+        )
+    if earlier is not None:
+        if not same_message(
+            earlier,
+            to_agent=payload.to_agent,
+            subject=payload.subject,
+            body=payload.body,
+            project_id=project_id,
+            metadata=metadata,
+            kind=payload.kind,
+            expires_at=payload.expires_at,
+        ):
+            raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different message.")
+        response.status_code = status.HTTP_200_OK
+        response.headers["Idempotent-Replayed"] = "true"
+        return SendInboxResponse(
+            inbox_id=earlier["inbox_id"],
+            status=earlier["status"],
+            created_at=earlier["created_at"],
+            project_id=earlier.get("project_id") or (earlier.get("metadata") or {}).get("project_id"),
+            sender_kind=earlier.get("sender_kind") or sender_kind,
+            sender_verified=bool(earlier.get("sender_verified")),
+        )
     await relay_guard(request, response, current_user.user_id)
     try:
         row = await inbox.send(
+            inbox_id=inbox_id,
             owner_user_id=current_user.user_id,
             from_agent=from_agent,
             to_agent=payload.to_agent,
@@ -333,6 +380,18 @@ async def send_to_inbox(
             detail="Failed to send inbox message. Please try again later.",
         ) from e
 
+    if inbox_id is not None and not same_message(
+        row,
+        to_agent=payload.to_agent,
+        subject=payload.subject,
+        body=payload.body,
+        project_id=project_id,
+        metadata=metadata,
+        kind=payload.kind,
+        expires_at=payload.expires_at,
+    ):
+        # a concurrent send with the same key stored a different message first
+        raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different message.")
     await record_relay_usage(request, current_user.user_id)
     return SendInboxResponse(
         inbox_id=row["inbox_id"],
