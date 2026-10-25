@@ -13,7 +13,7 @@ When a session ends, Remembra keeps the facts, not the chatter. The relay hooks 
 - Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Until then it skips the hook. The interactive Codex CLI asks at startup about hooks that need review. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
 - Whenever handoffs don't arrive, run `remembra-relay doctor`. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem.
 - Windows setup has not been tested.
-- Crew mode, several agents on one project at once, is not available yet.
+- Crew mode runs several agents on one project at once. Its limits: local enforcement coordinates cooperative agents.
 - Quote prices only from https://remembra.dev/pricing. Never compute them.
 
 ## Setup

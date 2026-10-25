@@ -872,11 +872,10 @@ def test_crew_page_is_labelled_part_of_launch_only_by_the_switch(monkeypatch: py
     partials = _script("site_partials")
     crew = (LANDING / "crew.html").read_text()
     eyebrow = re.compile(r'<p class="eyebrow">Crew mode <!-- @crew-tag -->(.*?)<!-- /@crew-tag --></p>')
-    assert eyebrow.search(crew).group(1) == '<span class="tag">Not available yet</span>'  # off: crew is not merged yet
-    assert "<!-- requires Crew mode (feat/crew) merged and live before launch -->" in crew
-    monkeypatch.setattr(partials, "CREW_LIVE", True)
-    live = partials.render(crew)
-    assert eyebrow.search(live).group(1) == '<span class="tag signal">Part of launch</span>'
+    assert eyebrow.search(crew).group(1) == '<span class="tag signal">Part of launch</span>'  # live since 0.17.0
+    monkeypatch.setattr(partials, "CREW_LIVE", False)
+    off = partials.render(crew)
+    assert eyebrow.search(off).group(1) == '<span class="tag">Not available yet</span>'
     section = (SCRIPTS / "site-crew-section.html").read_text()
     assert '<span class="tag signal">Part of launch</span>' in section
 
@@ -891,17 +890,16 @@ def _crew_preview_and_plan(page: str) -> str:
 def test_crew_link_previews_and_plan_do_not_say_launch_while_off(monkeypatch: pytest.MonkeyPatch) -> None:
     partials = _script("site_partials")
     crew = (LANDING / "crew.html").read_text()
-    off = _crew_preview_and_plan(crew)
-    assert "launch" not in off.lower()
-    assert "not available yet" in off and "What ships first" in off and "First release" in off
-    assert "2 to 3 weeks" not in off and "no date yet" in off  # P-050: the follow-up release has no date
-    assert "Confirmed for Claude Code" not in crew and "in the release after" not in crew  # P-048, P-049
-    assert crew.count('<meta name="description"') == 1 and crew.count('<meta property="og:description"') == 1
-    monkeypatch.setattr(partials, "CREW_LIVE", True)
-    live = partials.render(crew)
-    on = _crew_preview_and_plan(live)
+    on = _crew_preview_and_plan(crew)
     assert "Part of launch" in on and "What ships at launch" in on and "At launch" in on
     assert "not available" not in on.lower()
+    assert "2 to 3 weeks" not in on and "no date yet" in on  # P-050: the follow-up release has no date
+    assert "Confirmed for Claude Code" not in crew and "in the release after" not in crew  # P-048, P-049
+    assert crew.count('<meta name="description"') == 1 and crew.count('<meta property="og:description"') == 1
+    monkeypatch.setattr(partials, "CREW_LIVE", False)
+    off = _crew_preview_and_plan(partials.render(crew))
+    assert "launch" not in off.lower()
+    assert "not available yet" in off and "What ships first" in off and "First release" in off
 
 
 # ---------------------------------------------------------------------------
@@ -934,21 +932,19 @@ def test_pages_are_up_to_date_with_the_partials() -> None:
         assert rendered == text, f"{name} is stale: run python scripts/site_partials.py"
 
 
-def test_crew_mode_is_off_everywhere_until_it_ships() -> None:
+def test_crew_mode_is_live_everywhere() -> None:
     partials = _script("site_partials")
-    assert partials.CREW_LIVE is False
+    assert partials.CREW_LIVE is True
     for name in partials.PAGES:
-        text = (LANDING / name).read_text()
-        assert 'href="/crew"' not in text, name
-        assert 'remembra.dev/crew"' not in text or name == "crew.html", name
-    assert "/crew" not in (LANDING / "sitemap.xml").read_text()
+        assert (LANDING / name).read_text().count('href="/crew"') >= 2, name  # header, menu and footer
+    assert "<loc>https://remembra.dev/crew</loc>" in (LANDING / "sitemap.xml").read_text()
     home = (LANDING / "index.html").read_text()
-    assert 'id="crew"' not in home and "Part of launch" not in home
-    assert [int(n) for n in re.findall(r'<p class="eyebrow"><span class="n">(\d\d)</span>', home)] == [1, 2, 3, 4]
+    assert 'id="crew"' in home and 'href="/crew">How crew mode works' in home
+    assert [int(n) for n in re.findall(r'<p class="eyebrow"><span class="n">(\d\d)</span>', home)] == [1, 2, 3, 4, 5]
     crew = (LANDING / "crew.html").read_text()
-    assert '<!-- @crew-robots --><meta name="robots" content="noindex"><!-- /@crew-robots -->' in crew
-    assert "Crew mode is still being built and is not available yet." in _text(crew)
-    assert "Part of launch" not in _text(crew)
+    assert "noindex" not in crew
+    assert "not available yet" not in _text(crew) and "still being built" not in _text(crew)
+    assert "not shipped yet" not in _text(crew)  # the hook guard ships for Claude Code and verified Codex
 
 
 def test_crew_page_claims_only_what_the_code_does() -> None:
@@ -967,24 +963,22 @@ def test_one_switch_brings_every_crew_link_back_and_off_again(monkeypatch: pytes
     partials = _script("site_partials")
     committed = {name: (LANDING / name).read_text() for name in [*partials.PAGES, partials.SITEMAP]}
 
-    def render_all() -> dict[str, str]:
-        return {n: (partials.render_sitemap(t) if n == partials.SITEMAP else partials.render(t)) for n, t in committed.items()}
-
-    monkeypatch.setattr(partials, "CREW_LIVE", True)
-    live = render_all()
-    for name in partials.PAGES:
-        assert live[name].count('href="/crew"') >= 2, name  # header, menu and footer
-    assert "<loc>https://remembra.dev/crew</loc>" in live[partials.SITEMAP]
-    home = live["index.html"]
-    assert 'id="crew"' in home and 'href="/crew">How crew mode works' in home
-    assert [int(n) for n in re.findall(r'<p class="eyebrow"><span class="n">(\d\d)</span>', home)] == [1, 2, 3, 4, 5]
-    assert re.search(r'<span class="n">03</span> Crew mode', home)
-    assert "noindex" not in live["crew.html"] and "Part of launch" in live["crew.html"]
-    assert "not available yet" not in live["crew.html"]
+    def render(pages: dict[str, str]) -> dict[str, str]:
+        return {n: (partials.render_sitemap(t) if n == partials.SITEMAP else partials.render(t)) for n, t in pages.items()}
 
     monkeypatch.setattr(partials, "CREW_LIVE", False)
-    again = {n: (partials.render_sitemap(t) if n == partials.SITEMAP else partials.render(t)) for n, t in live.items()}
-    assert again == committed  # off and on again is a no-op
+    off = render(committed)
+    for name in partials.PAGES:
+        assert 'href="/crew"' not in off[name], name
+    assert "/crew" not in off[partials.SITEMAP]
+    home = off["index.html"]
+    assert 'id="crew"' not in home and "Part of launch" not in home
+    assert [int(n) for n in re.findall(r'<p class="eyebrow"><span class="n">(\d\d)</span>', home)] == [1, 2, 3, 4]
+    assert '<!-- @crew-robots --><meta name="robots" content="noindex"><!-- /@crew-robots -->' in off["crew.html"]
+    assert "Crew mode is still being built and is not available yet." in _text(off["crew.html"])
+
+    monkeypatch.setattr(partials, "CREW_LIVE", True)
+    assert render(off) == committed  # off and on again is a no-op
 
 
 # ---------------------------------------------------------------------------
@@ -1050,13 +1044,15 @@ def test_every_docs_link_is_built_from_a_docs_page_and_gated_until_deployed() ->
 
 def test_predeploy_check_fails_on_a_docs_link_that_is_not_live() -> None:
     predeploy = _script("site_predeploy")
-    lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200, latest=lambda: "0.16.1")
+    lines, problems = predeploy.check(
+        online=True, fetch=lambda url: 404 if "guides/relay" in url else 200, latest=lambda: "0.17.0"
+    )
     assert problems == [
         "https://docs.remembra.dev/guides/relay/ is not live yet (HTTP 404): "
         "deploy the docs site first (index.html, crew.html, changelog.html, setup.md, llms.txt, llms-full.txt)"
     ]
     assert any("Crew mode switch" in line for line in lines)
-    _, none = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
+    _, none = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.17.0")
     assert none == []
 
     def no_network() -> str:
@@ -1164,19 +1160,15 @@ def test_legal_pages_name_the_billing_provider_the_code_uses() -> None:
 def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
     predeploy = _script("site_predeploy")
     gated = [v for text in predeploy.gates() for v in predeploy.MIN_RELEASE.findall(text)]
-    assert max(gated) == "0.16"  # the <!-- requires ... remembra>=0.16 --> gates on the install blocks
-    # setup.md's doctor line (`pipx run --spec 'remembra>=0.16.1'`) raises the bar: doctor ships in 0.16.1
-    assert predeploy.required_release() == "0.16.1"
-    lines, problems = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.13.2")
-    assert problems == ["PyPI has remembra 0.13.2; the install lines need remembra>=0.16.1: release it first"]
-    assert "PyPI: remembra 0.13.2 (the install lines need remembra>=0.16.1)" in lines
+    assert max(gated) == "0.17"  # the crew page's <!-- requires ... remembra>=0.17 --> gate: Crew mode ships in 0.17
+    assert predeploy.required_release() == "0.17"
+    lines, problems = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.2")
+    assert problems == ["PyPI has remembra 0.16.2; the install lines need remembra>=0.17: release it first"]
+    assert "PyPI: remembra 0.16.2 (the install lines need remembra>=0.17)" in lines
     _, unreachable = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: None)
-    assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16.1 is released"]
-    _, behind = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
-    assert behind == ["PyPI has remembra 0.16.0; the install lines need remembra>=0.16.1: release it first"]
-    _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
+    assert unreachable == ["PyPI could not be reached to confirm remembra>=0.17 is released"]
+    _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.17.0")
     assert ok == []
-
 
 def test_codex_verification_copy_says_what_was_run() -> None:
     """Changelog and guide: the Claude Code half was replayed, the model was a stand-in, the build a prerelease."""

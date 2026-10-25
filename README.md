@@ -89,6 +89,43 @@ The same repository on a laptop, a server or in a worktree is one project, becau
 
 Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease, and the same tests also pass on the stable 0.157.1). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too: each was run against the real tool at the version in the table, with a local stand-in for the model, and put the brief in the model's request and posted the handoff; other versions have not been run. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent.
 
+## Crew mode
+
+Several agents in one repository at once, without one undoing another's work. Name the areas of the repo in
+`.remembra/zones.yml` and commit it on the default branch:
+
+```yaml
+version: 1
+zones:
+  api:
+    include: ["src/api/**"]
+  web:
+    include: ["src/web/**"]
+```
+
+Then, at a terminal (it shows every change and asks before writing):
+
+```bash
+remembra-crew connect --apply                 # Claude Code
+remembra-crew connect --agent codex --include-unverified --apply
+remembra-crew verify --agent codex            # one round trip on your machine; Codex then enforces
+```
+
+The first agent to write in a zone holds it. Another agent's write there is stopped before it happens and the
+agent is told who holds it; it can ask for a handover with `crew_say`, or you hand it over from the dashboard.
+
+| Agent | Writes to a held zone |
+|---|---|
+| Claude Code | **stopped** before every write (hooks verified) |
+| Codex | **stopped** after `remembra-crew verify --agent codex` passes: shell commands and every file an `apply_patch` names (checked live on codex-cli 0.157.1) |
+| Gemini CLI, Qwen Code, Kimi Code | stopped once `verify` passes on your machine; until then, read-only fence |
+| Cursor and other agents | read-only fence in their own worktree; MCP-only agents are advisory |
+
+Git hooks (`connect --git-hooks`) also stop a commit or push that touches a held zone, for every agent. The
+honest limit: these local layers stop cooperating agents' mistakes, not a deliberately hostile agent on the same
+machine. Crew mode needs a server that runs it (`REMEMBRA_CREW_MODE`; on for Remembra Cloud). The guide is
+[Crew mode](https://docs.remembra.dev/relay/crew/).
+
 ## How it compares
 
 | | Remembra Relay | Vendor memory (Claude Code, Codex, Copilot, Windsurf) | Local handoff tools | Memory APIs (Mem0, Zep, Letta) |
@@ -97,7 +134,7 @@ Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155
 | Works across vendors | Yes | No, one vendor each | Yes | Through their API |
 | Handoff facts from git | Yes, with the summary checked | No | Transcript or diff | No |
 | Durable trail of sessions | Yes | No | No | No |
-| Enforced coordination between agents | Crew mode, in build | Claude-only agent teams | No | No |
+| Enforced coordination between agents | Crew mode (Claude Code; Codex once verified) | Claude-only agent teams | No | No |
 
 Details, with a source and date, for claude-mem, agentmemory, the local handoff tools and Claude Code's own features: [Remembra and other handoff tools](docs/comparisons/handoff-tools.md). claude-mem and agentmemory are larger projects that also carry memory between sessions; the comparison says where each is the better pick.
 

@@ -5,7 +5,7 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.17.0] - 2026-09-28
+## [0.17.0] - 2026-10-25
 
 **Crew mode: several coding agents can work in one repository without undoing each other's work.** It builds
 on Relay: every agent still starts with a brief and ends with a handoff. Crew mode adds zones, claims, batons,
@@ -19,13 +19,37 @@ They cannot stop a determined or prompt-injected agent on the same machine. The 
 that matter most: human-only actions, keeping each account's data to itself, and protecting the crew policy.
 A required check on the git host is not part of this release.
 
+### Fixed since the 2026-09-28 preview
+- **A session that joins inside the snapshot window is guarded from its first write.** The server allows one
+  crew snapshot read per 10 s per key, agent and crew. A second session joining inside that window was missing
+  from the local snapshot, so for 10-13 s the gate treated its checkout as outside crew control and allowed
+  writes to zones another session held. crewd now lists a joining checkout locally at once, the gate adds the
+  caller's own checkout from its session file, and with no snapshot at all the gate asks the server's guard.
+- **`remembra-crew verify` can pass.** The gate never recorded the payloads the round trip checks, so no agent
+  could be verified. It now records them while a round trip is armed.
+- **Codex `apply_patch` is checked.** Codex 0.157.1 runs its tools from a code-mode program; its nested calls
+  reach the pre-tool hook as `Bash`, `apply_patch` and `mcp__*`. `apply_patch` was allowed unchecked; each
+  file its patch adds, updates, deletes or moves to is now decided like any other write.
+- **A crew join files a repository under its own project**, as the relay does (it used the folder hint).
+- **The brief no longer says Crew mode is automatic where its hooks are missing.** It checks this machine and,
+  where they are not installed, says so and names `remembra-crew connect`.
+- **Cold API key checks no longer block the server.** bcrypt verification ran on the event loop (~180 ms per
+  cold key); it now runs on a small worker pool, and the key's authority is re-read before it is cached.
+- **A metering failure no longer fails a committed write.** Relay usage was recorded after inbox sends,
+  handoffs and memory writes had committed; if it failed, the caller saw an error and a resend stored the
+  write twice. Relay usage never uses credits, so the failure is logged instead.
+- **Every hook close logs that it started and that it sent**, so a close hook that never fires can be told
+  from one that fires and stops.
+- The 0.16.2 fixes are included (they were released from their own branch).
+
 ### Added
 - **Zones and claims.** `.remembra/zones.yml` names the areas of a repository. The first agent to write in a
   zone holds it. The other agents see it under DO NOT TOUCH, and where their hooks can enforce it, their
   writes there are refused. Claude Code's hooks check before every write. Codex, Gemini, Qwen and Kimi
-  enforce once `remembra-crew verify --agent <name>` has passed on your machine (Codex: shell commands
-  only). Cursor, and those agents while unverified, get a read-only fence in their own worktree; MCP-only
-  agents are advisory. The git hooks check commits and pushes.
+  enforce once `remembra-crew verify --agent <name>` has passed on your machine; Codex (checked live on
+  0.157.1) is checked on its shell commands and on every file an `apply_patch` names. Cursor, and those
+  agents while unverified, get a read-only fence in their own worktree; MCP-only agents are advisory. The
+  git hooks check commits and pushes.
 - **Batons.** When an agent stops (out of credits, crashed, closed), its claims are kept, its uncommitted work
   is saved to `refs/remembra/baton/…`, its task is paused with a report, and the next agent picks the baton up
   (`remembra-crew adopt T-n`), or you hand it over from the dashboard. A task with no zones is picked up only

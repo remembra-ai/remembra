@@ -178,6 +178,24 @@ Your memory lives in the cloud, not on one laptop. Start at your desk, keep goin
 
 Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install --all` sets up those tools for Claude Code, Claude Desktop (on macOS), Codex, Cursor and Gemini CLI, for each one it finds. Windsurf is unverified: `remembra-install --agent windsurf` writes its config, and `--all` leaves it out. Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
 
+Crew mode Part of launch
+
+### Many agents on one project. Nobody steps on anybody.
+
+Crew mode lets several agents work the same repo at the same time. Each one holds the zones it is working in, checkpoints on its own, and hands off the moment it stops. You watch it all live.
+
+edit.blockedcodex · pre-write hook ✗ Edit blocked: src/pos/refunds.ts is in zone POS held by claude-code (task T-14 "refund flow"), active 2 min ago. Pick another task, or post to the crew channel to ask for a handover.
+
+When credits run out
+
+- 0 sClaude Code's limit fires. Remembra records a stall checkpoint straight away.
+- +2 sA handoff is written from facts: task, files, tests, what is unfinished.
+- +3 sUncommitted code is saved to git as a baton, so nothing on disk is lost, and the POS zone is held for the next agent.
+- +5 sYou get an email or webhook alert once you have added a target (outside your quiet hours), and the project inbox shows the baton waiting.
+- nextThe next agent starts with the brief and one restore command, and carries on.
+
+On your own machine, crew guards stop mistakes, not a deliberately hostile agent. Agents cannot switch protection off, and every bypass is logged.
+
 The dashboard
 
 ### Mission control for Claude Code, Codex, Cursor and the other agents you connect.
@@ -344,7 +362,7 @@ Crew mode
 
 ### Live agents per crew, by plan.
 
-Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan. They are per crew, never multiplied by Team seats, and add nothing to the price.
+Each crew gets the limits of its owner's plan. They are per crew, never multiplied by Team seats, and add nothing to the price.
 
 | Per crew | Free | Solo | Pro | Team | Enterprise |
 | --- | --- | --- | --- | --- | --- |
@@ -477,11 +495,11 @@ How Remembra lines up against the [OWASP Top 10 for Agentic Applications](https:
 | ASI07 Insecure inter-agent communication | Partly | Handoffs and inbox messages travel over HTTPS and stay inside one account. A handoff belongs to one project, but an inbox message can be account-wide, and briefs can show linked projects' headlines. Handoffs show whether the sender was key-verified or self-declared. An inbox message shows only a sender name: with an agent-scoped key it is always the key's agent, otherwise the sender names itself. Messages carry no end-to-end signature. |
 | ASI08 Cascading failures | Partly | Relay hook commands finish within a 10-second budget and always exit 0, AI-provider failures trip a circuit breaker, and running out of credits degrades a save instead of failing it. A wrong handoff can still mislead the next agent, which is why facts and claims are labelled apart. |
 | ASI09 Human-agent trust exploitation | Partly | The brief and the dashboard show where each fact came from and mark agent-written text as unverified or contradicted. |
-| ASI10 Rogue agents | Not covered | The trail and audit log record what each key did, but Remembra cannot stop an agent on your machine. Crew mode's enforcement is planned. |
+| ASI10 Rogue agents | Partly | The trail and audit log record what each key did, and Crew mode stops cooperating agents' writes to zones another agent holds (Claude Code, and Codex once verified). It cannot stop an agent deliberately working around it on your machine. |
 
 ### Crew mode
 
-Crew mode, several agents on one project at once, is not available yet. When it ships, its limits are these: local enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on your machine; every bypass is recorded.
+Crew mode runs several agents on one project at once. Its limits: local enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on your machine; every bypass is recorded.
 
 ### Reporting a vulnerability
 

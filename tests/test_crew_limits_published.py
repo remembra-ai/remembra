@@ -78,20 +78,19 @@ def test_the_pricing_page_publishes_the_same_crew_limits() -> None:
     assert "The crew owner can add teammates through the API" in section
 
 
-def test_the_pricing_page_says_crew_mode_is_not_available_while_the_site_switch_is_off(
+def test_the_pricing_page_says_crew_mode_follows_the_site_switch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     partials = _partials()
     html = PRICING.read_text()
-    assert partials.CREW_LIVE is False
+    assert partials.CREW_LIVE is True  # Crew mode is live since 0.17.0
     assert partials.render(html) == html  # the page is up to date with the switch
-    off = _text(html)
-    assert "Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan." in off
-    monkeypatch.setattr(partials, "CREW_LIVE", True)
-    on = _text(partials.render(html))
+    on = _text(html)
     assert "not available on Remembra Cloud yet" not in on
     assert "Each crew gets the limits of its owner's plan." in on
-
+    monkeypatch.setattr(partials, "CREW_LIVE", False)
+    off = _text(partials.render(html))
+    assert "Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan." in off
 
 def test_the_crew_guide_links_to_the_limits_it_mentions() -> None:
     guide = (ROOT / "docs" / "relay" / "crew.md").read_text()

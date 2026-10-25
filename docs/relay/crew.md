@@ -66,7 +66,7 @@ is planned for the next one. Until then, the push gate is also local.
 | Agent | Before a write | At commit | At push | After the fact |
 |---|---|---|---|---|
 | Claude Code (hooks) | **enforced** (edits, shell writes, MCP writes, other agents' checkouts) | enforced | enforced | detected |
-| Codex / Gemini / Qwen / Kimi, verified with `remembra-crew verify --agent <name>` | enforced where verified (Codex: shell commands only) | enforced | enforced | detected |
+| Codex / Gemini / Qwen / Kimi, verified with `remembra-crew verify --agent <name>` | enforced where verified (Codex, checked live on codex-cli 0.157.1: shell commands and every file an `apply_patch` names) | enforced | enforced | detected |
 | The same agents, not verified, in their own worktree | read-only fence (cooperative) | enforced | enforced | detected |
 | Cursor | read-only fence | enforced | enforced | detected |
 | MCP-only agents | advisory (`crew_guard`, refused claims) | enforced if the git hooks are installed | enforced if the git hooks are installed | detected from checkpoints and close |
@@ -179,7 +179,13 @@ machine before trusting them:
 remembra-crew verify --agent codex     # asks you to run one prompt, then checks the file stayed unchanged
 ```
 
-Only a passed round trip switches that agent from observe to enforce.
+Only a passed round trip switches that agent from observe to enforce. While a round trip is armed, the
+gate records each hook payload from the scratch repository and decides it against a synthetic snapshot in
+which another session holds the scratch file; the round trip passes when a pre-tool hook saw the write and
+the `ls`, and the file is unchanged on disk. Codex 0.157.1 runs its tools from a code-mode program; its
+nested calls still reach the pre-tool hook (as `Bash`, `apply_patch` and `mcp__*`), which is what lets it
+enforce. Trust the crew hooks in Codex (`/hooks`) right after `connect`: Codex skips a changed hook until
+you trust it, and the crew hooks also carry the Relay brief and handoff.
 
 Finally, in the dashboard add an email address or a webhook for notifications, so collisions, tamper
 attempts, bypasses and batons waiting for pickup reach you in real time. Your own login email works at

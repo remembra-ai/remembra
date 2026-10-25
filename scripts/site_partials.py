@@ -72,8 +72,8 @@ PAGES = [
 SITEMAP = "sitemap.xml"
 CREW_SECTION = Path(__file__).resolve().parent / "site-crew-section.html"
 
-# Crew mode is not built yet: keep this False until feat/crew is merged and live.
-CREW_LIVE = False
+# Crew mode is live (0.17.0): Claude Code, and Codex once verified on the machine.
+CREW_LIVE = True
 CREW_URL = "https://remembra.dev/crew"
 # What a shared /crew link shows in a preview. While crew mode is off it must not say "launch".
 CREW_META_LIVE = (

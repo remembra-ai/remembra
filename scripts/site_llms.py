@@ -8,7 +8,7 @@ from what it guesses. Neither may say anything the pages do not:
 * llms-full.txt is generated here, verbatim, from the pages in SOURCES (the
   home page without its demos, install tabs and decorative parts; pricing,
   security, subprocessors, privacy and refunds; setup.md whole). Crew mode's
-  page is left out: the feature is not available yet.
+  page is left out (its claims are summarized on the security page, which is in).
 * every sentence of llms.txt outside its link lists must appear in that text
   (``unsupported()``), so a page edit that drops a claim fails the check.
 
