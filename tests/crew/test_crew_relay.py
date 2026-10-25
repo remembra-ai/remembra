@@ -222,7 +222,10 @@ def test_crew_block_follows_the_spec_template_and_the_agent_text_rules():
         "YOUR BATON (offered to you): T-12 from cc-1 (quota_blocked, 18:02 UTC, billing_error, reported) · "
         "2 commits unpushed · 3 dirty files saved as refs/remembra/baton/T-12/7 · 1 failing test"
     )
-    assert lines[2] == "  To continue T-12: remembra-crew adopt T-12   (restores the saved work into this checkout)"
+    assert lines[2] == (
+        "  To continue T-12: remembra-crew adopt T-12   (restores the saved work into this checkout)"
+        '   or crew_claim(action="adopt", task="T-12")'
+    )
     assert lines[3] == (
         "DO NOT TOUCH: zone pos → codex-1 T-14 (active 40s) · deploy:vercel → cc-2 · zone billing FROZEN by a human"
     )

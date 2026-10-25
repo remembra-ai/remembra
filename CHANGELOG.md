@@ -5,6 +5,30 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.4] - 2026-10-25
+
+**Taking over a stopped agent's work is automatic from Codex and Claude Code: found by a live kill-and-takeover
+test of 0.17.3.**
+
+### Fixed
+- **One crew session per agent.** On a machine where crew hooks run, a stdio MCP server is started by the agent,
+  so every crew tool (status, claim, task, say, checkpoint, report) now acts as the session the hooks joined,
+  through `crewd`.
+  Before, MCP crew tools held a separate `mcp` seat in the configured default project: a hooked Claude Code's
+  claim landed in another crew and was never the one kept and offered when the agent stopped. A project the
+  agent chose itself (`crew_status(project_id=…)` or `session_brief`, the latest choice wins) uses its MCP seat;
+  `REMEMBRA_MCP_LOCAL_CREW=0` turns this off.
+- **The MCP adopt restores the saved work.** `crew_claim(action="adopt", …)` with a task, zone or path now
+  restores the stopped session's uncommitted work into the checkout, lifts the fence and reports the restore,
+  as `remembra-crew adopt` does. This works from Codex, whose sandbox blocks `ps` and crewd's socket for
+  commands it runs, so `remembra-crew adopt` typed in its shell could not find its session. Several paths of
+  one stopped session are adopted together and restored once; called again after a refused restore
+  (uncommitted changes in the way), it restores only.
+- **A clear message when `remembra-crew` cannot find its session** (it pointed the wrong way: "runs inside a
+  crew session"); it now says why and names `crew_claim`. The brief lists `crew_claim(action="adopt", task=…)`
+  next to the CLI line for task batons too, and the MCP instructions allow the adopt for task, zone and path.
+- Reviewed by Codex in four passes before release; each finding has a test.
+
 ## [0.17.3] - 2026-10-25
 
 **Picking up another agent's work: the Codex app connects without setup, a lost agent's path can be taken

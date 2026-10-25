@@ -826,6 +826,10 @@ def _remember_session_project(project_id: str, locator: dict[str, Any] | None) -
     if len(_session_projects) >= _MAX_SESSION_PROJECTS:
         _session_projects.clear()
     _session_projects[_session_scope()] = {"project_id": project_id, "locator": dict(locator) if locator else None}
+    try:  # the crew tools follow the latest project chosen here (CrewBridge.note_project)
+        _crew.note_project(_crew_caller(), project_id)
+    except Exception:  # noqa: S110 - crew follow-up is best effort; the brief's project is kept above
+        pass
 
 
 def _session_project() -> dict[str, Any]:
@@ -1908,6 +1912,11 @@ def _crew_client_session_id(client: Memory) -> str:
     return clean_client_session_id(client.session_id)
 
 
+# Set by main() for a stdio server: it runs in the agent's process tree on the agent's machine, so the
+# agent's crew-hook session (crewd) may act for crew_claim. Never set in-process (tests, remote transports).
+_LOCAL_CREW = False
+
+
 def _crew_caller() -> CallerInfo:
     """Resolve the caller (client, key fingerprint, MCP session, agent, default project) on the event-loop side."""
     client = _get_client()
@@ -1919,6 +1928,8 @@ def _crew_caller() -> CallerInfo:
         client_session_id=_crew_client_session_id(client),
         agent_id=(client.agent_id or _default_agent_id() or None),
         default_project=remembered or configured,
+        chosen_project=remembered,
+        local=_LOCAL_CREW,
     )
 
 
@@ -2577,6 +2588,8 @@ def main() -> None:
         uvicorn.run(_build_remote_app(transport), host=host, port=port, log_level="info")
         return
 
+    global _LOCAL_CREW
+    _LOCAL_CREW = transport == "stdio" and os.environ.get("REMEMBRA_MCP_LOCAL_CREW", "1") != "0"
     mcp.run(transport=transport)  # type: ignore[arg-type]
 
 

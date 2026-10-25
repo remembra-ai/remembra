@@ -595,7 +595,15 @@ def _task_by_ref(layout: Layout, crew_id: str, ref: str) -> dict[str, Any] | Non
 def _need_session(layout: Layout) -> dict[str, Any]:
     who = _whoami(layout)
     if who is None:
-        raise SystemExit(_fail({"message": "this command runs inside a crew session (an agent started by a crew hook)"}))
+        raise SystemExit(
+            _fail(
+                {
+                    "message": "no crew session found for this command: it must run inside an agent session that crew "
+                    "hooks joined, and an agent's sandbox can hide that session. From an agent, use the crew_claim "
+                    "tool instead (it reaches the same session, and its adopt restores the saved work)."
+                }
+            )
+        )
     return who
 
 

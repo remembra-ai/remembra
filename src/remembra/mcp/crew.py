@@ -117,6 +117,104 @@ def _error_from(res: httpx.Response) -> CrewApiError:
     )
 
 
+class LocalCrewHttp:
+    """Crew REST calls as the agent's crew-hook session, through crewd's ``api`` op (same shape as :class:`CrewHttp`)."""
+
+    # crewd's ``api`` op serves the crew's own routes; anything else (the session brief) uses the agent's key
+    CREWD_PREFIXES = ("/crews/", "/claims/", "/tasks/", "/messages/", "/inbox/items/", "/collisions/")
+
+    def __init__(self, layout: Any, key: str, client: Memory | None = None) -> None:
+        self.layout = layout
+        self.key = key
+        self.client = client
+
+    def call(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
+        timeout: float | None = None,
+        etag: str | None = None,
+        if_match: str | None = None,
+    ) -> tuple[int, Any, str | None]:
+        from remembra.relay.crew.gate import rpc
+
+        if not path.startswith(self.CREWD_PREFIXES) or path == "/crews/join":
+            if self.client is None:
+                raise CrewApiError(0, "unavailable", "This call is not available through the local crew daemon.")
+            return CrewHttp(self.client).call(method, path, json=json, params=params, timeout=timeout, etag=etag)
+        wait = float(timeout or 15.0)
+        res = rpc(
+            self.layout,
+            "api",
+            {
+                "key": self.key,
+                "method": method,
+                "path": path,
+                "json": dict(json) if json is not None else None,
+                "params": dict(params or {}),
+                "if_match": if_match,
+                "timeout": wait,
+            },
+            timeout=wait + 2.0,
+        )
+        if res is None:
+            raise CrewApiError(0, "unreachable", "The local crew daemon did not answer.")
+        status = int(res.get("status") or 0)
+        body = res.get("body")
+        if res.get("ok") and status < 400:
+            return status, body, None
+        detail = body.get("detail", body) if isinstance(body, dict) else body
+        if isinstance(detail, dict):
+            return_error = CrewApiError(
+                status,
+                str(detail.get("error") or res.get("error") or f"http_{status}"),
+                _clean_message(detail.get("message") or detail.get("error") or ""),
+                detail,
+            )
+        else:
+            return_error = CrewApiError(status, str(res.get("error") or f"http_{status}"), _clean_message(detail or ""))
+        raise return_error
+
+
+@dataclass
+class LocalCrew:
+    """The crew session the agent's crew hooks joined, when this MCP server runs inside that agent's process tree.
+
+    MCP crew tools otherwise hold a separate ``mcp`` seat: its claims are not the ones crewd saves as a baton
+    when the agent dies, and its project is the configured default rather than this repository's crew. Claim,
+    release and adopt go through crewd as the hook session instead (crewd checks the caller's process ancestry),
+    and adopt restores the saved work into the checkout, which a sandboxed agent's own shell cannot do.
+    """
+
+    layout: Any
+    who: dict[str, Any]
+
+    def http(self, client: Memory | None = None) -> LocalCrewHttp:
+        return LocalCrewHttp(self.layout, str(self.who["key"]), client)
+
+
+def local_crew(timeout: float = 1.0) -> LocalCrew | None:
+    """The agent's crew-hook session via crewd's ``whoami``, or None (no crewd, no hook session, not local)."""
+    try:
+        from pathlib import Path
+
+        from remembra.relay.crew.gate import Layout, rpc
+
+        layout = Layout(Path.home())
+        if not layout.socket.exists():
+            return None
+        who = rpc(layout, "whoami", {}, timeout=timeout)
+    except Exception:
+        return None
+    if not who or not who.get("ok") or not who.get("key") or not who.get("crew_id") or not who.get("session_id"):
+        return None
+    return LocalCrew(layout, dict(who))
+
+
 class CrewHttp:
     """Crew REST calls with the caller's own client (key, agent header, base URL)."""
 
@@ -184,6 +282,10 @@ class CallerInfo:
     client_session_id: str
     agent_id: str | None
     default_project: str | None = None
+    # the project the agent named itself (crew_status / session_brief), not the configured default
+    chosen_project: str | None = None
+    # stdio MCP server on the agent's machine: its crew hooks' session may act for it (see LocalCrew)
+    local: bool = False
 
 
 @dataclass
@@ -209,6 +311,8 @@ class Seat:
     notice_etag: str | None = None
     pending: list[dict[str, Any]] = field(default_factory=list)
     current_task_id: str | None = None
+    # set when this seat IS the agent's crew-hook session (see LocalCrew): calls go through crewd
+    local: LocalCrew | None = None
     cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
@@ -348,6 +452,58 @@ class CrewBridge:
             body["head"] = head
         return body
 
+    def _local_seat(self, caller: CallerInfo, scope: tuple[str, str], project_id: str | None) -> Seat | None:
+        """The agent's crew-hook session as this MCP session's seat (one crew session per agent), or None.
+
+        Used when the MCP server runs inside that agent's process tree (stdio, ``caller.local``) and neither this
+        call nor an earlier one in this MCP session chose another project (``crew_status(project_id=…)``).
+        """
+        if not caller.local:
+            return None
+        local = local_crew()
+        if local is None:
+            return None
+        project = str(local.who.get("project_id") or "")
+        with self._lock:
+            current = self._current.get(scope)
+        # the latest choice (this call, else crew_status / session_brief, see note_project) decides
+        chosen = project_id or current or caller.chosen_project
+        if not project or (chosen and chosen != project):
+            return None
+        with self._lock:
+            seat = self._seats.get(scope, {}).get(project)
+            if seat is None or seat.local is None or seat.session_id != str(local.who["session_id"]):
+                seat = Seat(
+                    scope=scope,
+                    project_id=project,
+                    agent_id=str(caller.agent_id or local.who.get("adapter") or ""),
+                    client_session_id=str(local.who.get("client_session_id") or ""),
+                    crew_id=str(local.who["crew_id"]),
+                    session_id=str(local.who["session_id"]),
+                    token="",
+                    callsign=str(local.who.get("callsign") or ""),
+                    verified=True,
+                    observe_only=False,
+                    status_cursor=0,
+                    notice_cursor=0,
+                    last_touch=self._clock(),
+                    local=local,
+                )
+                self._seats.setdefault(scope, {})[project] = seat
+            else:
+                seat.local = local
+            self._current[scope] = project
+        return seat
+
+    def note_project(self, caller: CallerInfo, project_id: str) -> None:
+        """Record a project the agent chose outside the crew tools (session_brief): the latest choice wins."""
+        with self._lock:
+            self._current[(caller.fingerprint, caller.client_session_id)] = project_id
+
+    def _http(self, caller: CallerInfo, seat: Seat) -> CrewHttp | LocalCrewHttp:
+        """How this seat reaches the server: crewd as the hook session, or the MCP seat's own token."""
+        return seat.local.http(caller.client) if seat.local is not None else CrewHttp(caller.client)
+
     def seat(
         self,
         caller: CallerInfo,
@@ -365,6 +521,9 @@ class CrewBridge:
                 "(or send the X-Remembra-Agent-Id header), e.g. claude-desktop or codex."
             )
         scope = (caller.fingerprint, caller.client_session_id)
+        local_seat = self._local_seat(caller, scope, project_id)
+        if local_seat is not None:
+            return local_seat, None
         with self._lock:
             project = project_id or self._current.get(scope) or caller.default_project
             existing = self._seats.get(scope, {}).get(project) if project else None
@@ -428,6 +587,8 @@ class CrewBridge:
 
     def touch(self, caller: CallerInfo, seat: Seat, *, force: bool = False) -> dict[str, Any] | None:
         """Re-join with the current token (liveness + lease renewal) at most once per minute."""
+        if seat.local is not None:  # crewd's heartbeat keeps the hook session alive
+            return None
         now = self._clock()
         with seat.lock:
             if seat.left or (not force and now - seat.last_touch < TOUCH_INTERVAL_S):
@@ -562,7 +723,7 @@ class CrewBridge:
         verbose: bool,
     ) -> str:
         seat, joined = self.seat(caller, project_id, checkout)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         rejoin = joined or self.touch(caller, seat, force=True) or {}
         lines: list[str] = []
         data: list[str] = []
@@ -774,7 +935,7 @@ class CrewBridge:
             return None
 
     def _notice(self, caller: CallerInfo, seat: Seat, *, force: bool) -> str | None:
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         try:
             self.touch(caller, seat)
         except CrewApiError:
@@ -831,19 +992,74 @@ class CrewBridge:
         wait_s: int,
     ) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         if action == "claim":
             return self._claim(http, seat, zone=zone, paths=paths, mode=mode, task=task, reason=reason, wait_s=wait_s)
         if action == "release":
             return self._release(http, seat, zone=zone, paths=paths, task=task, baton=baton, reason=reason)
         if action == "adopt":
+            if seat.local is not None and not (zone and _is_resource(zone)):
+                # through crewd, which also restores the saved work into this checkout (a resource has none)
+                return self._local_adopt(seat.local, zone=zone, paths=paths, task=task)
             return self._adopt(http, seat, zone=zone, paths=paths, task=task)
         if action == "handover":
             return self._handover(http, seat, zone=zone, paths=paths, task=task, to=to, reason=reason)
         if action in ("accept", "decline"):
             return self._answer_handover(http, seat, action, zone=zone, task=task)
         raise CrewUsageError(f"Unknown action {action!r}.")
+
+    def _local_adopt(self, local: LocalCrew, *, zone: str | None, paths: Sequence[str] | None, task: str | None) -> str:
+        """Adopt through crewd, which also restores the saved work into this checkout and reports the restore."""
+        from remembra.relay.crew.gate import rpc
+
+        args: dict[str, Any] = {"key": local.who["key"]}
+        if task:
+            args["task"] = task
+            what = _safe(task) or "the task"
+        elif paths:
+            args["paths"] = [str(x) for x in list(paths)[:20]]
+            what = ", ".join(_safe(x) or "a path" for x in list(paths)[:3])
+        elif zone:
+            args["zone"] = zone
+            what = f"zone {_safe(zone) or 'named'}"
+        else:
+            raise CrewUsageError(
+                'Name the baton to adopt: task="T-12", zone="pos" or paths=["src/app/cart.ts"] (as offered in your brief).'
+            )
+        res = rpc(local.layout, "adopt", args, timeout=90.0)
+        if res is not None and not res.get("ok"):
+            # already adopted (by this session, earlier) and its restore did not finish: restore only
+            again = rpc(local.layout, "adopt", {**args, "restore_only": True}, timeout=90.0)
+            if again is not None and again.get("ok") and again.get("restore"):
+                res = again
+        if res is None:
+            return f"NOT ADOPTED {what}: the local crew daemon did not answer. Try again in a moment."
+        if not res.get("ok"):
+            msg = _clean_message(res.get("message") or res.get("error") or "refused")
+            return f"NOT ADOPTED {what}: {msg}"
+        claims = [c for c in res.get("claims") or [] if isinstance(c, str)]
+        me = _safe(local.who.get("callsign")) or "your crew session"
+        lines = [f"ADOPTED {what}: you now hold {len(claims) or 'its'} claim(s) as {me}."]
+        restore = res.get("restore") if isinstance(res.get("restore"), dict) else None
+        ref = str((restore or {}).get("ref") or res.get("baton_ref") or "")
+        ref = ref if re.fullmatch(r"refs/remembra/baton/[A-Za-z0-9_/-]{1,120}", ref) else ""
+        if restore and restore.get("restored"):
+            n = len(restore.get("files") or [])
+            lines.append(
+                f"The previous session's saved work is restored into this checkout: {n} file(s)"
+                + (f" from {ref}." if ref else ".")
+            )
+        elif restore and restore.get("reason") == "dirty_tree":
+            lines.append(
+                "The saved work is NOT restored yet: this checkout has uncommitted changes. Commit or move them, "
+                "then call this same crew_claim adopt again to restore it."
+            )
+        elif restore:
+            lines.append("The saved work could not be restored here" + (f"; it is kept as {ref}." if ref else "."))
+        for item in res.get("refused") or []:
+            lines.append(f"NOT ADOPTED {_clean_message(item, 160)}")
+        return "\n".join(lines)
 
     def _touch_quietly(self, caller: CallerInfo, seat: Seat) -> None:
         try:
@@ -1218,7 +1434,7 @@ class CrewBridge:
 
     def guard(self, caller: CallerInfo, *, paths: Sequence[str], command: str | None, mcp_tool: str | None) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         body: dict[str, Any] = {"session_id": seat.session_id, "paths": [str(p) for p in paths][:200]}
         if mcp_tool:
@@ -1265,7 +1481,7 @@ class CrewBridge:
         note: str | None,
     ) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         if action == "list":
             seat.forget("tasks")
@@ -1377,7 +1593,7 @@ class CrewBridge:
 
     def say(self, caller: CallerInfo, *, body: str, kind: str, to: str, thread: str | None, wait_s: int) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         text = body
         target = (to or "crew").strip()
@@ -1433,7 +1649,7 @@ class CrewBridge:
         task: str | None,
     ) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         task_row = self._task(http, seat, task) if task else None
         facts: dict[str, Any] = {"files_changed": [str(p) for p in files_changed][:500]}
@@ -1511,7 +1727,7 @@ class CrewBridge:
         release: bool,
     ) -> str:
         seat, _ = self.seat(caller)
-        http = CrewHttp(caller.client)
+        http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         row = self._task(http, seat, task)
         ref = task_ref(row) or str(row.get("id"))

@@ -2665,10 +2665,13 @@ class Crewd:
         sess = self.require(peer, args.get("key"))
         ref_arg = str(args.get("task") or "")
         claim_id = ref_arg if re.fullmatch(r"clm_[A-Za-z0-9]{8,64}", ref_arg) else ""  # an offer for a claim with no task
-        if claim_id or (not ref_arg and (args.get("path") or args.get("zone"))):
+        paths = [str(x) for x in (args.get("paths") or []) if isinstance(x, str) and x][:20]
+        if args.get("path"):
+            paths = [str(args["path"]), *paths]
+        if claim_id or (not ref_arg and (paths or args.get("zone"))):
             return await self.adopt_reserved(
                 sess,
-                path=str(args.get("path") or ""),
+                paths=paths,
                 zone=str(args.get("zone") or ""),
                 claim_id=claim_id,
                 restore_only=bool(args.get("restore_only")),
@@ -2747,14 +2750,24 @@ class Crewd:
         return restore
 
     async def adopt_reserved(
-        self, sess: dict[str, Any], *, path: str, zone: str, restore_only: bool, claim_id: str = ""
+        self, sess: dict[str, Any], *, paths: Sequence[str], zone: str, restore_only: bool, claim_id: str = ""
     ) -> dict[str, Any]:
         """``remembra-crew adopt --path P`` / ``--zone Z``: adopt a lost session's reserved claim that is not
         tied to a task (a path or a zone it held), then restore its saved work like a task baton."""
         key = str(sess["key"])
+        path = paths[0] if paths else ""
         plain = bool(G.SAFE_CLAIM_PATH_RE.fullmatch(path)) and ".." not in path.split("/")
         label = (f"path {path}" if plain else "the named path") if path else f"zone {zone}" if zone else f"claim {claim_id}"
-        flag = f"--path {shlex.quote(path)}" if path else f"--zone {shlex.quote(zone)}" if zone else claim_id
+        if len(paths) > 1:
+            label += f" and {len(paths) - 1} more"
+        flag = (
+            " ".join(f"--path {shlex.quote(x)}" for x in paths[:1])
+            if path
+            else f"--zone {shlex.quote(zone)}"
+            if zone
+            else claim_id
+        )
+
         zone_id: str | None = None
         if zone:
             snap = self.snapshots.get(str(sess["crew_id"])) or {}
@@ -2772,7 +2785,7 @@ class Crewd:
                 return bool(
                     (claim_id and c.get("id") == claim_id)
                     or (zone_id and c.get("zone_id") == zone_id)
-                    or (path and G.claim_covers_path(path, str(c.get("path_glob") or "")))
+                    or any(G.claim_covers_path(x, str(c.get("path_glob") or "")) for x in paths)
                 )
 
             rows = [c for c in (resp.body or {}).get("claims") or () if isinstance(c, dict) and covers(c)]

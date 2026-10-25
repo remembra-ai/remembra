@@ -1470,6 +1470,7 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[
         lines.append(
             f"  To continue {task}: remembra-crew adopt {task}"
             + ("   (restores the saved work into this checkout)" if ref else "")
+            + f'   or crew_claim(action="adopt", task="{task}")'
         )
     elif zones:
         lines.append(

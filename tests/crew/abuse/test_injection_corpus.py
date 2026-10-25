@@ -99,7 +99,11 @@ def check(label: str, text: str, channel: str, *, offered: bool = False, planted
                 # crew items: one per line, ≤140 chars of text; the trust policy's fixed notes follow unclipped
                 text_part = line.replace(" " + COMMAND_FLAG, "").replace(" " + HIDDEN_FLAG, "")
                 assert len(text_part) <= 200, (label, len(text_part), line)
-    adopts = re.findall(r"remembra-crew adopt (\S+?)\.?(?:\s|$)|action=\"adopt\"", outside)
+    # the CLI line and its MCP twin both name the target: crew_claim(action="adopt", task="T-1")
+    adopts = [
+        cli or mcp
+        for cli, mcp in re.findall(r"remembra-crew adopt (\S+?)\.?(?:\s|$)|action=\"adopt\"(?:, task=\"([^\"]*)\")?", outside)
+    ]
     if offered:
         # only the offered baton, only in the server's own templates (the brief line or the offered deny)
         assert set(adopts) <= {"T-1"}, (label, adopts)
