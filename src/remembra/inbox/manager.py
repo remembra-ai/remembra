@@ -199,7 +199,8 @@ def same_message(
 ) -> bool:
     """True when ``row`` stores exactly this message: recipient, texts (as stored: cleaned), project,
     every metadata field, kind and expiry."""
-    meta = dict(row.get("metadata")) if isinstance(row.get("metadata"), dict) else {}
+    raw = row.get("metadata")
+    meta: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
     stored_project = row.get("project_id") or meta.pop("project_id", None) or None
     meta.pop("project_id", None)
     wanted = _scrub_deep({k: v for k, v in (metadata or {}).items() if k != "project_id"})

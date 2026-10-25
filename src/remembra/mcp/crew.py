@@ -117,69 +117,6 @@ def _error_from(res: httpx.Response) -> CrewApiError:
     )
 
 
-class LocalCrewHttp:
-    """Crew REST calls as the agent's crew-hook session, through crewd's ``api`` op (same shape as :class:`CrewHttp`)."""
-
-    # crewd's ``api`` op serves the crew's own routes; anything else (the session brief) uses the agent's key
-    CREWD_PREFIXES = ("/crews/", "/claims/", "/tasks/", "/messages/", "/inbox/items/", "/collisions/")
-
-    def __init__(self, layout: Any, key: str, client: Memory | None = None) -> None:
-        self.layout = layout
-        self.key = key
-        self.client = client
-
-    def call(
-        self,
-        method: str,
-        path: str,
-        *,
-        token: str | None = None,
-        json: Mapping[str, Any] | None = None,
-        params: Mapping[str, Any] | None = None,
-        timeout: float | None = None,
-        etag: str | None = None,
-        if_match: str | None = None,
-    ) -> tuple[int, Any, str | None]:
-        from remembra.relay.crew.gate import rpc
-
-        if not path.startswith(self.CREWD_PREFIXES) or path == "/crews/join":
-            if self.client is None:
-                raise CrewApiError(0, "unavailable", "This call is not available through the local crew daemon.")
-            return CrewHttp(self.client).call(method, path, json=json, params=params, timeout=timeout, etag=etag)
-        wait = float(timeout or 15.0)
-        res = rpc(
-            self.layout,
-            "api",
-            {
-                "key": self.key,
-                "method": method,
-                "path": path,
-                "json": dict(json) if json is not None else None,
-                "params": dict(params or {}),
-                "if_match": if_match,
-                "timeout": wait,
-            },
-            timeout=wait + 2.0,
-        )
-        if res is None:
-            raise CrewApiError(0, "unreachable", "The local crew daemon did not answer.")
-        status = int(res.get("status") or 0)
-        body = res.get("body")
-        if res.get("ok") and status < 400:
-            return status, body, None
-        detail = body.get("detail", body) if isinstance(body, dict) else body
-        if isinstance(detail, dict):
-            return_error = CrewApiError(
-                status,
-                str(detail.get("error") or res.get("error") or f"http_{status}"),
-                _clean_message(detail.get("message") or detail.get("error") or ""),
-                detail,
-            )
-        else:
-            return_error = CrewApiError(status, str(res.get("error") or f"http_{status}"), _clean_message(detail or ""))
-        raise return_error
-
-
 @dataclass
 class LocalCrew:
     """The crew session the agent's crew hooks joined, when this MCP server runs inside that agent's process tree.
@@ -193,7 +130,7 @@ class LocalCrew:
     layout: Any
     who: dict[str, Any]
 
-    def http(self, client: Memory | None = None) -> LocalCrewHttp:
+    def http(self, client: Memory) -> LocalCrewHttp:
         return LocalCrewHttp(self.layout, str(self.who["key"]), client)
 
 
@@ -271,6 +208,67 @@ class CrewHttp:
 # ---------------------------------------------------------------------------
 # Seats
 # ---------------------------------------------------------------------------
+
+
+class LocalCrewHttp(CrewHttp):
+    """Crew REST calls as the agent's crew-hook session, through crewd's ``api`` op (same shape as :class:`CrewHttp`)."""
+
+    # crewd's ``api`` op serves the crew's own routes; anything else (the session brief) uses the agent's key
+    CREWD_PREFIXES = ("/crews/", "/claims/", "/tasks/", "/messages/", "/inbox/items/", "/collisions/")
+
+    def __init__(self, layout: Any, key: str, client: Memory) -> None:
+        super().__init__(client)
+        self.layout = layout
+        self.key = key
+
+    def call(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
+        timeout: float | None = None,
+        etag: str | None = None,
+        if_match: str | None = None,
+    ) -> tuple[int, Any, str | None]:
+        from remembra.relay.crew.gate import rpc
+
+        if not path.startswith(self.CREWD_PREFIXES) or path == "/crews/join":
+            return super().call(method, path, json=json, params=params, timeout=timeout, etag=etag)
+        wait = float(timeout or 15.0)
+        res = rpc(
+            self.layout,
+            "api",
+            {
+                "key": self.key,
+                "method": method,
+                "path": path,
+                "json": dict(json) if json is not None else None,
+                "params": dict(params or {}),
+                "if_match": if_match,
+                "timeout": wait,
+            },
+            timeout=wait + 2.0,
+        )
+        if res is None:
+            raise CrewApiError(0, "unreachable", "The local crew daemon did not answer.")
+        status = int(res.get("status") or 0)
+        body = res.get("body")
+        if res.get("ok") and status < 400:
+            return status, body, None
+        detail = body.get("detail", body) if isinstance(body, dict) else body
+        if isinstance(detail, dict):
+            return_error = CrewApiError(
+                status,
+                str(detail.get("error") or res.get("error") or f"http_{status}"),
+                _clean_message(detail.get("message") or detail.get("error") or ""),
+                detail,
+            )
+        else:
+            return_error = CrewApiError(status, str(res.get("error") or f"http_{status}"), _clean_message(detail or ""))
+        raise return_error
 
 
 @dataclass(frozen=True)
@@ -500,7 +498,7 @@ class CrewBridge:
         with self._lock:
             self._current[(caller.fingerprint, caller.client_session_id)] = project_id
 
-    def _http(self, caller: CallerInfo, seat: Seat) -> CrewHttp | LocalCrewHttp:
+    def _http(self, caller: CallerInfo, seat: Seat) -> CrewHttp:
         """How this seat reaches the server: crewd as the hook session, or the MCP seat's own token."""
         return seat.local.http(caller.client) if seat.local is not None else CrewHttp(caller.client)
 
