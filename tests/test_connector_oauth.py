@@ -1047,12 +1047,12 @@ async def test_connector_brief_only_shows_inbox_of_granted_projects(h):
     assert other["status"] == "error" and other["code"] == 404
     assert "project-b only agent" not in json.dumps(other)
 
-    # The unrestricted desktop key still sees everything, as before.
+    # The unrestricted desktop key lists this project's and untagged messages, and counts the other project's.
     full = await h.http.get(
         "/api/v1/session/brief", params={"project_id": "project-a", "agent_id": "claude-code"}, headers={"X-API-Key": key}
     )
     assert full.status_code == 200
-    assert full.json()["inbox"]["unread_count"] == 3
+    assert full.json()["inbox"]["unread_count"] == 2 and full.json()["inbox"]["other_projects_unread"] == 1
     assert "secret-agent" in full.json()["known_agents"]
 
 

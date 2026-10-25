@@ -354,3 +354,27 @@ async def test_all_duplicate_store_sets_duplicate_of(env):
     assert resp.id == first.id
     assert resp.duplicate_of == first.id
     assert resp.status == "duplicate"
+
+
+async def test_session_brief_inbox_lists_this_projects_messages_and_counts_the_rest(env):
+    """A message tagged with another project belongs to that project's sessions: the brief lists this
+    project's messages and untagged ones, and only counts the others (they are still one get_inbox away)."""
+    c, inbox = env["client"], env["inbox"]
+    send = inbox.send
+    await send(owner_user_id="default_user", from_agent="codex", to_agent="claude-code", subject="here", body="a", project_id="alpha")
+    await send(owner_user_id="default_user", from_agent="codex", to_agent="claude-code", subject="untagged", body="b")
+    await send(owner_user_id="default_user", from_agent="codex", to_agent="claude-code", subject="elsewhere", body="c", project_id="beta")
+
+    brief = (await c.get("/api/v1/session/brief", params={"project_id": "alpha", "agent_id": "claude-code"})).json()
+    assert sorted(i["subject"] for i in brief["inbox"]["items"]) == ["here", "untagged"]
+    assert brief["inbox"]["unread_count"] == 2 and brief["inbox"]["other_projects_unread"] == 1
+
+    beta = (await c.get("/api/v1/session/brief", params={"project_id": "beta", "agent_id": "claude-code"})).json()
+    assert sorted(i["subject"] for i in beta["inbox"]["items"]) == ["elsewhere", "untagged"]
+    assert beta["inbox"]["other_projects_unread"] == 1
+
+    from remembra.relay.handoff import render_brief
+
+    text = render_brief(brief)
+    assert "Inbox: 2 unread here; 1 more in other projects" in text
+    assert "elsewhere" not in text

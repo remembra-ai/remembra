@@ -113,6 +113,12 @@ GUARD_TIMEOUT_MAX_S: Final = 5.0  # the gate passes what is left of its claim bu
 GUARD_PATHS_MAX: Final = 200  # the GuardRequest limit
 GIT_DELTA_TIMEOUT_S: Final = 0.8
 MAX_NEWS: Final = 30
+# Relay messages (agent_inbox) addressed to a live session's agent in its project: read every INBOX_POLL_S so
+# the per-turn hook can surface a message that arrives after the session's start brief.
+INBOX_POLL_S: Final = 30.0
+MAX_INBOX_ITEMS: Final = 50  # oldest first, so a backlog surfaces in order; ``unread`` counts all (up to 200)
+INBOX_READ_LIMIT: Final = 200  # the inbox API's page cap
+_INBOX_ID_RE: Final = re.compile(r"inbox_[0-9a-f]{8,64}")
 MAX_TOOL_WINDOWS: Final = 64
 WINDOW_SLACK_S: Final = 0.25
 OPEN_WINDOW_MAX_S: Final = 600.0  # mtime vs tool-window comparison slack (clock granularity, hook dispatch delay)
@@ -1336,6 +1342,52 @@ class Crewd:
 
     def save_commits_seen(self) -> None:
         write_json(self.layout.run / "commits.json", {"seen": self.commits_seen})
+
+    async def poll_inbox(self) -> None:
+        """Each live session's unread Relay messages (its agent id, its project), kept in its session file.
+
+        The start brief lists unread messages, but one that arrives later would wait for the next session;
+        the per-turn hook (``gate.render_turn_for``) surfaces these, each once. Only ids, sender and kind leave
+        here as template text; a subject is agent-authored and passes the brief's trust policy.
+        """
+        for key, sess in list(self.sessions.items()):
+            if sess.get("ended") or not sess.get("agent_id") or not sess.get("project_id"):
+                continue
+            params = {"agent_id": str(sess["agent_id"]), "project_id": str(sess["project_id"]), "limit": INBOX_READ_LIMIT}
+            try:
+                resp = await self.request(self.api_for(sess), "GET", "/inbox", params=params, timeout=5.0)
+            except Unreachable:
+                continue  # the last read stands: it is still what the server said
+            if resp.status in (401, 403, 404):
+                # the key or the agent's access is gone: nothing from the last read may surface any more
+                if sess.get("inbox") != {"unread": 0, "items": []}:
+                    sess["inbox"] = {"unread": 0, "items": []}
+                    self.persist(key)
+                continue
+            if not resp.ok or not isinstance(resp.body, list):
+                continue
+            items: list[dict[str, Any]] = []
+            for row in resp.body:
+                if not isinstance(row, dict) or not _INBOX_ID_RE.fullmatch(str(row.get("inbox_id") or "")):
+                    continue
+                items.append(
+                    {
+                        "inbox_id": str(row["inbox_id"]),
+                        "from_agent": str(row.get("from_agent") or "")[:64],
+                        "kind": str(row.get("kind") or (row.get("metadata") or {}).get("kind") or "")[:32],
+                        "sender_verified": bool(row.get("sender_verified")),
+                        "created_at": str(row.get("created_at") or "")[:40],
+                        "subject": police_item(
+                            str(row.get("subject") or ""),
+                            clip_body=lambda t: S.clip_item(t, 140),
+                            stored_trust=row.get("trust_score"),
+                        ),
+                    }
+                )
+            inbox = {"unread": len(items), "items": sorted(items, key=lambda i: i["created_at"])[:MAX_INBOX_ITEMS]}
+            if sess.get("inbox") != inbox:
+                sess["inbox"] = inbox
+                self.persist(key)
 
     async def heartbeat(self) -> dict[str, Any]:
         groups: dict[str, list[dict[str, Any]]] = {}
@@ -3121,6 +3173,7 @@ class Crewd:
 
         loops = [
             self._every(HEARTBEAT_S, self.heartbeat),
+            self._every(INBOX_POLL_S, self.poll_inbox),
             self._every(OUTBOX_S, self.flush_outbox),
             self._every(LIVENESS_S, self.liveness),
             self._every(INTEGRITY_S, integrity),

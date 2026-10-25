@@ -523,12 +523,33 @@ class AgentSessionService:
         return {r[1] for r in await cursor.fetchall()}
 
     async def _inbox_summary(
-        self, user_id: str, agent_id: str, limit: int, project_ids: list[str] | None = None
+        self,
+        user_id: str,
+        agent_id: str,
+        limit: int,
+        project_ids: list[str] | None = None,
+        current_project: str | None = None,
     ) -> dict[str, Any]:
+        """The agent's unread messages for the brief. With ``current_project`` (and no project restriction) it
+        lists that project's messages and untagged ones, and counts the rest as ``other_projects_unread``: a
+        message tagged with another project belongs to that project's sessions."""
         now_iso = datetime.now(UTC).isoformat()
         try:
             columns = await self._inbox_columns()
             project_sql, project_args = _inbox_project_filter(project_ids, "project_id" in columns)
+            other_count = 0
+            if current_project and project_ids is None and "project_id" in columns:
+                cursor = await self.db.conn.execute(
+                    """
+                    SELECT COUNT(*) FROM agent_inbox
+                    WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
+                      AND (expires_at IS NULL OR expires_at > ?) AND project_id IS NOT NULL AND project_id != ?
+                    """,
+                    (user_id, agent_id, now_iso, current_project),
+                )
+                other_row = await cursor.fetchone()
+                other_count = int(other_row[0]) if other_row else 0
+                project_sql, project_args = " AND (project_id = ? OR project_id IS NULL)", [current_project]
             cursor = await self.db.conn.execute(
                 f"""
                 SELECT COUNT(*) FROM agent_inbox
@@ -589,6 +610,7 @@ class AgentSessionService:
             "available": True,
             "agent_id": agent_id,
             "unread_count": int(count_row[0]) if count_row else 0,
+            "other_projects_unread": other_count,
             "items": items,
         }
 
@@ -647,7 +669,9 @@ class AgentSessionService:
         )
 
         if agent:
-            inbox: dict[str, Any] | None = await self._inbox_summary(user_id, agent, inbox_limit, inbox_project_ids)
+            inbox: dict[str, Any] | None = await self._inbox_summary(
+                user_id, agent, inbox_limit, inbox_project_ids, current_project=project_id
+            )
         else:
             inbox = None
             warnings.append("No agent_id: inbox not checked. Set REMEMBRA_AGENT_ID for this client so other agents can reach it.")

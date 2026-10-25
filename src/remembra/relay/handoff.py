@@ -1285,8 +1285,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         )
 
     inbox = brief.get("inbox")
-    if inbox and inbox.get("available", True) and inbox.get("unread_count"):
-        data.append(f"Inbox: {inbox['unread_count']} unread (get_inbox for bodies, ack_inbox when done)")
+    elsewhere = int((inbox or {}).get("other_projects_unread") or 0)
+    if inbox and inbox.get("available", True) and (inbox.get("unread_count") or elsewhere):
+        more = f"; {elsewhere} more in other projects" if elsewhere else ""
+        data.append(f"Inbox: {inbox.get('unread_count') or 0} unread here{more} (get_inbox for bodies, ack_inbox when done)")
         data.extend(_inbox_line(item, now, allowed) for item in (inbox.get("items") or [])[:5])
     status_items = brief.get("status_items") or []
     if status_items:

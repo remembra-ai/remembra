@@ -125,14 +125,17 @@ class Server:
 
 
 @asynccontextmanager
-async def crew_server(tmp_path: Path, *, rate_limits: bool = False):
+async def crew_server(tmp_path: Path, *, rate_limits: bool = False, inbox: bool = False):
     """The crew routers in process. ``rate_limits`` turns on the real crew rate limiter (a fresh
-    in-memory one), as production runs it: e.g. the snapshot bucket's 1 read per 10 s."""
+    in-memory one), as production runs it: e.g. the snapshot bucket's 1 read per 10 s. ``inbox`` adds
+    the Relay inbox routes with a real ``InboxManager`` (agent-to-agent messages)."""
     db = CrewDatabase(str(tmp_path / "crew.db"))
     await db.init_schema()
     bus = CrewBus(loader=db_loader(db))
     log = CrewEventLog(db, bus)
     routers = [auth.router, relay_api.router, *(importlib.import_module(n).router for n in CREW_ROUTER_MODULES)]
+    if inbox:
+        routers.append(importlib.import_module("remembra.api.v1.inbox").router)
     settings = make_settings(rate_limit_enabled=True) if rate_limits else None
     if rate_limits:
         set_crew_rate_limiter(CrewRateLimiter("memory://"))
@@ -150,6 +153,11 @@ async def crew_server(tmp_path: Path, *, rate_limits: bool = False):
             )
             service.extractor = OneFactExtractor()  # type: ignore[assignment]
             h.app.state.memory_service = service
+            if inbox:
+                from remembra.inbox.manager import InboxManager
+
+                h.app.state.inbox_manager = InboxManager(h.db)
+                await h.app.state.inbox_manager.init_schema()
 
             @h.app.get("/health")
             async def health() -> dict[str, str]:

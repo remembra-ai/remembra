@@ -1158,6 +1158,42 @@ def _obligations(snapshot: Mapping[str, Any], caller: str) -> list[str]:
     return out[:2]
 
 
+_INBOX_ID_RE: Final = re.compile(r"inbox_[0-9a-f]{8,64}")
+_AGENT_ID_RE: Final = re.compile(r"[A-Za-z0-9._:@-]{1,64}")
+TURN_MESSAGES_SHOWN: Final = 2
+
+
+def _fresh_messages(session: Mapping[str, Any], turn: Mapping[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    """Relay messages crewd found for this session's agent (``session["inbox"]``) not yet shown in this session,
+    oldest first: ``(ids of the ones rendered, template lines, data items)``. The caller records an id as shown
+    only when its line is in the emitted text. A message stays unread until the agent acknowledges it. The line
+    names only ids, the sender and whether its key vouches for it; the subject is agent-authored and goes in
+    the data block."""
+    raw = session.get("inbox")
+    inbox: Mapping[str, Any] = raw if isinstance(raw, dict) else {}
+    shown = set(turn.get("delivered_inbox") or ())
+    fresh = [
+        m
+        for m in inbox.get("items") or ()
+        if isinstance(m, dict) and _INBOX_ID_RE.fullmatch(str(m.get("inbox_id") or "")) and m["inbox_id"] not in shown
+    ]
+    if not fresh:
+        return [], [], []
+    lines, data = [], []
+    for m in fresh[:TURN_MESSAGES_SHOWN]:
+        sender = str(m.get("from_agent") or "")
+        sender = sender if _AGENT_ID_RE.fullmatch(sender) else "an agent"
+        trust = "key-verified" if m.get("sender_verified") else "self-declared"
+        lines.append(
+            f"MESSAGE {m['inbox_id']} for you from {sender} ({trust}): get_inbox to read; reply with "
+            f"in_reply_to={m['inbox_id']}; ack_inbox when done."
+        )
+        data.append(f"{m['inbox_id']} subject: {m.get('subject') or ''}")
+    if len(fresh) > TURN_MESSAGES_SHOWN:
+        lines.append(f"(+{len(fresh) - TURN_MESSAGES_SHOWN} more new messages: get_inbox)")
+    return [str(m["inbox_id"]) for m in fresh[:TURN_MESSAGES_SHOWN]], lines, data
+
+
 def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping[str, Any]) -> str | None:
     """The per-turn delta, or ``None`` when the digest is unchanged since the last turn."""
     from remembra.crew import gatecore as G
@@ -1171,6 +1207,8 @@ def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping
     obligations = _obligations(snapshot, caller)
     inject = session.get("inject") if isinstance(session.get("inject"), dict) else None
     pending_inject = inject if inject and inject.get("id") not in (turn.get("delivered_inject") or []) else None
+    messages, message_lines, message_data = _fresh_messages(session, turn)
+    obligations = [*message_lines, *obligations]
     now = _server_dt(snapshot, ctx.local_now)
     digest = G.turn_digest(
         snapshot,
@@ -1183,7 +1221,8 @@ def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping
     if digest == turn.get("digest") and not fresh_news:
         return None
     count = int(turn.get("injections") or 0)
-    compact = count >= TURN_COMPACT_AFTER
+    # a turn that carries a message is never compact: the compact cap (200 chars) cannot hold its line
+    compact = count >= TURN_COMPACT_AFTER and not messages
     items = [str(n.get("summary") or "")[:140] for n in fresh_news][-4:]
     if pending_inject:
         obligations = [str(pending_inject.get("text"))[:200], *obligations]
@@ -1192,6 +1231,7 @@ def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping
         caller,
         now,
         new_items=items,
+        data_items=message_data,
         obligations=obligations,
         files_since_checkpoint=int(session.get("files_since_checkpoint") or 0) or None,
         compact=compact,
@@ -1204,6 +1244,10 @@ def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping
     if pending_inject:
         turn.setdefault("delivered_inject", []).append(pending_inject["id"])
         turn["delivered_inject"] = turn["delivered_inject"][-50:]
+    # only a message whose line made it into the text counts as shown (compact mode and the length cap can cut)
+    shown = [m for m in messages if f"MESSAGE {m} " in (text or "")]
+    if shown:
+        turn["delivered_inbox"] = [*(turn.get("delivered_inbox") or []), *shown][-200:]
     write_json(ctx.layout.turn_file(key), turn)
     if pending_inject:
         rpc_send(ctx.layout, "delivered", {"key": key, "inject_id": pending_inject["id"]})
