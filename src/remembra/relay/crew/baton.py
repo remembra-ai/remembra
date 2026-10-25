@@ -28,6 +28,7 @@ import re
 import secrets
 import subprocess
 import time
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,6 +77,11 @@ def git(
 
 def out(args: Sequence[str], cwd: str | Path, **kw: Any) -> str:
     return git(args, cwd, **kw).stdout.decode("utf-8", "replace").strip()
+
+
+def z_paths(args: Sequence[str], cwd: str | Path, **kw: Any) -> list[str]:
+    """The NUL-separated paths a ``-z`` git command prints, exactly (``out`` strips, which drops a leading space)."""
+    return [p for p in git(args, cwd, **kw).stdout.decode("utf-8", "replace").split("\0") if p]
 
 
 def try_out(args: Sequence[str], cwd: str | Path, **kw: Any) -> str | None:
@@ -170,6 +176,35 @@ def dirty_entries(toplevel: str | Path) -> list[tuple[str, str]]:
             continue
         outl.append((item[:2], item[3:]))
     return outl
+
+
+def local_entries(toplevel: str | Path) -> list[tuple[str, str]]:
+    """:func:`dirty_entries` plus ignored paths (``!!``): everything a restore must not write over."""
+    res = git(
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--no-renames"],
+        toplevel,
+        timeout=10.0,
+    )
+    return [(item[:2], item[3:]) for item in res.stdout.decode("utf-8", "replace").split("\0") if len(item) >= 4]
+
+
+def _path_key(path: str) -> str:
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", path).casefold()).rstrip("/")
+
+
+def files_in_the_way(entries: Sequence[tuple[str, str]], touched: Iterable[str]) -> list[str]:
+    """Untracked or ignored paths a restore would write over: the same path, one inside a directory the restore
+    replaces with a file, or a file where the restore needs a directory. Compared as macOS compares names:
+    case-insensitively and with composed and decomposed accents equal (``é`` and ``e`` + U+0301)."""
+    keys = {_path_key(t) for t in touched if t}
+    hits: list[str] = []
+    for st, path in entries:
+        if st not in ("??", "!!"):
+            continue
+        q = _path_key(path)
+        if any(q == t or q.startswith(t + "/") or t.startswith(q + "/") for t in keys):
+            hits.append(path)
+    return hits
 
 
 def is_clean(toplevel: str | Path) -> bool:
@@ -394,7 +429,13 @@ def restore_baton(
 ) -> RestoreResult:
     """Bring a baton's saved work into ``toplevel`` (§8.1). Refuses on a dirty tree; never destructive.
 
-    All or nothing: the tree is clean before anything is touched, so on any failure part-way (a
+    Dirty means a tracked change (modified, staged, deleted) or an untracked or ignored file in the way of what
+    the restore writes or deletes, including the paths the move to the baton's parent commit changes: the same
+    path, a file inside a directory it replaces, or a file where it needs a directory, compared
+    case-insensitively. Other untracked files (``.claude/``, ``.DS_Store``, a scratch note) are never touched,
+    so they do not block a restore: refusing on them made most real checkouts refuse every baton.
+
+    All or nothing: nothing tracked is changed before anything is touched, so on any failure part-way (a
     read-only fence, a permission error, a git error) the checkout is put back exactly as it was:
     original branch or HEAD, index and tracked files reset to that HEAD, files the restore created
     removed, a branch it created deleted. The result then says ``restore_failed`` with the error.
@@ -403,8 +444,6 @@ def restore_baton(
     if not try_out(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], top):
         if not (remote and fetch_baton(top, ref, remote)):
             return RestoreResult(False, "ref_missing", ref)
-    if not is_clean(top):
-        return RestoreResult(False, "dirty_tree", ref, next_command=retry_command)
     commit = out(["rev-parse", f"{ref}^{{commit}}"], top)
     parent = out(["rev-parse", f"{commit}^"], top)
     message = out(["log", "-1", "--format=%B", commit], top)
@@ -412,8 +451,15 @@ def restore_baton(
     orig_head = try_out(["rev-parse", "--verify", "--quiet", "HEAD"], top)
     orig_branch = try_out(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
     branch = orig_branch
-    changed = [p for p in out(["diff", "--name-only", "-z", "--diff-filter=d", parent, commit], top).split("\0") if p]
-    deleted = [p for p in out(["diff", "--name-only", "-z", "--diff-filter=D", parent, commit], top).split("\0") if p]
+    changed = z_paths(["diff", "--name-only", "-z", "--diff-filter=d", parent, commit], top)
+    deleted = z_paths(["diff", "--name-only", "-z", "--diff-filter=D", parent, commit], top)
+    entries = local_entries(top)
+    # touched: what the saved work writes or deletes, and what moving to its parent commit changes
+    touched = set(changed) | set(deleted)
+    if orig_head and orig_head != parent:
+        touched |= set(z_paths(["diff", "--name-only", "-z", "--no-renames", orig_head, parent], top))
+    if any(st not in ("??", "!!") for st, _ in entries) or files_in_the_way(entries, touched):
+        return RestoreResult(False, "dirty_tree", ref, next_command=retry_command)
     existed = {p for p in changed if os.path.lexists(os.path.join(top, p))}
     created_branch: str | None = None
     try:

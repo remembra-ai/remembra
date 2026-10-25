@@ -5,6 +5,21 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.5] - 2026-10-25
+
+**A baton restores into a real checkout.**
+
+### Fixed
+- **Untracked files no longer block a baton restore.** A restore refused on any untracked file, so a checkout
+  with an untracked `.claude/` (Claude Code's local settings), `.DS_Store` or a scratch note refused every
+  baton: found by the live kill-and-takeover test, where Codex adopted the stopped session's file and was told
+  the saved work could not be restored. A restore now refuses only on a tracked change (modified, staged,
+  deleted) or an untracked or ignored file in the way of what it writes or deletes: the same path, a file
+  inside a folder it replaces, a file where it needs a folder, or a path the move to the baton's commit
+  changes, compared as macOS compares names (case and accent forms). Other untracked files are left exactly
+  as they were. Changed-path lists keep names that start with a space.
+- Reviewed by Codex in three passes before release; each data-loss case has a test.
+
 ## [0.17.4] - 2026-10-25
 
 **Taking over a stopped agent's work is automatic from Codex and Claude Code: found by a live kill-and-takeover

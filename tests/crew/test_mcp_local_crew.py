@@ -258,11 +258,12 @@ async def test_a_task_baton_restore_refused_by_a_dirty_checkout_is_retried_by_th
         (repo / "src/app/pos/tender.ts").write_text("export const tender = 'wip';\n")
         assert (await d.stall(peer(LOST_PID), {"key": a["key"], "error": "billing_error"})).get("baton_ref")
         await d.join(peer(me), {"adapter": "codex", "client_session_id": "sess-c", "cwd": str(wt_c), "agent_pid": me})
-        (wt_c / "scratch.txt").write_text("in the way\n")  # uncommitted change: the restore is refused
+        readme = (wt_c / "README.md").read_text()
+        (wt_c / "README.md").write_text("in the way\n")  # a tracked change: the restore is refused
         args = dict(zone=None, paths=None, mode="exclusive", to=None, baton=None, reason=None, wait_s=0)
         first = await asyncio.to_thread(CrewBridge().claim, _caller(), action="adopt", task="T-1", **args)
         assert first.startswith("ADOPTED T-1") and "NOT restored yet" in first, first
-        (wt_c / "scratch.txt").unlink()
+        (wt_c / "README.md").write_text(readme)
         second = await asyncio.to_thread(CrewBridge().claim, _caller(), action="adopt", task="T-1", **args)
         assert "saved work is restored into this checkout" in second, second
         assert (wt_c / "src/app/pos/tender.ts").read_text() == "export const tender = 'wip';\n"

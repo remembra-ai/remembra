@@ -266,7 +266,7 @@ async def test_adopt_restores_the_saved_work_in_another_worktree(tmp_path):
 async def test_adopt_refuses_to_restore_into_a_dirty_tree(tmp_path):
     repo = make_repo(tmp_path / "repo")
     wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
-    (wt_c / "mine.txt").write_text("c's own work\n")
+    (wt_c / "README.md").write_text("c's own work\n")  # a tracked change: the restore is refused
     ref = None
     (repo / "src/app/pos/tender.ts").write_text("saved\n")
     baton = B.create_baton_ref(repo, "T-3")
@@ -507,3 +507,145 @@ async def test_the_several_batons_message_quotes_glob_paths(tmp_path):
         both = await d.adopt(peer(C_PID), {"path": "art/lls"})
         assert both["error"] == "several_batons", both
         assert "--path 'art/lls/*.txt'" in both["message"] and "--path art/lls/back.md" in both["message"], both
+
+
+async def test_unrelated_untracked_files_do_not_block_a_restore_and_are_kept(tmp_path):
+    """Found live: an untracked .claude/ (or any scratch file) refused every baton restore. Only a tracked change
+    or an untracked file the saved work would write over refuses it now."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    (repo / "src/app/pos/tender.ts").write_text("saved\n")
+    (repo / "docs").mkdir()
+    (repo / "docs/plan.md").write_text("plan\n")
+    baton = B.create_baton_ref(repo, "T-4")
+    assert baton is not None
+    (wt_c / ".claude").mkdir()
+    (wt_c / ".claude/settings.local.json").write_text("{}\n")
+    (wt_c / "notes.txt").write_text("mine\n")
+    result = B.restore_baton(wt_c, baton.ref)
+    assert result.restored is True, result
+    assert (wt_c / "src/app/pos/tender.ts").read_text() == "saved\n" and (wt_c / "docs/plan.md").read_text() == "plan\n"
+    assert (wt_c / ".claude/settings.local.json").read_text() == "{}\n" and (wt_c / "notes.txt").read_text() == "mine\n"
+
+
+async def test_an_untracked_file_the_saved_work_would_overwrite_refuses_the_restore(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    (repo / "docs").mkdir()
+    (repo / "docs/plan.md").write_text("the lost session's plan\n")
+    baton = B.create_baton_ref(repo, "T-5")
+    assert baton is not None
+    (wt_c / "docs").mkdir()
+    (wt_c / "docs/plan.md").write_text("c's own plan\n")
+    result = B.restore_baton(wt_c, baton.ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "docs/plan.md").read_text() == "c's own plan\n"
+
+
+def _baton_with(repo, files: dict[str, str], label: str):
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    baton = B.create_baton_ref(repo, label)
+    assert baton is not None
+    return baton.ref
+
+
+async def test_a_restore_never_deletes_an_untracked_folder_it_would_replace_with_a_file(tmp_path):
+    """Codex review P1: the saved work adds a file `docs`; the adopter's untracked docs/notes.txt is kept."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    ref = _baton_with(repo, {"docs": "a file named docs\n"}, "T-6")
+    (wt_c / "docs").mkdir()
+    (wt_c / "docs/notes.txt").write_text("mine\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "docs/notes.txt").read_text() == "mine\n"
+
+
+async def test_a_restore_never_overwrites_an_ignored_file(tmp_path):
+    """Codex review P1: git status hides ignored files; the restore still refuses to write over one."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    ref = _baton_with(repo, {"local.cfg": "the lost session's\n"}, "T-7")
+    (wt_c / ".gitignore").write_text("local.cfg\n")
+    (wt_c / "local.cfg").write_text("my secrets\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "local.cfg").read_text() == "my secrets\n"
+
+
+async def test_a_restore_compares_paths_case_insensitively(tmp_path):
+    """Codex review P1: on macOS Docs/plan.md and docs/plan.md are one file."""
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    ref = _baton_with(repo, {"docs/plan.md": "theirs\n"}, "T-8")
+    (wt_c / "Docs").mkdir()
+    (wt_c / "Docs/plan.md").write_text("mine\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "Docs/plan.md").read_text() == "mine\n"
+
+
+async def test_a_restore_never_overwrites_a_file_the_move_to_the_batons_commit_would_bring(tmp_path):
+    """Codex review P1: the adopter is on an older commit; moving to the baton's parent adds tools/run.sh,
+    where the adopter has an untracked file of its own."""
+    from tests.crew.wp9_support import git
+
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")  # at the old HEAD
+    (repo / "tools").mkdir()
+    (repo / "tools/run.sh").write_text("echo theirs\n")
+    git(repo, "add", "tools/run.sh")
+    git(repo, "commit", "-qm", "add run.sh")
+    ref = _baton_with(repo, {"src/app/pos/tender.ts": "saved\n"}, "T-9")
+    (wt_c / "tools").mkdir()
+    (wt_c / "tools/run.sh").write_text("echo mine\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / "tools/run.sh").read_text() == "echo mine\n"
+    (wt_c / "tools/run.sh").unlink()
+    assert B.restore_baton(wt_c, ref).restored is True  # nothing in the way: it restores
+
+
+async def test_an_ignored_file_with_a_leading_space_is_not_overwritten_by_the_branch_switch(tmp_path):
+    """Codex review P1: path lists were stripped, so " report" was checked as "report"."""
+    from tests.crew.wp9_support import git
+
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")  # at the old HEAD
+    (repo / " report").write_text("theirs\n")
+    git(repo, "add", "--", " report")
+    git(repo, "commit", "-qm", "add a file with a leading space")
+    ref = _baton_with(repo, {"src/app/pos/tender.ts": "saved\n"}, "T-10")
+    (wt_c / ".gitignore").write_text("/ report\n")
+    (wt_c / " report").write_text("mine\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / " report").read_text() == "mine\n"
+
+
+async def test_a_restore_treats_composed_and_decomposed_accents_as_one_name(tmp_path):
+    """Codex review P1: macOS treats é and e + U+0301 as the same file name."""
+    import unicodedata
+
+    repo = make_repo(tmp_path / "repo")
+    wt_c = add_worktree(repo, tmp_path / "wt-c", "c-work")
+    composed = unicodedata.normalize("NFC", "notes/café.txt")
+    decomposed = unicodedata.normalize("NFD", "notes/café.txt")
+    assert composed != decomposed
+    ref = _baton_with(repo, {composed: "theirs\n"}, "T-11")
+    (wt_c / "notes").mkdir()
+    (wt_c / decomposed).write_text("mine\n")
+    result = B.restore_baton(wt_c, ref)
+    assert result.restored is False and result.reason == "dirty_tree", result
+    assert (wt_c / decomposed).read_text() == "mine\n"
+
+
+def test_path_lists_keep_leading_spaces_and_names_compare_as_on_macos():
+    import unicodedata
+
+    entries = [("??", unicodedata.normalize("NFD", "Café/Plan.md")), ("!!", " report"), (" M", "x")]
+    assert B.files_in_the_way(entries, [unicodedata.normalize("NFC", "café/plan.md")]) == [entries[0][1]]
+    assert B.files_in_the_way(entries, [" report"]) == [" report"]
+    assert B.files_in_the_way(entries, ["report"]) == []

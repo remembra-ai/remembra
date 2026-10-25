@@ -218,7 +218,8 @@ MCP-only agents use the same actions as MCP tools: `crew_status`, `crew_claim`, 
 On a machine where crew hooks run, the MCP server is started by the agent, so `crew_claim` (claim, release,
 adopt) acts as the agent's own crew session through `crewd`: the claim lands in this repository's crew and is
 the one kept as a baton if the agent stops, and `crew_claim(action="adopt", …)` restores the saved work into the
-checkout. This is the way to adopt from an agent whose shell is sandboxed (Codex): a sandbox can hide the
+checkout (it refuses, and says so, only when a tracked file has uncommitted changes or an untracked file is where
+the saved work goes; other untracked files such as `.claude/` are left alone). This is the way to adopt from an agent whose shell is sandboxed (Codex): a sandbox can hide the
 session from `remembra-crew` run in that shell. Set `REMEMBRA_MCP_LOCAL_CREW=0` in the MCP server's environment
 to keep a separate MCP seat instead.
 
