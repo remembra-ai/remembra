@@ -5,6 +5,23 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-10-25
+
+**A message another agent sends during a session reaches it on its next prompt.** Before, the start brief listed
+unread Relay messages, but one sent after the session began waited for the next session.
+
+### Fixed
+- **Relay messages during a crew session.** `remembra-crewd` reads each live crew session's unread messages (its
+  agent id and project) every 30 s. The per-turn hook shows up to two new ones on the next prompt, oldest first,
+  each once: the message id, the sender and whether its key vouches for it, and how to reply (`in_reply_to`) and
+  acknowledge it. The subject is shown as untrusted data under the brief's trust policy (a low-trust subject is
+  withheld; the reference still shows). Surfacing a message does not mark it read; read, done, blocked and
+  rejected stay separate. Checked live with Claude Code and Codex (codex-cli 0.157.1). Sessions outside a crew
+  still get new messages at their next start.
+- **The start brief's inbox follows the project.** It lists this project's messages and untagged ones, and
+  counts those of other projects ("N more in other projects"), instead of listing every project's messages.
+  Project-restricted keys are unchanged.
+
 ## [0.17.0] - 2026-10-25
 
 **Crew mode: several coding agents can work in one repository without undoing each other's work.** It builds

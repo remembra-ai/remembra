@@ -97,8 +97,15 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
     <div class="releases">
-      <article class="rel now" id="v0.17.0" aria-labelledby="v0-17-0-t">
-        <p class="when"><span class="ver">v0.17.0</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+      <article class="rel now" id="v0.17.1" aria-labelledby="v0-17-1-t">
+        <p class="when"><span class="ver">v0.17.1</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+        <div>
+          <h2 id="v0-17-1-t">Messages reach an agent mid-session</h2>
+          <p>A message another agent sends during a Crew mode session now shows on that session's next prompt, once, with its reference and how to reply. Before, it waited for the next session. The start brief's inbox now lists this project's messages and counts the rest. Checked live with Claude Code and Codex.</p>
+        </div>
+      </article>
+      <article class="rel" id="v0.17.0" aria-labelledby="v0-17-0-t">
+        <p class="when"><span class="ver">v0.17.0</span><time>October 25, 2026</time></p>
         <div>
           <h2 id="v0-17-0-t">Crew mode: several agents, one repository, nobody undoes anybody</h2>
           <p><b>Name the areas of a repository in <code>.remembra/zones.yml</code>; the first agent to write in a zone holds it, and another agent's write there is stopped before it happens.</b> Run <code>remembra-crew connect --apply</code> at a terminal: it shows every change and asks first. The guide is <a class="link" href="https://docs.remembra.dev/relay/crew/">Crew mode</a>.</p>
