@@ -1194,6 +1194,24 @@ def _fresh_messages(session: Mapping[str, Any], turn: Mapping[str, Any]) -> tupl
     return [str(m["inbox_id"]) for m in fresh[:TURN_MESSAGES_SHOWN]], lines, data
 
 
+_BRIEF_INBOX_RE: Final = re.compile(r"\[(inbox_[0-9a-f]{8,64})\]")
+
+
+def record_brief_messages(layout: Layout, adapter: str, client_session_id: str, text: str) -> list[str]:
+    """Record the Relay messages a start brief listed (``[inbox_…]`` in the emitted text) as shown to this
+    session, so its next prompt does not surface them again. Only crew sessions keep a turn file: without the
+    crew directory nothing is written. Returns the ids recorded."""
+    ids = list(dict.fromkeys(_BRIEF_INBOX_RE.findall(text or "")))
+    if not ids or not adapter or not client_session_id or not layout.sessions.is_dir():
+        return []
+    path = layout.turn_file(session_key(adapter, client_session_id))
+    turn = read_json(path) or {}
+    known = list(turn.get("delivered_inbox") or [])
+    turn["delivered_inbox"] = [*known, *(i for i in ids if i not in known)][-200:]
+    write_json(path, turn)
+    return ids
+
+
 def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping[str, Any]) -> str | None:
     """The per-turn delta, or ``None`` when the digest is unchanged since the last turn."""
     from remembra.crew import gatecore as G

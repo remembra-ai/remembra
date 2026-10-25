@@ -80,6 +80,24 @@ def test_config_project_entries_codex_credentials_and_preference(tmp_path):
     assert load_config(environ={}, home=tmp_path / "bad").api_key is None
 
 
+def test_gemini_qwen_and_cursor_hooks_read_their_own_key_and_no_one_else_does(tmp_path):
+    """Each agent's hooks send with the key in its own MCP config; another agent's file is never a fallback."""
+    _write(tmp_path / ".claude.json", json.dumps({"mcpServers": {"remembra": {"env": {"REMEMBRA_API_KEY": "rem_claude"}}}}))
+    for name, rel in (("gemini", ".gemini/settings.json"), ("qwen", ".qwen/settings.json"), ("cursor", ".cursor/mcp.json")):
+        env = {"REMEMBRA_API_KEY": f"rem_{name}", "REMEMBRA_AGENT_ID": name, "REMEMBRA_URL": f"https://{name}.example"}
+        _write(tmp_path / rel, json.dumps({"mcpServers": {"remembra": {"command": "remembra-mcp", "env": env}}}))
+        spec = get_adapter(name).spec
+        cfg = load_config(environ={}, home=tmp_path, prefer=spec.config_source)
+        assert (cfg.api_key, cfg.agent_id, cfg.url) == (f"rem_{name}", name, f"https://{name}.example")
+        assert cli.load_config_from_source(cfg.source).api_key == f"rem_{name}"  # the outbox resends with the same key
+    assert load_config(environ={}, home=tmp_path).api_key == "rem_claude"
+    assert load_config(environ={}, home=tmp_path, prefer="codex").api_key == "rem_claude"
+    # without its own entry an agent falls back exactly as before (Claude's file, then credentials)
+    _write(tmp_path / "bare" / ".gemini" / "settings.json", json.dumps({"mcpServers": {}}))
+    _write(tmp_path / "bare" / ".remembra" / "credentials", json.dumps({"api_key": "rem_creds"}))
+    assert load_config(environ={}, home=tmp_path / "bare", prefer="gemini").api_key == "rem_creds"
+
+
 def test_payload_maps():
     assert PayloadMap().extract({"session_id": "s", "cwd": "/w", "transcript_path": "/t", "reason": "exit"}, {}) == {
         "session_id": "s",
@@ -431,3 +449,46 @@ def test_dripping_server_real_process_exits_within_the_budget(tmp_path):
         server.close()
     assert proc.returncode == 0 and elapsed < 6, (elapsed, proc.stderr)
     assert "Remembra brief unavailable" in proc.stdout
+
+
+def test_messages_listed_in_the_start_brief_count_as_shown_to_the_crew_session(wired, monkeypatch, capsys, tmp_path):
+    """The start brief lists unread messages; the per-turn hook must not surface the same ones again."""
+    from remembra.relay.crew.gate import Layout, _fresh_messages, read_json, session_key
+
+    _, clones = make_remote_and_clones(tmp_path, ("a",))
+    a = clones["a"]
+    git(a, "remote", "set-url", "origin", "https://github.com/acme/briefmsg.git")
+    http = wired["api"]["http"]
+    http.headers["X-API-Key"] = "rem_inprocess"
+    ids = []
+    for i in range(7):  # the brief lists five: the other two have not been shown
+        r = http.post(
+            "/api/v1/inbox/send",
+            json={"to_agent": "claude-code", "from_agent": "codex", "subject": f"m{i}", "body": "b", "project_id": "briefmsg"},
+        )
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["inbox_id"])
+
+    layout = Layout(wired["home"])
+    turn_file = layout.turn_file(session_key("claude-code", "S-msg"))
+    # no crew directory: nothing is written
+    hook = json.dumps({"session_id": "S-msg", "cwd": str(a)})
+    code, out, err = _run(monkeypatch, capsys, ["brief", "--hook", "claude-code", "--agent", "claude-code"], hook)
+    assert code == 0 and ids[-1] in out, err
+    assert not turn_file.exists()
+
+    layout.sessions.mkdir(parents=True)
+    code, out, err = _run(
+        monkeypatch,
+        capsys,
+        ["brief", "--hook", "claude-code", "--agent", "claude-code"],
+        json.dumps({"session_id": "S-msg2", "cwd": str(a)}),
+    )
+    listed = [i for i in ids if f"[{i}]" in out]
+    assert code == 0 and len(listed) == 5, (out, err)
+    recorded = (read_json(layout.turn_file(session_key("claude-code", "S-msg2"))) or {}).get("delivered_inbox")
+    assert sorted(recorded) == sorted(listed)
+    # crewd's poll then holds all seven: the turn hook surfaces only the two the brief did not list
+    session = {"inbox": {"items": [{"inbox_id": i, "from_agent": "codex", "subject": "s"} for i in ids]}}
+    fresh, _, _ = _fresh_messages(session, {"delivered_inbox": recorded})
+    assert sorted(fresh) == sorted(set(ids) - set(listed))

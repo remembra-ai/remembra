@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import AsyncQdrantClient, models
 
 from remembra.config import Settings
 from remembra.core.provider_errors import ProviderErrorKind
@@ -293,7 +293,7 @@ async def test_reconcile_cli_reports_json(tmp_path, monkeypatch, capsys) -> None
     monkeypatch.setenv("REMEMBRA_EMBEDDING_DIMENSIONS", "4")
     monkeypatch.setattr(remembra.config, "_settings", None)
     local = AsyncQdrantClient(location=":memory:")
-    await local.create_collection("cli_test", vectors_config={"size": 4, "distance": "Cosine"})
+    await local.create_collection("cli_test", vectors_config=models.VectorParams(size=4, distance=models.Distance.COSINE))
 
     async def local_client(self):  # noqa: ANN001
         return local

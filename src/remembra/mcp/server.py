@@ -1620,6 +1620,22 @@ def _expires_at_from(expires_in: str | None) -> str | None:
     return (datetime.now(UTC) + timedelta(seconds=int(text[:-1]) * units[text[-1]])).isoformat()
 
 
+_INBOX_ID_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
+
+
+def _reply_project(client: Any, agent: str, in_reply_to: Any) -> str | None:
+    """The project of the message ``in_reply_to`` names, when it was addressed to ``agent`` (else None)."""
+    if not isinstance(in_reply_to, str) or not _INBOX_ID_RE.fullmatch(in_reply_to) or agent == "unknown":
+        return None
+    try:
+        rows = client.get_inbox(agent_id=agent, status="all", limit=200)
+    except Exception:
+        return None
+    original = next((r for r in rows if isinstance(r, dict) and r.get("inbox_id") == in_reply_to), None)
+    project = (original or {}).get("project_id") or ((original or {}).get("metadata") or {}).get("project_id")
+    return str(project) if project else None
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         title="Send To Agent Inbox",
@@ -1647,7 +1663,8 @@ def send_to_inbox(
         to_agent: Recipient agent id. Unknown ids are delivered but warned about.
         subject: One-line subject.
         body: Message body with full context.
-        metadata: Optional key/value metadata. project_id defaults to this client's project.
+        metadata: Optional key/value metadata. project_id defaults to the original message's project for a
+            reply (in_reply_to=<inbox id> of a message to this agent), else to this client's project.
         from_agent: Sender id; defaults to REMEMBRA_AGENT_ID. A key scoped to one agent may only send as that agent.
         expires_in: Optional expiry ("12h", "7d", "2w"); expired rows are hidden.
 
@@ -1666,9 +1683,14 @@ def send_to_inbox(
             )
         if sender == "unknown":
             warnings.append("Sender is 'unknown' because REMEMBRA_AGENT_ID is not set; the recipient cannot reply.")
-        # Tag the message with this client's project so project-restricted
-        # readers (e.g. the Claude/ChatGPT connector) can see it.
+        # A reply goes to its original's project, so it surfaces where the conversation is; otherwise
+        # tag the message with this client's project so project-restricted readers (e.g. the
+        # Claude/ChatGPT connector) can see it.
         tagged = dict(metadata or {})
+        if not tagged.get("project_id"):
+            replied_project = _reply_project(client, sender, tagged.get("in_reply_to"))
+            if replied_project:
+                tagged["project_id"] = replied_project
         project = getattr(client, "project", None)
         if project and not tagged.get("project_id"):
             tagged["project_id"] = project

@@ -453,3 +453,26 @@ def test_relationships_at_hits_the_real_search_route(mcp_env):
     assert out["status"] == "ok", out
     assert out["count"] == 1
     assert out["relationships"][0]["from"] == "Alice" and out["relationships"][0]["to"] == "Acme"
+
+
+def test_a_reply_goes_to_the_original_messages_project(mcp_env):
+    """The client's project (REMEMBRA_PROJECT) is only a hint; a reply belongs where the conversation is."""
+    codex = mcp_env["make_client"](project="beta", agent_id="codex")
+    original = codex.send_to_inbox(
+        to_agent="claude-code", subject="check CONT-1", body="reply please", metadata={"project_id": "beta"}
+    )
+    reply = _j(
+        server.send_to_inbox(
+            to_agent="codex", subject="Re: check CONT-1", body="ok", metadata={"in_reply_to": original["inbox_id"]}
+        )
+    )
+    assert reply["ok"] is True
+    rows = codex.get_inbox(agent_id="codex", status="all")
+    got = next(r for r in rows if r["inbox_id"] == reply["inbox_id"])
+    assert got["project_id"] == "beta" and got["metadata"]["in_reply_to"] == original["inbox_id"]
+
+    # not a reply (or an id this agent never received): the client's project, as before
+    plain = _j(server.send_to_inbox(to_agent="codex", subject="new", body="x"))
+    unknown = _j(server.send_to_inbox(to_agent="codex", subject="x", body="x", metadata={"in_reply_to": "inbox_0123456789ab"}))
+    rows = {r["inbox_id"]: r for r in codex.get_inbox(agent_id="codex", status="all")}
+    assert rows[plain["inbox_id"]]["project_id"] == "alpha" and rows[unknown["inbox_id"]]["project_id"] == "alpha"

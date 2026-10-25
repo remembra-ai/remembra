@@ -70,6 +70,7 @@ SPEC = AdapterSpec(
         "Unverified: cursor-agent 2026.09.26's own hook runner fired these hooks (brief returned, close stored), "
         "but no logged-in Cursor session has run them yet. The CLI gives a brief to new chats only, not --resume."
     ),
+    config_source="cursor",
 )
 
 

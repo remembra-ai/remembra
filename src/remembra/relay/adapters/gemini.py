@@ -105,6 +105,7 @@ SPEC = AdapterSpec(
         f"Verified with Gemini CLI {', '.join(TESTED_VERSIONS)}, headless and interactive, with a local stand-in for"
         " the model; other versions have not been run."
     ),
+    config_source="gemini",
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)

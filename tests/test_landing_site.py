@@ -1170,6 +1170,7 @@ def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
     _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.17.0")
     assert ok == []
 
+
 def test_codex_verification_copy_says_what_was_run() -> None:
     """Changelog and guide: the Claude Code half was replayed, the model was a stand-in, the build a prerelease."""
     root = LANDING.parent

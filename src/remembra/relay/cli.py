@@ -751,6 +751,18 @@ def crew_footer_here(ctx: Context, rendered: str) -> str:
     return "\n".join(crew_footer_off(ctx.agent) if line == CREW_FOOTER else line for line in rendered.split("\n"))
 
 
+def _brief_messages_shown(ctx: Context, hook_session: str | None, rendered: str) -> None:
+    """The messages this brief listed count as shown to the session: its per-turn hook does not repeat them."""
+    if not ctx.adapter or not hook_session:
+        return
+    try:
+        from remembra.relay.crew.gate import Layout, record_brief_messages
+
+        record_brief_messages(Layout(ctx.home), ctx.adapter.spec.name, hook_session, rendered)
+    except Exception as e:
+        _err(f"brief: could not record the messages shown ({e.__class__.__name__})")
+
+
 def _emit_brief(
     mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None, event: str = "SessionStart"
 ) -> None:
@@ -976,6 +988,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
             brief["rendered"] = crew_footer_here(ctx, brief["rendered"])
         if _claim_print(home, once_key, hook_session, event, exclusive):
             _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay), event=event)
+            _brief_messages_shown(ctx, hook_session, str(brief.get("rendered") or ""))
     except Exception as e:  # never break the agent's session start
         _err(f"brief failed: {e.__class__.__name__}: {e}")
         try:

@@ -76,6 +76,7 @@ SPEC = AdapterSpec(
         " the model; other versions have not been run. A handoff is written when an interactive session ends, on a"
         " rate-limit or billing stop, and before /compress; one-shot `qwen -p` runs write none."
     ),
+    config_source="qwen",
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)

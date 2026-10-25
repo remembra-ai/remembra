@@ -92,6 +92,7 @@ def test_the_pricing_page_says_crew_mode_follows_the_site_switch(
     off = _text(partials.render(html))
     assert "Crew mode is not available on Remembra Cloud yet; when it is, each crew gets the limits of its owner's plan." in off
 
+
 def test_the_crew_guide_links_to_the_limits_it_mentions() -> None:
     guide = (ROOT / "docs" / "relay" / "crew.md").read_text()
     assert "(../reference/plans-and-credits.md#crew-mode-limits)" in guide

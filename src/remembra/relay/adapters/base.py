@@ -123,7 +123,7 @@ class AdapterSpec:
     # Files that mean "installed" (relative to home), where a directory alone would not: Gemini
     # CLI's ~/.gemini is also Antigravity's, but only Gemini CLI writes ~/.gemini/settings.json.
     detect_files: tuple[str, ...] = ()
-    config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
+    config_source: str | None = None  # prefer this agent's config file for the API key (config.load_config)
     # Per-hook timeouts in SECONDS, keyed "start" / "prompt" / "end"; written in the agent's
     # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
     hook_timeouts: dict[str, int] = field(default_factory=dict)

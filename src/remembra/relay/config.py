@@ -9,6 +9,10 @@ source, so a key is never sent to a server configured somewhere else):
 3. ``~/.codex/config.toml``: ``[mcp_servers.remembra.env]``;
 4. ``~/.remembra/credentials`` (written by ``remembra-install``).
 
+A hook of an agent with its own MCP config (Gemini CLI ``~/.gemini/settings.json``,
+Qwen Code ``~/.qwen/settings.json``, Cursor ``~/.cursor/mcp.json``) reads that
+file first, so each agent sends with its own key; other agents never read it.
+
 The agent id is ``--agent`` > ``REMEMBRA_AGENT_ID`` > the source's value.
 With no key anywhere, the URL is ``REMEMBRA_URL`` (else the local default):
 that is the server a handoff queued without a key is kept for.
@@ -69,6 +73,27 @@ def _from_claude_json(path: Path) -> dict[str, str]:
     return {}
 
 
+def _from_mcp_json(path: Path) -> dict[str, str]:
+    """``mcpServers.remembra.env`` of an agent's JSON MCP config (Gemini CLI, Qwen Code, Cursor)."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    server = (data.get("mcpServers") or {}).get("remembra") if isinstance(data, dict) else None
+    env = server.get("env") if isinstance(server, dict) else None
+    if isinstance(env, dict) and env.get("REMEMBRA_API_KEY"):
+        return {str(k): str(v) for k, v in env.items()}
+    return {}
+
+
+# agent-owned config files, read only by that agent's hooks (``prefer``)
+_OWN_CONFIG = {
+    "gemini": (".gemini", "settings.json"),
+    "qwen": (".qwen", "settings.json"),
+    "cursor": (".cursor", "mcp.json"),
+}
+
+
 def _from_codex_toml(path: Path) -> dict[str, str]:
     try:
         data = tomllib.loads(path.read_text())
@@ -101,8 +126,8 @@ def load_config(
     home: Path | None = None,
     prefer: str | None = None,
 ) -> RelayConfig:
-    """Discover the connection config. ``prefer`` ("claude" | "codex") tries that
-    agent's config file first (a Codex hook should use Codex's key)."""
+    """Discover the connection config. ``prefer`` ("claude" | "codex" | "gemini" | "qwen" | "cursor")
+    tries that agent's config file first (a Codex hook should use Codex's key)."""
     env = dict(os.environ if environ is None else environ)
     home = home or Path(env.get("HOME") or Path.home())
 
@@ -116,6 +141,8 @@ def load_config(
             ("codex", _from_codex_toml, home / ".codex" / "config.toml"),
             ("credentials", _from_credentials, home / ".remembra" / "credentials"),
         ]
+        if prefer in _OWN_CONFIG:
+            candidates.append((prefer, _from_mcp_json, home.joinpath(*_OWN_CONFIG[prefer])))
         candidates.sort(key=lambda c: 0 if c[0] == prefer else 1)
         for name, loader, path in candidates:
             found = loader(path)
@@ -128,7 +155,12 @@ def load_config(
     return _build("none", {"REMEMBRA_URL": env.get("REMEMBRA_URL") or ""}, agent, env)
 
 
-_LOADERS = {"claude": _from_claude_json, "codex": _from_codex_toml, "credentials": _from_credentials}
+_LOADERS = {
+    "claude": _from_claude_json,
+    "codex": _from_codex_toml,
+    "credentials": _from_credentials,
+    **{name: _from_mcp_json for name in _OWN_CONFIG},
+}
 
 
 def load_config_from_source(
