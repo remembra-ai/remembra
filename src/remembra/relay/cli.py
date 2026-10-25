@@ -1157,7 +1157,7 @@ def unchanged_since_sent(home: Path, agent: str, session_id: str, fingerprint: s
     try:
         if time.time() - path.stat().st_mtime > STATE_TTL_SECONDS:
             return False
-        return json.loads(path.read_text()).get("fingerprint") == fingerprint
+        return bool(json.loads(path.read_text()).get("fingerprint") == fingerprint)
     except (OSError, ValueError, AttributeError):
         return False
 
