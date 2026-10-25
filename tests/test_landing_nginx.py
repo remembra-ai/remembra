@@ -359,16 +359,17 @@ def test_every_retired_release_page_has_its_anchor_on_the_changelog() -> None:
 def test_changelog_leads_with_the_latest_release_then_crew_mode_and_relay() -> None:
     changelog = (LANDING / "changelog.html").read_text()
     releases = re.findall(r'<article class="(rel[^"]*)" id="([^"]+)"', changelog)
-    assert releases[:5] == [
-        ("rel now", "v0.17.1"),
+    assert releases[:6] == [
+        ("rel now", "v0.17.2"),
+        ("rel", "v0.17.1"),
         ("rel", "v0.17.0"),
         ("rel", "v0.16.2"),
         ("rel", "v0.16.1"),
         ("rel", "v0.16.0"),
     ]
     assert changelog.count('<span class="tag signal">Latest</span>') == 1
-    first = changelog.index('id="v0.17.1"')
-    assert '<span class="ver">v0.17.1</span><span class="tag signal">Latest</span>' in changelog[first : first + 300]
+    first = changelog.index('id="v0.17.2"')
+    assert '<span class="ver">v0.17.2</span><span class="tag signal">Latest</span>' in changelog[first : first + 300]
     crew = changelog.index('id="v0.17.0"')
     assert "Crew mode" in changelog[crew : crew + 600]
     relay = changelog.index('id="v0.16.0"')

@@ -5,6 +5,23 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2] - 2026-10-25
+
+**Each agent sends with its own key, and a reply lands where the conversation is.**
+
+### Fixed
+- **A reply goes to the original message's project.** `send_to_inbox` with `in_reply_to` and no `project_id`
+  now files the reply under the project of the message it answers, instead of the MCP server's configured
+  default project. The sender reading that project's inbox now sees it. An explicit `project_id` still wins.
+- **Messages listed in the start brief are not shown again.** In a crew session, the per-turn hook used to
+  surface a message the start brief had already listed. The brief now records the ids it actually printed as
+  shown for that session; ids it did not print still surface on the next prompt.
+- **Gemini CLI, Qwen Code and Cursor hooks use their own key.** Their Relay hooks read the `remembra` entry in
+  `~/.gemini/settings.json`, `~/.qwen/settings.json` and `~/.cursor/mcp.json` first, so a handoff or brief is
+  sent with that agent's key instead of falling through to Claude Code's. No other agent reads those files.
+- Tests: a reconcile test used a dict `vectors_config` that qdrant-client 1.20 rejects; two test files were
+  not formatted (CI lint).
+
 ## [0.17.1] - 2026-10-25
 
 **A message another agent sends during a session reaches it on its next prompt.** Before, the start brief listed
