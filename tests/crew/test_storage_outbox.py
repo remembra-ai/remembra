@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -69,6 +72,185 @@ async def reset_pending(store: CrewStore, outbox_id: str) -> None:
 # ---------------------------------------------------------------------------
 # worker mechanics
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("separate_connection", [False, True])
+async def test_separate_workers_do_not_apply_the_same_pending_effect(crew: CrewStore, separate_connection: bool) -> None:
+    """Per-worker asyncio locks must not let two API workers apply one effect."""
+    other_db = CrewDatabase(crew.db.db_path) if separate_connection else crew.db
+    if separate_connection:
+        await other_db.connect()
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    effects: list[str] = []
+
+    async def first_handler(item: OutboxItem) -> str:
+        effects.append(item.id)
+        entered.set()
+        await finish.wait()
+        return "first-effect"
+
+    async def second_handler(item: OutboxItem) -> str:
+        effects.append(item.id)
+        return "duplicate-effect"
+
+    outbox_id = await crew.enqueue_outbox(crew.crew_id, "k", {})
+    first = asyncio.create_task(CrewOutboxWorker(crew, {"k": first_handler}).run_once())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        second = await asyncio.wait_for(CrewOutboxWorker(CrewStore(other_db), {"k": second_handler}).run_once(), timeout=5)
+    finally:
+        finish.set()
+        await first
+        if separate_connection:
+            await other_db.close()
+    assert second == {"done": 0, "retry": 0, "failed": 0}
+    assert effects == [outbox_id]
+    assert (await crew.get_outbox(outbox_id))["result_id"] == "first-effect"
+
+
+async def test_other_process_is_excluded_and_a_killed_worker_does_not_strand_pending_work(
+    crew: CrewStore, tmp_path: Path
+) -> None:
+    outbox_id = await crew.enqueue_outbox(crew.crew_id, "k", {})
+    ready = tmp_path / "worker-entered"
+    child_code = """
+import asyncio, sys
+from pathlib import Path
+from remembra.crew.db import CrewDatabase
+from remembra.crew.store import CrewStore
+from remembra.crew.outbox import CrewOutboxWorker
+async def main():
+    db = CrewDatabase(sys.argv[1])
+    await db.connect()
+    async def blocked(item):
+        Path(sys.argv[2]).write_text(item.id)
+        await asyncio.Event().wait()
+    await CrewOutboxWorker(CrewStore(db), {"k": blocked}).run_once()
+asyncio.run(main())
+"""
+    effects: list[str] = []
+
+    async def handler(item: OutboxItem) -> str:
+        effects.append(item.id)
+        return "recovered"
+
+    child = subprocess.Popen([sys.executable, "-c", child_code, crew.db.db_path, str(ready)])
+    worker = CrewOutboxWorker(crew, {"k": handler})
+    try:
+        async with asyncio.timeout(10):
+            while not ready.exists():
+                assert child.poll() is None, "worker process exited before handling the item"
+                await asyncio.sleep(0.02)
+        excluded = await worker.run_once()
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+    assert excluded == {"done": 0, "retry": 0, "failed": 0}
+    assert effects == []
+    pending = await crew.get_outbox(outbox_id)
+    assert pending["state"] == "pending" and pending["attempts"] == 0
+    assert await worker.run_once() == {"done": 1, "retry": 0, "failed": 0}
+    assert effects == [outbox_id]
+
+
+async def test_cancelling_a_handler_releases_the_lock_for_another_connection(crew: CrewStore) -> None:
+    entered = asyncio.Event()
+
+    async def blocked(item: OutboxItem) -> None:
+        entered.set()
+        await asyncio.Event().wait()
+
+    outbox_id = await crew.enqueue_outbox(crew.crew_id, "k", {})
+    task = asyncio.create_task(CrewOutboxWorker(crew, {"k": blocked}).run_once())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    other_db = CrewDatabase(crew.db.db_path)
+    await other_db.connect()
+
+    async def recovered(item: OutboxItem) -> str:
+        return "recovered"
+
+    try:
+        assert await CrewOutboxWorker(CrewStore(other_db), {"k": recovered}).run_once() == {"done": 1, "retry": 0, "failed": 0}
+        assert (await crew.get_outbox(outbox_id))["result_id"] == "recovered"
+    finally:
+        await other_db.close()
+
+
+async def test_lock_failure_never_runs_a_handler_unlocked(crew: CrewStore, monkeypatch) -> None:
+    effects: list[str] = []
+
+    async def handler(item: OutboxItem) -> None:
+        effects.append(item.id)
+
+    def refused(*args, **kwargs):
+        raise PermissionError("lock file unavailable")
+
+    outbox_id = await crew.enqueue_outbox(crew.crew_id, "k", {})
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", refused)
+        with pytest.raises(PermissionError, match="lock file unavailable"):
+            await CrewOutboxWorker(crew, {"k": handler}).run_once()
+    assert effects == []
+    assert (await crew.get_outbox(outbox_id))["state"] == "pending"
+    assert await CrewOutboxWorker(crew, {"k": handler}).run_once() == {"done": 1, "retry": 0, "failed": 0}
+
+
+async def test_in_memory_database_serializes_worker_instances(tmp_path: Path) -> None:
+    db = CrewDatabase(":memory:")
+    await db.init_schema()
+    store = CrewStore(db)
+    row, _ = await store.ensure_crew("u1", "p")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    calls: list[str] = []
+
+    async def handler(item: OutboxItem) -> None:
+        calls.append(item.id)
+        entered.set()
+        await finish.wait()
+
+    item_id = await store.enqueue_outbox(row["id"], "k", {})
+    first = asyncio.create_task(CrewOutboxWorker(store, {"k": handler}).run_once())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert await CrewOutboxWorker(CrewStore(db), {"k": handler}).run_once() == {"done": 0, "retry": 0, "failed": 0}
+    finally:
+        finish.set()
+        await first
+        await db.close()
+    assert calls == [item_id]
+
+
+async def test_distinct_databases_process_independently(crew: CrewStore, tmp_path: Path) -> None:
+    other_db = CrewDatabase(str(tmp_path / "other-crew.db"))
+    await other_db.init_schema()
+    other_store = CrewStore(other_db)
+    row, _ = await other_store.ensure_crew("u2", "other-project")
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def blocked(item: OutboxItem) -> None:
+        entered.set()
+        await finish.wait()
+
+    async def immediate(item: OutboxItem) -> str:
+        return "other-effect"
+
+    await crew.enqueue_outbox(crew.crew_id, "k", {})
+    other_id = await other_store.enqueue_outbox(row["id"], "k", {})
+    first = asyncio.create_task(CrewOutboxWorker(crew, {"k": blocked}).run_once())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert await CrewOutboxWorker(other_store, {"k": immediate}).run_once() == {"done": 1, "retry": 0, "failed": 0}
+        assert (await other_store.get_outbox(other_id))["result_id"] == "other-effect"
+    finally:
+        finish.set()
+        await first
+        await other_db.close()
 
 
 async def test_worker_applies_retries_and_dead_letters(crew: CrewStore) -> None:
