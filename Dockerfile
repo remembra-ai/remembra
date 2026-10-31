@@ -4,7 +4,7 @@
 # =============================================================================
 # Stage 1: Build Dashboard
 # =============================================================================
-FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS dashboard-builder
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS dashboard-builder
 
 WORKDIR /app/dashboard
 
@@ -19,7 +19,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Python Dependencies
 # =============================================================================
-FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS python-builder
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS python-builder
 
 WORKDIR /app
 
@@ -51,7 +51,7 @@ RUN uv pip install --no-cache --no-deps .
 # =============================================================================
 # Stage 3: Production Image
 # =============================================================================
-FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS production
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS production
 
 LABEL org.opencontainers.image.title="Remembra"
 LABEL org.opencontainers.image.description="AI Memory Layer - Self-hosted"
