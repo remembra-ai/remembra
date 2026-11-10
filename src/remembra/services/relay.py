@@ -1402,7 +1402,7 @@ class RelayService:
             session = await core.find_session(crew_id, user_id, agent_id, client_session_id)
             if session is not None and session["state"] != "ended":
                 viewer = session["id"]
-        return await core.brief_data(crew_id, viewer_session_id=viewer)
+        return await core.brief_data(crew_id, viewer_session_id=viewer, reader_agent_id=agent_id)
 
 
 def _parse_iso(value: Any) -> datetime | None:

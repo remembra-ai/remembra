@@ -876,8 +876,9 @@ def test_a_path_baton_is_offered_with_a_working_adopt_line_and_adopted_by_path(l
     use(d)
     status = call("crew_status", project_id=project)
     assert "YOUR BATON (offered to you): path art/lls/cover.psd" in status, status
-    assert "To continue: remembra-crew adopt --path art/lls/cover.psd" in status, status
-    assert 'crew_claim(action="adopt", paths=["art/lls/cover.psd"])' in status, status
+    # F15: an MCP seat cannot run remembra-crew (the CLI finds only hook-joined sessions): its line is the tool call
+    assert '  To continue: crew_claim(action="adopt", paths=["art/lls/cover.psd"])' in status, status
+    assert "remembra-crew adopt" not in status, status
     # the directory it lies in names it too
     adopted = call("crew_claim", action="adopt", paths=["art/lls"])
     assert adopted.startswith("ADOPTED art/lls: you now hold"), adopted

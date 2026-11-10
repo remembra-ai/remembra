@@ -24,7 +24,7 @@ import functools
 import json
 import re
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -1668,7 +1668,74 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
 MAX_CREW_BLOCK_CHARS = 1500  # brief 4,500 + crew block 1,500 = MAX_BRIEF_CHARS (D24)
 MAX_BRIEF_WITH_CREW_CHARS = MAX_BRIEF_CHARS - MAX_CREW_BLOCK_CHARS - 1
 CREW_DATA_ITEM_CLIP = 140
+# The crew block's last line is a statement about the READER. The server writes the block and often cannot
+# tell who reads it, so the line is chosen from what is known (:func:`crew_footer_for`), and a client that
+# knows more about the reading session (the relay CLI, the MCP server) replaces it.
 CREW_FOOTER = "Crew mode is automatic: claims, checkpoints and reports happen by hook."
+_CREW_MANUAL = (
+    'nothing is claimed for you automatically. Claim before editing (crew_claim or crew_task action="start"); '
+    "call crew_checkpoint after commits and test runs."
+)
+# A session joined through the MCP crew tools (crew_status ends with the same line).
+CREW_FOOTER_MCP = "You are an MCP session (advisory): " + _CREW_MANUAL
+# Crew hooks are installed on this machine, and they did not join the reading session.
+CREW_FOOTER_UNJOINED = (
+    "Crew hooks did not join this session (they join one that starts inside a crew-enabled git checkout): " + _CREW_MANUAL
+)
+# The reader is not known: say when the automatic part holds and what to do when it does not.
+CREW_FOOTER_UNKNOWN = (
+    "Claims, checkpoints and reports happen by hook only in a session the crew hooks joined (crew_status says "
+    'which kind yours is). In any other session, claim before editing (crew_claim or crew_task action="start") '
+    "and call crew_checkpoint after commits and test runs."
+)
+_CREW_NO_HOOK_HEAD = "No crew-hook session "
+_CREW_NO_HOOK_TAIL = "is live in this crew: " + _CREW_MANUAL
+_READER_KINDS = ("hook", "mcp", "cli")
+
+
+def crew_footer_no_hook(agent: str | None) -> str:
+    """The crew block's last line when no hook-joined session of the asking agent is live in the crew."""
+    name = _SAFE_ID_RE.sub("_", agent)[:64] if isinstance(agent, str) and agent else ""
+    return _CREW_NO_HOOK_HEAD + (f"of {name} " if name else "") + _CREW_NO_HOOK_TAIL
+
+
+def is_crew_footer(line: str) -> bool:
+    """Whether ``line`` is one of the crew block's reader lines (so a client can replace it with what it knows)."""
+    if line in (CREW_FOOTER, CREW_FOOTER_MCP, CREW_FOOTER_UNJOINED, CREW_FOOTER_UNKNOWN):
+        return True
+    return line.startswith(_CREW_NO_HOOK_HEAD) and line.endswith(_CREW_NO_HOOK_TAIL)
+
+
+def crew_reader_kind(crew: Mapping[str, Any], reader: str | None = None) -> str | None:
+    """How the reading session joined the crew: ``hook``, ``mcp``, ``cli``, or None when that is not known.
+
+    ``reader`` is the caller's own knowledge (crew_status knows its seat); otherwise the server's
+    ``crew["viewer"]``, present only when the request named a live session of this crew.
+    """
+    if reader in _READER_KINDS:
+        return reader
+    viewer = crew.get("viewer")
+    kind = viewer.get("client_kind") if isinstance(viewer, Mapping) else None
+    return kind if kind in _READER_KINDS else None
+
+
+def crew_footer_for(crew: Mapping[str, Any], reader: str | None = None) -> str:
+    """The crew block's last line for this reader.
+
+    "Crew mode is automatic" is said only to a session the crew hooks joined (whatever its enforcement:
+    a hook-joined Codex is advisory and its hooks still claim and checkpoint for it). An MCP session gets
+    the advisory line. Without a known reader, "no hook session of <agent> is live here" is said only when
+    the server counted none (``hook_live`` is exactly 0); in every other case the neutral line.
+    """
+    kind = crew_reader_kind(crew, reader)
+    if kind == "hook":
+        return CREW_FOOTER
+    if kind == "mcp":
+        return CREW_FOOTER_MCP
+    hook_live = crew.get("hook_live")
+    if kind is None and crew.get("viewer") is None and type(hook_live) is int and hook_live == 0:
+        return crew_footer_no_hook(crew.get("reader_agent"))
+    return CREW_FOOTER_UNKNOWN
 
 
 def crew_footer_off(agent: str) -> str:
@@ -1771,8 +1838,13 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
-def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[list[str], list[str]]:
-    """Template lines (ids only) and data items for one baton offered to the reader (D33: only then the adopt line)."""
+def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = (), reader: str | None = None) -> tuple[list[str], list[str]]:
+    """Template lines (ids only) and data items for one baton offered to the reader (D33: only then the adopt line).
+
+    ``reader`` is the reading session's kind. A session the crew hooks did not join (``mcp``, ``cli``) cannot
+    run ``remembra-crew adopt`` (the CLI finds only hook-joined sessions), so its line leads with the
+    ``crew_claim`` form and names the CLI only as where the saved work is restored.
+    """
     task = _only(baton.get("task"), _TASK_REF_RE)
     zones = [z for z in (baton.get("zones") or []) if _only(z, _SLUG_RE)]
     paths = [p for p in (baton.get("paths") or []) if _only(p, SAFE_CLAIM_PATH_RE) and ".." not in p.split("/")]
@@ -1799,7 +1871,21 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[
     if failing:
         parts.append(f"{_plural(len(failing), 'failing test')}")
     lines = [" · ".join(parts)]
-    if task:
+    if reader in ("mcp", "cli"):
+        cli = ""
+        if task:
+            call, cli = f'To continue {task}: crew_claim(action="adopt", task="{task}")', f"remembra-crew adopt {task}"
+        elif zones:
+            call, cli = f'To continue: crew_claim(action="adopt", zone="{zones[0]}")', f"remembra-crew adopt --zone {zones[0]}"
+        elif paths:
+            call = f'To continue: crew_claim(action="adopt", paths={json.dumps(paths[:5])})'
+            cli = f"remembra-crew adopt --path {shlex.quote(paths[0])}"
+        else:
+            call = ""
+        if call:
+            saved = f"   (the saved work is restored only from a session the crew hooks joined: {cli})" if ref else ""
+            lines.append(f"  {call}{saved}")
+    elif task:
         lines.append(
             f"  To continue {task}: remembra-crew adopt {task}"
             + ("   (restores the saved work into this checkout)" if ref else "")
@@ -1858,7 +1944,13 @@ def _dnt_entry(item: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[str
     return text, data
 
 
-def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHARS, *, allowed_urls: tuple[str, ...] = ()) -> str:
+def render_crew_block(
+    crew: dict[str, Any],
+    max_chars: int = MAX_CREW_BLOCK_CHARS,
+    *,
+    allowed_urls: tuple[str, ...] = (),
+    reader: str | None = None,
+) -> str:
     """The crew block of the brief (≤1,500 chars, most important first).
 
     Server-template lines carry facts only: ids, slugs, callsigns, counts and
@@ -1870,7 +1962,13 @@ def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHAR
     outside ``allowed_urls`` flagged). The adopt command appears only
     for batons recorded as offered to the reader (D33). When the text is too
     long, data items go first, then DO NOT TOUCH entries beyond the first.
+
+    The last line says how crew mode works for the READER (:func:`crew_footer_for`):
+    ``reader`` is the caller's knowledge of the reading session's kind, else
+    ``crew["viewer"]`` decides, else nothing is claimed about the reader.
     """
+    kind = crew_reader_kind(crew, reader)
+    footer = crew_footer_for(crew, reader)
     project = _SAFE_ID_RE.sub("_", str(crew.get("project_id") or "project"))[:64]
     mode = "multi" if crew.get("mode") == "multi" else "solo"
     live = int(crew.get("live") or 0)
@@ -1880,7 +1978,7 @@ def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHAR
     baton_lines: list[str] = []
     data: list[str] = []
     for baton in (crew.get("batons") or [])[:2]:
-        lines, items = _baton_lines(baton, allowed_urls)
+        lines, items = _baton_lines(baton, allowed_urls, kind)
         baton_lines.extend(lines)
         data.extend(items)
 
@@ -1923,7 +2021,7 @@ def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHAR
             lines.append("TEMPORARY ZONES: auto-derived from folders (a human can edit them)")
         if data_items:
             lines.extend([DATA_OPEN, DATA_PREAMBLE, *data_items, DATA_CLOSE])
-        lines.append(CREW_FOOTER)
+        lines.append(footer)
         return "\n".join(lines)
 
     dnt_items = list(dnt)
@@ -1936,7 +2034,13 @@ def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHAR
         dnt_items.pop()
         text = assemble(dnt_items, data_items)
     if len(text) > max_chars:  # pathological: keep the header and the safety lines, drop the rest
-        text = "\n".join([header, *baton_lines[:2], CREW_FOOTER])[:max_chars]
+        keep = baton_lines[:2]
+        text = "\n".join([header, *keep, footer])
+        while len(text) > max_chars and keep:  # the reader line is never the part that is cut
+            keep.pop()
+            text = "\n".join([header, *keep, footer])
+        if len(text) > max_chars:
+            text = (header[: max(0, max_chars - len(footer) - 1)] + "\n" + footer)[:max_chars]
     return text
 
 

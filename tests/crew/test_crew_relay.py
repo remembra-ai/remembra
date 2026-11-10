@@ -177,6 +177,9 @@ BLOCK_INPUT: dict[str, Any] = {
     "mode": "multi",
     "live": 2,
     "as_of": "2026-09-25T18:09:00.000Z",
+    # the reader is a session the crew hooks joined (a baton is offered only to a resolved viewer; F15: the
+    # block's last line and a baton's "To continue" form depend on how the reader joined)
+    "viewer": {"client_kind": "hook", "enforcement": "enforced"},
     "batons": [
         {
             "task": "T-12",

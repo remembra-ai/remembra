@@ -70,6 +70,7 @@ from remembra.mcp.crew import (
     CrewHttp,
     CrewUsageError,
     FailureText,
+    brief_for_reader,
     clean_client_session_id,
     hook_adapter_of,
     local_crew,
@@ -954,6 +955,8 @@ def session_brief(
             )
         if still_queued:
             brief["warnings"] = [*(brief.get("warnings") or []), _queued_closes_warning(still_queued)]
+        # The crew block's last line is about the reader, whom the server cannot see on this call.
+        brief["rendered"] = brief_for_reader(brief.get("rendered"), brief.get("project_id"), local=_LOCAL_CREW)
         handoff = brief.get("handoff") or {}
         inbox = brief.get("inbox") or {}
         summary = {

@@ -708,19 +708,34 @@ def _task_by_ref(layout: Layout, crew_id: str, ref: str) -> dict[str, Any] | Non
     return None
 
 
-def _need_session(layout: Layout) -> dict[str, Any]:
-    who = _whoami(layout)
-    if who is None:
-        raise SystemExit(
-            _fail(
-                {
-                    "message": "no crew session found for this command: it must run inside an agent session that crew "
-                    "hooks joined, and an agent's sandbox can hide that session. From an agent, use the crew_claim "
-                    "tool instead (it reaches the same session, and its adopt restores the saved work)."
-                }
-            )
+def _no_session_message(res: Mapping[str, Any], cwd: str) -> str:
+    """Why this command has no crew session, said as the case it is (each fits the refusal's 300 characters).
+
+    crewd knows only sessions that crew hooks joined, and finds the caller's by its process ancestry. The
+    crew tools of an MCP session (crew_status, crew_claim) hold a separate seat and need no hook session.
+    """
+    head = "no crew session found for this command: "
+    tools = "From an agent, use the crew tools instead (crew_status, crew_claim)"
+    if res.get("error") == "no_session":
+        where = "inside a git checkout" if _toplevel(cwd) else "outside any git checkout"
+        return (
+            f"{head}crewd is running, but no crew hook joined this agent session (hooks join one that "
+            f"starts inside a crew-enabled git checkout; this command ran {where}). {tools}."
         )
-    return who
+    if res.get("error") == "crewd_unreachable":
+        return (
+            f"{head}crewd cannot be reached from this shell (it is not running, or an agent's sandbox blocks "
+            f"its socket; remembra-crew doctor says which). {tools}."
+        )
+    why = S.clip_item(str(res.get("message") or res.get("error") or "no answer from crewd"), 120)
+    return f"{head}{why}. {tools}."
+
+
+def _need_session(layout: Layout) -> dict[str, Any]:
+    res = _call(layout, "whoami", timeout=3.0)
+    if not res.get("ok"):
+        raise SystemExit(_fail({"message": _no_session_message(res, os.getcwd())}))
+    return res
 
 
 # ===========================================================================

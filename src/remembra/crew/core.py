@@ -561,7 +561,12 @@ class CrewCore:
         )
 
     async def brief_data(
-        self, crew_id: str, *, viewer_session_id: str | None = None, now: datetime | None = None
+        self,
+        crew_id: str,
+        *,
+        viewer_session_id: str | None = None,
+        now: datetime | None = None,
+        reader_agent_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Structured input for :func:`remembra.relay.handoff.render_crew_block` (read-only).
 
@@ -569,12 +574,40 @@ class CrewCore:
         recorded for it are shown as ``YOUR BATON`` with the adopt command (D33);
         other sessions only see that the zone is reserved. Its own claims are
         not listed under DO NOT TOUCH.
+
+        The block's last line is about the reader, so the result says what is
+        known of it: ``viewer`` (how the reading session joined: its
+        ``client_kind`` and ``enforcement``) when ``viewer_session_id`` is a
+        session of this crew, else None; and, for a reader that is not known,
+        ``hook_live``: how many hook-joined sessions that have not ended the crew
+        has for ``reader_agent_id`` (for any agent when it is not given).
         """
         now = now or datetime.now(UTC)
         crew = await self.crew_row(crew_id)
         if crew is None:
             return None
         live = await self.live_count(crew_id)
+        viewer: dict[str, Any] | None = None
+        if viewer_session_id:
+            row = await self.db.fetchone(
+                "SELECT client_kind, adapter_enforcement FROM crew_sessions WHERE crew_id = ? AND id = ?",
+                (crew_id, viewer_session_id),
+            )
+            if row is not None:
+                kind = row.get("client_kind")
+                viewer = {
+                    "client_kind": kind if kind in schemas.CLIENT_KINDS else None,
+                    "enforcement": row.get("adapter_enforcement"),
+                }
+        hook_live: int | None = None
+        if viewer is None:
+            sql = "SELECT COUNT(*) AS n FROM crew_sessions WHERE crew_id = ? AND client_kind = 'hook' AND state != 'ended'"
+            args: tuple[Any, ...] = (crew_id,)
+            if reader_agent_id:
+                sql += " AND agent_id = ?"
+                args = (crew_id, reader_agent_id)
+            counted = await self.db.fetchone(sql, args)
+            hook_live = int(counted["n"]) if counted else 0
         zones = {
             z["id"]: z
             for z in await self.db.fetchall("SELECT * FROM crew_zones WHERE crew_id = ? AND archived_at IS NULL", (crew_id,))
@@ -669,6 +702,9 @@ class CrewCore:
             "live": live,
             "as_of": now_iso(now),
             "viewer_session_id": viewer_session_id,
+            "viewer": viewer,
+            "hook_live": hook_live,
+            "reader_agent": reader_agent_id if viewer is None else None,
             "batons": list(batons.values()),
             "do_not_touch": do_not_touch,
             "frozen": frozen,

@@ -57,7 +57,8 @@ def test_unknown_agent_is_undecided(tmp_path: Path) -> None:
 
 
 def test_brief_footer_rewritten_where_hooks_are_missing(tmp_path: Path) -> None:
-    rendered = "Last session: x\n" + render_crew_block({"project_id": "p", "live": 0})
+    # F15: the server says "automatic" only to a hook-joined reader (a 0.17.5 server said it to everyone)
+    rendered = "Last session: x\n" + render_crew_block({"project_id": "p", "live": 0, "viewer": {"client_kind": "hook"}})
     assert rendered.endswith(CREW_FOOTER)
     out = crew_footer_here(_ctx(tmp_path, tmp_path), rendered)
     assert CREW_FOOTER not in out

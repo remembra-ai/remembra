@@ -99,7 +99,15 @@ from remembra.relay.adapters import (
 )
 from remembra.relay.adapters.base import OUTPUT_MODES, AdapterSpec, RefusedEdit
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
-from remembra.relay.handoff import CREW_FOOTER, build_sections, crew_footer_off, sections_have_substance
+from remembra.relay.handoff import (
+    CREW_FOOTER,
+    CREW_FOOTER_UNJOINED,
+    CREW_FOOTER_UNKNOWN,
+    build_sections,
+    crew_footer_off,
+    is_crew_footer,
+    sections_have_substance,
+)
 from remembra.relay.identity import HINT_SCOPE_ALL
 from remembra.security.untrusted import neutralize_encoded, strip_controls
 
@@ -746,18 +754,56 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
 # ---------------------------------------------------------------------------
 
 
-def crew_footer_here(ctx: Context, rendered: str) -> str:
-    """The server writes the crew block's "Crew mode is automatic" line without knowing this
-    machine; where the reading agent's crew hooks are not installed, it says so instead."""
-    if CREW_FOOTER not in rendered or not ctx.agent:
+def _crew_hooks_joined(ctx: Context, hook_session: str | None) -> bool | None:
+    """Whether crew hooks joined the agent session this brief is for: its crew session file exists
+    (crewd writes one per joined session and nothing else does). None without a hook session id."""
+    adapter = getattr(ctx, "adapter", None)
+    if adapter is None or not hook_session:
+        return None
+    try:
+        from remembra.relay.crew.gate import Layout, session_key
+
+        layout = Layout(Path(ctx.home))
+        # crewd keys the file by the payload's own session_id; the adapter's mapped id is tried as well
+        ids = {str(hook_session), str((getattr(ctx, "payload", None) or {}).get("session_id") or hook_session)}
+        return any(layout.session_file(session_key(adapter.spec.name, sid)).exists() for sid in ids)
+    except Exception:
+        return None
+
+
+def crew_footer_here(ctx: Context, rendered: str, hook_session: str | None = None) -> str:
+    """The crew block's last line, made true for the session that reads this brief.
+
+    The server writes it without knowing this machine (a 0.17.5 server always writes "Crew mode is
+    automatic"; a later one says what it knows of the reader). Here more is known: where the agent's crew
+    hooks are not installed, the line says so; where this hook session has a crew session file, hooks
+    joined it and the automatic line is true; where it has none (it started outside a crew-enabled git
+    checkout), the line says nothing is claimed for it. Without a hook session id nothing is known of the
+    reader: the old server's unconditional line becomes the neutral one, any other line stays.
+    """
+    lines = rendered.split("\n")
+    at = [i for i, line in enumerate(lines) if is_crew_footer(line)]
+    if not at or not ctx.agent:
         return rendered
     try:
         installed = crew_hooks_installed(ctx.home, ctx.agent, ctx.repo.toplevel or str(ctx.cwd))
     except Exception:
         installed = None
-    if installed is not False:
+    line: str | None = None
+    if installed is False:
+        line = crew_footer_off(ctx.agent)
+    else:
+        joined = _crew_hooks_joined(ctx, hook_session)
+        if joined is True:
+            line = CREW_FOOTER
+        elif joined is False:
+            line = CREW_FOOTER_UNJOINED
+        elif lines[at[-1]] == CREW_FOOTER:
+            line = CREW_FOOTER_UNKNOWN
+    if line is None or lines[at[-1]] == line:
         return rendered
-    return "\n".join(crew_footer_off(ctx.agent) if line == CREW_FOOTER else line for line in rendered.split("\n"))
+    lines[at[-1]] = line
+    return "\n".join(lines)
 
 
 def _brief_messages_shown(ctx: Context, hook_session: str | None, rendered: str) -> None:
@@ -994,7 +1040,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
         outbox.record(ctx.home, agent_id=ctx.agent, command="brief", ok=True, config_source=ctx.config.source)
         brief = response.json()
         if isinstance(brief.get("rendered"), str):
-            brief["rendered"] = crew_footer_here(ctx, brief["rendered"])
+            brief["rendered"] = crew_footer_here(ctx, brief["rendered"], hook_session)
         if _claim_print(home, once_key, hook_session, event, exclusive):
             _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay), event=event)
             _brief_messages_shown(ctx, hook_session, str(brief.get("rendered") or ""))

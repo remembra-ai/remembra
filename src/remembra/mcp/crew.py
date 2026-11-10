@@ -52,7 +52,15 @@ from remembra.client.memory import Memory, _header_agent_id
 from remembra.crew import gatecore as G
 from remembra.crew import schemas as S
 from remembra.mcp.seats import SeatRecord, SeatStore, pool_key
-from remembra.relay.handoff import CREW_FOOTER, data_line, police_item, render_crew_block
+from remembra.relay.handoff import (
+    CREW_FOOTER,
+    CREW_FOOTER_MCP,
+    CREW_FOOTER_UNKNOWN,
+    data_line,
+    is_crew_footer,
+    police_item,
+    render_crew_block,
+)
 from remembra.security.error_sanitizer import sanitize_error_message
 from remembra.security.untrusted import DATA_PREAMBLE
 
@@ -85,10 +93,7 @@ MAX_SCOPES: Final = 1000
 # Session-queue kinds delivered immediately (server-generated collisions, human overrides and pause, §7).
 URGENT_KINDS: Final = frozenset({"collision_notice", "override_notice"})
 NOTICE_CAP: Final = S.TEXT_CAPS["piggyback"]
-MCP_FOOTER: Final = (
-    "You are an MCP session (advisory): nothing is claimed for you automatically. Claim before editing "
-    '(crew_claim or crew_task action="start"); call crew_checkpoint after commits and test runs.'
-)
+MCP_FOOTER: Final = CREW_FOOTER_MCP  # the same line the server's brief ends with for an MCP session
 CORRECTIVE: Final = "Do not modify these files further. Tell @{who} or @mani with crew_say."
 # Message bodies as an agent reads them (inside the data block, under the trust policy): a listed
 # message or a mention's message up to MESSAGE_CLIP, the one asked for by id up to the largest body
@@ -447,6 +452,36 @@ def _request_mark(
         jsonlib.dumps(content, sort_keys=True, default=str),
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
+def brief_for_reader(rendered: Any, project_id: Any, *, local: bool) -> Any:
+    """The session brief's text with its crew block's last line made true for THIS reader.
+
+    ``session_brief`` names no crew session, so the server cannot tell who reads: a 0.17.5 server ends
+    every crew block with "Crew mode is automatic", a later one with a line that claims nothing about the
+    reader. On the agent's machine (``local``: a stdio server) crewd knows whether crew hooks joined this
+    agent session in the brief's project: then the automatic line is true and is the one shown. Otherwise
+    the old server's unconditional line becomes the neutral one, and any other line is the server's own
+    verdict and stays. Not finding a hook session is never reported as "not joined": the MCP server may run
+    outside the agent's process tree.
+    """
+    if not isinstance(rendered, str) or not rendered:
+        return rendered
+    lines = rendered.split("\n")
+    at = [i for i, line in enumerate(lines) if is_crew_footer(line)]
+    if not at:
+        return rendered
+    line: str | None = None
+    if local and project_id:
+        hook = local_crew()
+        if hook is not None and str(hook.who.get("project_id") or "") == str(project_id):
+            line = CREW_FOOTER
+    if line is None and lines[at[-1]] == CREW_FOOTER:
+        line = CREW_FOOTER_UNKNOWN
+    if line is None:
+        return rendered
+    lines[at[-1]] = line
+    return "\n".join(lines)
 
 
 class CrewHttp:
@@ -1690,7 +1725,12 @@ class CrewBridge:
             v_lines, v_data = self._verbose(http, seat)
             lines.extend(v_lines)
             data.extend(v_data)
-        lines.append(shadow.footer if shadow is not None and shadow.here else MCP_FOOTER)
+        # the seat is the agent's crew-hook session (reached through crewd) or this MCP session's own advisory
+        # seat; a seat shadowed by a hook session of the same program is told not to claim through it
+        if shadow is not None and shadow.here:
+            lines.append(shadow.footer)
+        else:
+            lines.append(CREW_FOOTER if seat.local is not None else MCP_FOOTER)
         self._resolve_items(http, seat, shown)
         with seat.lock:
             seat.pending.clear()
@@ -1717,7 +1757,7 @@ class CrewBridge:
         if caller.agent_id:
             params["agent_id"] = caller.agent_id
         http = self._http(caller, held) if held is not None else CrewHttp(caller.client)
-        block = self._crew_block_of(http, project, params)
+        block = self._crew_block_of(http, project, params, held)
         lines = [block or f"CREW {_safe(project) or 'this project'}: no crew yet (nobody has joined it)."]
         if held is not None:
             lines.append(self._you_line(http, held, {}))
@@ -1814,9 +1854,9 @@ class CrewBridge:
             "recent_n": 0,
             "inbox_limit": 0,
         }
-        return self._crew_block_of(http, seat.project_id, params)
+        return self._crew_block_of(http, seat.project_id, params, seat)
 
-    def _crew_block_of(self, http: CrewHttp, project_id: str, params: Mapping[str, Any]) -> str:
+    def _crew_block_of(self, http: CrewHttp, project_id: str, params: Mapping[str, Any], seat: Seat | None = None) -> str:
         try:
             _, brief, _ = http.call("GET", "/session/brief", params=params)
         except CrewApiError as e:
@@ -1824,15 +1864,19 @@ class CrewBridge:
         crew = brief.get("crew") if isinstance(brief, dict) else None
         if not isinstance(crew, dict):
             return ""
-        text = render_crew_block(crew, allowed_urls=tuple(brief.get("repo_url_prefixes") or ()))
+        # This seat's kind is known here whatever the server sent (0.17.5 sends no "viewer"): a baton's
+        # "To continue" line leads with the form this session can run. A look without a seat knows no kind.
+        reader = None if seat is None else "hook" if seat.local is not None else "mcp"
+        text = render_crew_block(crew, allowed_urls=tuple(brief.get("repo_url_prefixes") or ()), reader=reader)
         lines = text.split("\n")
-        return "\n".join(ln for ln in lines if ln != CREW_FOOTER)
+        return "\n".join(ln for ln in lines if not is_crew_footer(ln))  # crew_status ends with its own reader line
 
     def _you_line(self, http: CrewHttp, seat: Seat, rejoin: Mapping[str, Any], data: list[str] | None = None) -> str:
         session = rejoin.get("session") or {}
         state = _safe(session.get("state")) or "active"
         verified = "key-verified" if seat.verified else "self-declared"
-        parts = [f"YOU: {seat.callsign} ({seat.session_id}) · mcp, advisory · {verified} · {state}"]
+        kind = "hook session" if seat.local is not None else "mcp, advisory"
+        parts = [f"YOU: {seat.callsign} ({seat.session_id}) · {kind} · {verified} · {state}"]
         if rejoin.get("resumed_seat"):
             parts.append(resumed_text(str(rejoin["resumed_seat"])))
         if seat.observe_only:
@@ -2785,7 +2829,10 @@ class CrewBridge:
             ref = baton.get("baton_ref")
         ref = ref or next((c.get("baton_ref") for c in claims if c.get("baton_ref")), None)
         if isinstance(ref, str) and re.fullmatch(r"refs/remembra/baton/[A-Za-z0-9_/-]{1,120}", ref):
-            lines.append(f"The previous session's uncommitted work is saved as {ref} (the remembra-crew CLI restores it).")
+            lines.append(
+                f"The previous session's uncommitted work is saved as {ref}. It is NOT restored into your checkout: "
+                "an MCP session cannot restore it (remembra-crew adopt does, only from a session the crew hooks joined)."
+            )
         return "\n".join(lines)
 
     def _handover(
