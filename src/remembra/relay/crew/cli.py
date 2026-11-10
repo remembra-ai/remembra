@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -56,6 +57,7 @@ from remembra.relay.crew.gate import (
     rpc_ex,
     rpc_send,
     session_key,
+    socket_dir_trusted,
 )
 from remembra.relay.hints import RELAY_PROJECT_ENV
 
@@ -68,6 +70,20 @@ START_DEADLINE_S: Final = 8.0
 # close has its own ~10 s budget), detached by the relay itself for agents that do not wait. Kept under the
 # crew SessionEnd hook's 20 s timeout.
 END_PASSTHROUGH_S: Final = 17.0
+# A join that crewd took but did not answer inside START_DEADLINE_S may still have landed (crewd writes the
+# session file before its last server round trips). The hook looks for it until this long after its start
+# (§10.4: 10 s hard), so it can report the truth and recover the callsign, the exports and the brief.
+START_HARD_S: Final = 9.5
+LATE_JOIN_POLL_S: Final = 0.1
+LATE_JOIN_FIELDS: Final = (
+    "crew_id",
+    "session_id",
+    "callsign",
+    "member_key",
+    "project_id",
+    "observe_only",
+    "githook_state",
+)
 CREW_EXISTS_TIMEOUT_S: Final = 5.0
 MIN_STEP_S: Final = 0.3
 HOOK_OUTPUT: Final[Mapping[str, str]] = {
@@ -105,30 +121,108 @@ def data_block(items: Sequence[str]) -> str:
     return S.DATA_OPEN + "\n" + "\n".join(clean) + "\n" + S.DATA_CLOSE
 
 
-def ensure_crewd(layout: Layout, *, wait: float = CREWD_START_WAIT_S) -> bool:
-    """crewd answers ping, or is started (supervisor's argv from ``bin/crewd.json``, else this Python)."""
-    if rpc(layout, "ping", timeout=0.5):
+def crewd_listening(layout: Layout) -> bool:
+    """crewd holds its socket open: it is running, even when it is too busy to answer in time.
+
+    A bare connect (nothing is sent, so crewd does no work for it). A socket file left behind by a killed
+    crewd refuses the connection.
+    """
+    path = layout.socket
+    if path.parent != layout.run and not socket_dir_trusted(path.parent):
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(0.3)
+    try:
+        sock.connect(str(path))
         return True
-    if not respawn_crewd(layout, force=True):
-        layout.run.mkdir(parents=True, exist_ok=True)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("REMEMBRA_CREW")}
-        try:
-            subprocess.Popen(  # noqa: S603
-                [sys.executable, "-m", "remembra.relay.crew.crewd"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                env=env,
-            )
-        except OSError:
-            return False
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _spawn_crewd(layout: Layout) -> bool:
+    """Start crewd detached: the supervisor's argv from ``bin/crewd.json``, else this Python."""
+    if respawn_crewd(layout, force=True):
+        return True
+    layout.run.mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("REMEMBRA_CREW")}
+    try:
+        subprocess.Popen(  # noqa: S603
+            [sys.executable, "-m", "remembra.relay.crew.crewd"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+        )
+    except OSError:
+        return False
+    return True
+
+
+def ensure_crewd(layout: Layout, *, wait: float = CREWD_START_WAIT_S) -> bool:
+    """crewd answers ping, or is started (supervisor's argv from ``bin/crewd.json``, else this Python).
+
+    A crewd that took the ping but has not answered yet is running and busy: it is never started a second
+    time, and it gets one patient ping for the rest of ``wait`` rather than a burst of short ones (crewd
+    reads the process table for every new caller, so each abandoned ping adds to the stall). ``False`` then
+    means "no answer in time"; :func:`crewd_listening` tells a busy crewd from one that is not running.
+    """
+    res, listening = rpc_ex(layout, "ping", timeout=0.5)
+    if res:
+        return True
     end = time.monotonic() + wait
-    while time.monotonic() < end:
-        if rpc(layout, "ping", timeout=0.3):
+    spawned = False
+    while True:
+        if not listening and not spawned:
+            spawned = True
+            if not _spawn_crewd(layout):
+                return False
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return False
+        res, listening = rpc_ex(layout, "ping", timeout=remaining if listening else min(0.3, remaining))
+        if res:
             return True
-        time.sleep(0.1)
-    return False
+        if not listening:
+            time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+
+
+def _joined_session(layout: Layout, adapter: str, sid: str) -> dict[str, Any] | None:
+    """This session's live crew session file as a join reply, or ``None``.
+
+    The same test the gate applies before it enforces crew rules for a session (crew and session ids, not
+    ended), so a hit means the rules are in force whatever happened to crewd's reply.
+    """
+    key = session_key(adapter, sid)
+    data = read_json(layout.session_file(key))
+    if not isinstance(data, dict) or data.get("ended") or not data.get("crew_id") or not data.get("session_id"):
+        return None
+    if str(data.get("client_session_id") or sid) != sid or str(data.get("adapter") or adapter) != adapter:
+        return None
+    join: dict[str, Any] = {"ok": True, "key": key}
+    join.update({name: data.get(name) for name in LATE_JOIN_FIELDS})
+    return join
+
+
+def _late_join(layout: Layout, adapter: str, sid: str, *, until: float) -> tuple[dict[str, Any] | None, bool]:
+    """After a join got no reply: ``(join, busy)``.
+
+    ``join`` is the session crewd persisted (found now, or appearing before ``until``, a ``time.monotonic``
+    value). Without one, ``busy`` says whether crewd is still running, so the join may yet land.
+    """
+    found = _joined_session(layout, adapter, sid)
+    if found is not None:
+        return found, True
+    if not crewd_listening(layout):
+        return None, False
+    while time.monotonic() < until:
+        time.sleep(min(LATE_JOIN_POLL_S, max(0.0, until - time.monotonic())))
+        found = _joined_session(layout, adapter, sid)
+        if found is not None:
+            return found, True
+    return None, True
 
 
 # Ops that are safe to send twice. Anything else (adopt, claim, release, stall, end, report, bypass…)
@@ -398,7 +492,9 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
         if not enabled:
             relay_brief_passthrough(adapter, args.agent or adapter, plain, timeout=left())
             return 0
-        if not ensure_crewd(layout, wait=min(CREWD_START_WAIT_S, left())):
+        # a crewd that is running but slow to answer a ping still gets the join: only one that is not
+        # running at all leaves this session without crew rules
+        if not ensure_crewd(layout, wait=min(CREWD_START_WAIT_S, left())) and not crewd_listening(layout):
             _emit_start(
                 adapter, "Remembra crew unavailable: crewd did not start (run remembra-crew doctor). Crew rules are not active."
             )
@@ -420,6 +516,20 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             },
             timeout=max(MIN_STEP_S, left(reserve=0.5)),
         )
+        late = False
+        if join is None:
+            # No reply is not a refusal: crewd may have joined this session already (it finishes a join whatever
+            # the client does), or still be on it. The join is never sent twice.
+            hard = started + START_HARD_S
+            join, busy = _late_join(layout, adapter, str(sid), until=hard - MIN_STEP_S)
+            late = join is not None
+            if join is None and busy:
+                _emit_start(
+                    adapter,
+                    "Remembra crew: crewd is busy and has not confirmed this session yet. Crew rules apply "
+                    "from the moment it joins; check with: remembra-crew status.",
+                )
+                return 0
         if not join or not join.get("ok"):
             reason = (join or {}).get("message") or (join or {}).get("error") or "no answer from crewd"
             _emit_start(
@@ -428,10 +538,16 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             )
             return 0
         _env_file(join)
-        brief = rpc(layout, "brief", {"key": join["key"]}, timeout=left()) if left() >= MIN_STEP_S else None
+        # a late join has used up the deadline: its brief gets what is left of the hard limit instead
+        brief_s = max(left(), started + START_HARD_S - time.monotonic()) if late else left()
+        brief = rpc(layout, "brief", {"key": join["key"]}, timeout=brief_s) if brief_s >= MIN_STEP_S else None
         brief = brief or {}
         text = str(brief.get("rendered") or "").strip()
         extra: list[str] = []
+        if late:
+            extra.append("Crew: crewd answered late, but this session is joined: crew rules are active.")
+            if not text:
+                extra.append("Crew: the brief did not arrive in time; run remembra-crew status to see the crew.")
         if not text:
             extra.append(
                 f"Crew: you are {join.get('callsign')} in crew {join.get('crew_id')}. "
@@ -1317,4 +1433,4 @@ if __name__ == "__main__":
     entrypoint()
 
 
-__all__ = ["main", "entrypoint", "ensure_crewd", "data_block", "Path"]
+__all__ = ["main", "entrypoint", "ensure_crewd", "crewd_listening", "data_block", "Path"]

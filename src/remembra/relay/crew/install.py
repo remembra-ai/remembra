@@ -183,7 +183,9 @@ def render_launchd_plist(home: Path, program: Sequence[str], python: str) -> str
         "ProgramArguments": list(program),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "ProcessType": "Background",
+        # crewd is on the latency path of every hook: in the Background band it and its ps/git children run at
+        # the lowest priority and miss the hooks' deadlines whenever the machine is busy
+        "ProcessType": "Interactive",
         "ThrottleInterval": 10,
         "StandardOutPath": str(log),
         "StandardErrorPath": str(log),
