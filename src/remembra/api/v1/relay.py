@@ -320,6 +320,7 @@ _LIST_CAPS = {
     "tests": 100,
     "errors": 50,
     "todos_open": 100,
+    "done": 50,
     "incomplete": 10,
 }
 _STR_CAPS = {
@@ -347,6 +348,7 @@ class FactsIn(BaseModel):
     tests: list[TestRunIn] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     todos_open: list[str] = Field(default_factory=list)
+    done: list[str] = Field(default_factory=list, description="Completed work the agent declares (shown as declared)")
     notes: str | None = None
     next_step: str | None = None
     facts_source: str | None = Field(
@@ -380,7 +382,7 @@ class FactsIn(BaseModel):
             if isinstance(value, list):
                 # Keep the most recent entries for event lists, the first ones for file lists.
                 value = value[-cap:] if name in ("commands", "tests", "errors") else value[:cap]
-                if name in ("files_changed", "uncommitted_files", "errors", "todos_open", "incomplete"):
+                if name in ("files_changed", "uncommitted_files", "errors", "todos_open", "done", "incomplete"):
                     value = [_clip(v, 1000) for v in value if isinstance(v, str)]
                 data[name] = value
         for name, cap in _STR_CAPS.items():

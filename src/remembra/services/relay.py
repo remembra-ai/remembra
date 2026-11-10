@@ -31,6 +31,7 @@ from remembra.relay.handoff import (
     assess_text,
     build_sections,
     check_summary_grounding,
+    declared_done,
     handoff_ended_at,
     handoff_headline,
     handoff_location,
@@ -647,6 +648,10 @@ class RelayService:
             "closed_at": closed_at.isoformat(),
             "received_at": received_at.isoformat(),
         }
+        declared = len(declared_done(facts))
+        if declared:
+            # How many leading Done items are the agent's declared work (the brief shows both kinds).
+            relay_meta["done_declared"] = declared
         if location:
             relay_meta["location"] = location
         metadata = {

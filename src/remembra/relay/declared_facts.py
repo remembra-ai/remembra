@@ -39,7 +39,41 @@ _FALSE_WORDS = frozenset({"false", "f", "no", "n", "off", "fail", "failed", "fai
 # What an agent writes to say "nothing here" where a list of items is expected.
 _EMPTY_WORDS = frozenset({"", "none", "n/a", "na", "nil", "null", "nothing", "-"})
 
-_STRING_LISTS = ("files_changed", "uncommitted_files", "errors", "todos_open")
+_STRING_LISTS = ("files_changed", "uncommitted_files", "errors", "todos_open", "done")
+# The names agents use for a field, most of them the server's own output names (the stored handoff
+# says done / not_done / failing / next) or the wording of a handoff protocol ("open work").
+_LIST_ALIASES: dict[str, tuple[str, ...]] = {
+    "todos_open": ("open", "open_work", "not_done", "todos", "todo", "remaining"),
+    "errors": ("failing", "failures", "unresolved_failures", "unresolved"),
+    "done": ("completed",),
+}
+_NEXT_ALIASES = ("next", "next_steps")
+# Every key the close route has a field for (FactsIn), plus the one the server sets itself.
+KNOWN_KEYS = frozenset(
+    {
+        "branch",
+        "head_commit",
+        "upstream",
+        "unpushed_commits",
+        "no_upstream",
+        "commits",
+        "files_changed",
+        "uncommitted_files",
+        "diff_stat",
+        "commands",
+        "tests",
+        "errors",
+        "todos_open",
+        "done",
+        "notes",
+        "next_step",
+        "facts_source",
+        "commit_evidence",
+        "incomplete",
+        "normalized",
+    }
+)
+MAX_OTHER_FACTS = 20
 _LISTS = ("tests", "commits", "commands", *_STRING_LISTS, "incomplete")
 _STRINGS = ("head_commit", "upstream", "diff_stat", "notes", "next_step")
 
@@ -303,6 +337,62 @@ def _unpushed(value: Any, changes: _Changes) -> int | None:
     return None
 
 
+def _read_aliases(out: dict[str, Any], changes: _Changes) -> None:
+    """Move alias keys into the field they mean; a list alias adds to the field, it never replaces it."""
+    for name, aliases in _LIST_ALIASES.items():
+        for alias in aliases:
+            if alias not in out:
+                continue
+            value = out.pop(alias)
+            if value is None:
+                continue
+            merged = _as_list(out.get(name))
+            merged.extend(item for item in _as_list(value) if item not in merged)
+            out[name] = merged
+            changes.add(f"{alias}: read as {name}")
+    for alias in _NEXT_ALIASES:
+        if alias not in out:
+            continue
+        value = out.pop(alias)
+        if value is None:
+            continue
+        if out.get("next_step"):
+            changes.add(f"{alias}: not used, next_step is given too")
+        else:
+            out["next_step"] = value
+            changes.add(f"{alias}: read as next_step")
+
+
+def _other_fact(value: Any) -> str | None:
+    if value is None or value == "" or value == [] or value == {}:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return _short(value, 300)
+
+
+def _keep_other_facts(out: dict[str, Any], changes: _Changes) -> str | None:
+    """Remove keys the handoff has no field for and return them as one notes line (None when there are none).
+
+    Only for facts an agent typed: the relay CLI sends git-read facts with keys of its own that are
+    not prose for the next agent.
+    """
+    source = out.get("facts_source")
+    if isinstance(source, str) and source.strip() and source != "agent-declared":
+        return None
+    parts: list[str] = []
+    names: list[str] = []
+    for key in [k for k in out if k not in KNOWN_KEYS]:
+        text = _other_fact(out.pop(key))
+        if text is not None and len(parts) < MAX_OTHER_FACTS:
+            parts.append(f"{_short(key, 60)}: {text}")
+            names.append(_short(key, 60))
+    if not parts:
+        return None
+    changes.add(f"{', '.join(names)}: no handoff field for these, kept in notes")
+    return "Other declared facts: " + "; ".join(parts)
+
+
 def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[dict[str, Any], list[str]]:
     """``facts`` in the shape ``/api/v1/session/close`` validates, and what was rewritten.
 
@@ -315,8 +405,12 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
     ``lenient_branch`` (the MCP tool) moves a ``branch`` git would refuse into the notes. The API
     keeps refusing it with 422 (the name is printed into ``git switch`` lines), so it is not the default.
 
-    Keys this function does not know are passed through untouched. Anything that is not a mapping
-    gives ``({}, [...])``.
+    The names agents guess are read as the field they mean (``open`` / ``open_work`` / ``not_done``
+    add to ``todos_open``, ``failing`` / ``unresolved_failures`` to ``errors``, ``completed`` to
+    ``done``, ``next`` is ``next_step``). A key the handoff has no field for (``deployed``,
+    ``pushed``, ...) is appended to ``notes`` as ``Other declared facts: key: value`` when the
+    facts are agent-declared; facts from the relay CLI keep their extra keys untouched. Anything
+    that is not a mapping gives ``({}, [...])``.
     """
     changes = _Changes()
     if facts is None:
@@ -324,6 +418,7 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
     if not isinstance(facts, Mapping):
         return {}, [f"facts: expected an object, got {type(facts).__name__}; ignored"]
     out: dict[str, Any] = {str(k): v for k, v in facts.items()}
+    _read_aliases(out, changes)
     for name in _LISTS:
         if name in out and out[name] is None:  # an explicit null is "not given", which the API has no value for
             del out[name]
@@ -366,8 +461,11 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
             kept.append(("Branch as declared (not a valid git branch name)", [_short(branch, 200)]))
             changes.add("branch: not a valid git branch name, kept in notes")
 
-    if kept:
-        lines = [f"{label}: {'; '.join(items)}" for label, items in kept]
+    lines = [f"{label}: {'; '.join(items)}" for label, items in kept]
+    other = _keep_other_facts(out, changes)
+    if other:
+        lines.append(other)
+    if lines:
         notes = out.get("notes")
         out["notes"] = "\n".join([*([notes] if isinstance(notes, str) and notes.strip() else []), *lines])
     return out, changes.result()

@@ -56,7 +56,8 @@ def test_a_well_formed_close_is_passed_through_untouched():
         "unpushed_commits": 0,
         "notes": "  spaced  ",
         "next_step": "ship",
-        "custom": {"kept": 1},
+        "done": ["shipped"],
+        "facts_source": "agent-declared",
     }
     assert normalize_close_facts(facts) == (facts, [])
 

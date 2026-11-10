@@ -45,10 +45,11 @@ CLOSE_LIST_CAPS = {
     "tests": 100,
     "errors": 50,
     "todos_open": 100,
+    "done": 50,
     "incomplete": 10,
 }
 CLOSE_KEEP_NEWEST = frozenset({"commands", "tests", "errors"})
-CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "todos_open", "incomplete"})
+CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "todos_open", "done", "incomplete"})
 CLOSE_ITEM_CLIP = 1000  # characters per path (or other text item), as the server keeps them
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 

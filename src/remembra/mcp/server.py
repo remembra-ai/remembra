@@ -1147,8 +1147,8 @@ def _crew_evidence(
 def close_session(
     summary: str | None = None,
     next_step: str | None = None,
-    todos_open: list[str] | None = None,
-    errors: list[str] | None = None,
+    todos_open: list[str] | str | None = None,
+    errors: list[str] | str | None = None,
     facts: Annotated[dict[str, Any] | None, WithJsonSchema(CLOSE_FACTS_SCHEMA)] = None,
     end_reason: str | None = None,
     project_id: str | None = None,
@@ -1156,6 +1156,9 @@ def close_session(
     root_path: str | None = None,
     session_id: str | None = None,
     final: bool | None = None,
+    done: list[str] | str | None = None,
+    open_work: list[str] | str | None = None,
+    project: str | None = None,
 ) -> str:
     """Call this LAST, before you finish: leave a handoff for the next agent.
 
@@ -1176,6 +1179,9 @@ def close_session(
             declared by you; the next agent sees them labeled that way.
         next_step: The concrete next action for whoever picks up (shown as a
             suggestion, not an instruction).
+        done: What you completed, as short items. Use it for work git does not
+            show (a live check, a deploy, files outside the repo); commits,
+            changed files and passing tests in facts are listed too.
         todos_open: Work you did not finish.
         errors: Errors you hit that are not resolved.
         facts: Anything else you know. Keys and types, all optional:
@@ -1188,7 +1194,9 @@ def close_session(
             unpushed_commits 2 (a count; omit it when you do not know),
             upstream "origin/main", notes "free text".
             crew_checkpoint's shapes ({command, passed: 170, failed: 0}, bare
-            shas) are read too; the result lists what was rewritten.
+            shas) are read too; the result lists what was rewritten. Inside
+            facts, done / open / failing / next are read as done / todos_open /
+            errors / next_step; any other key is kept in the notes.
         end_reason: Why the session ends (e.g. "done", "blocked", "context full").
         project_id: Project. Default: the project your session_brief or
             crew_status resolved, else your crew session's. A local (stdio)
@@ -1204,6 +1212,8 @@ def close_session(
         final: true ends your crew session with the handoff; false stores a
             mid-session milestone handoff and keeps your seat and claims.
             Default: true, unless end_reason says "checkpoint" or "milestone".
+        open_work: Same as todos_open (both are listed).
+        project: Same as project_id.
 
     Returns:
         JSON with handoff_id, project_id (where the handoff was filed), project_source
@@ -1212,20 +1222,22 @@ def close_session(
         remembered = from an earlier session_brief or crew_status; crew-seat = your
         crew session's; relay-project = REMEMBRA_RELAY_PROJECT; configured = the
         caller's default project), headline, the rendered handoff and grounding verdict;
-        with a crew seat, a crew block that says whether the crew session ended.
+        normalized (what was rewritten in your facts), superseded (the handoff this one replaced)
+        and, with a crew seat, a crew block that says whether the crew session ended.
     """
     try:
         client = _get_client()
         is_final = final if final is not None else not _milestone_reason(end_reason)
+        raw: dict[str, Any] = dict(facts or {})
+        for key, given in (("done", done), ("todos_open", todos_open), ("todos_open", open_work), ("errors", errors)):
+            if given:
+                raw[key] = _items(raw.get(key)) + _items(given)
         # Before sending, so that a server that validates the facts as sent accepts the other vocabulary too.
-        merged, rewritten = normalize_close_facts(facts, lenient_branch=True)
+        merged, rewritten = normalize_close_facts(raw, lenient_branch=True)
         merged["facts_source"] = "agent-declared"
         if next_step:
             merged["next_step"] = next_step
-        if todos_open:
-            merged["todos_open"] = list(merged.get("todos_open") or []) + list(todos_open)
-        if errors:
-            merged["errors"] = list(merged.get("errors") or []) + list(errors)
+        project_id = project_id or project
         locator = None
         # how the project was found: named on this call, a location on this call (then the server's
         # resolution source), or inherited: remembered / crew-seat / relay-project / configured
@@ -1263,28 +1275,53 @@ def close_session(
                     return json.dumps({"status": "error", "error": _no_project_text("close_session", client)})
             else:
                 origin = "configured"
-        if seat is None:
-            result = client.close_session(
-                facts=merged,
-                summary=summary,
-                end_reason=end_reason,
-                session_id=session_id,
-                agent_id=_default_agent_id() or None,
-                project_id=project_id,
-                locator=locator,
-            )
-        else:
-            result = _close_crew_session(
+
+        def send(payload: dict[str, Any], leave: bool) -> dict[str, Any]:
+            if seat is None:
+                return client.close_session(
+                    facts=payload,
+                    summary=summary,
+                    end_reason=end_reason,
+                    session_id=session_id,
+                    agent_id=_default_agent_id() or None,
+                    project_id=project_id,
+                    locator=locator,
+                )
+            return _close_crew_session(
                 client,
                 seat,
-                facts=merged,
+                facts=payload,
                 summary=summary,
                 end_reason=end_reason,
                 session_id=session_id,
                 project_id=project_id,
                 locator=locator,
-                leave=is_final,
+                leave=leave,
             )
+
+        result = send(merged, is_final)
+        superseded = [str(h) for h in result.get("superseded") or []]
+        declared = [d for d in merged.get("done") or [] if isinstance(d, str) and d.strip()]
+        if declared and "facts_normalized" not in result:
+            # A server from before declared work had a field drops facts.done without a word. The handoff
+            # is stored again with the items in the notes; the crew part of the first close stands.
+            line = "Done (declared by the agent): " + "; ".join(declared)
+            notes = merged.get("notes")
+            retry = {k: v for k, v in merged.items() if k != "done"}
+            # First in the notes: the rendered handoff shows a limited length of them.
+            retry["notes"] = "\n".join([line, *([notes] if isinstance(notes, str) and notes.strip() else [])])
+            try:
+                again = send(retry, False)
+            except MemoryError as e:
+                rewritten = [
+                    *rewritten,
+                    f"done: this server has no field for declared work and the retry failed ({e.status_code})",
+                ]
+            else:
+                first_id = result.get("handoff_id")
+                superseded.extend(str(h) for h in again.get("superseded") or [] if h != first_id)
+                result = {**again, "crew": result.get("crew")}
+                rewritten = [*rewritten, "done: this server has no field for declared work, kept in notes"]
         out: dict[str, Any] = {
             "status": "ok",
             "handoff_id": result.get("handoff_id"),
@@ -1297,6 +1334,12 @@ def close_session(
         }
         if rewritten:
             out["normalized"] = rewritten
+        if superseded:
+            out["superseded"] = superseded
+            out["note"] = (
+                "This close replaced your earlier handoff for this session; the next agent sees only this one, "
+                "so it has to say everything that still matters."
+            )
         crew = result.get("crew")
         if seat is not None and isinstance(crew, dict):
             out["crew"] = {
@@ -1361,6 +1404,13 @@ def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | No
 
 
 _MILESTONE_REASON_RE = re.compile(r"\b(?:checkpoint|milestone)\b", re.IGNORECASE)
+
+
+def _items(value: Any) -> list[Any]:
+    """A list from a list or from one item given bare (an agent's single string for a list argument)."""
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
 def _milestone_reason(end_reason: str | None) -> bool:

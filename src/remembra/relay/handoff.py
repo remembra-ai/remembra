@@ -284,12 +284,46 @@ def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[
 # ---------------------------------------------------------------------------
 
 
+def _brief_done(done: list[Any], declared: Any, shown: int = 4) -> list[Any]:
+    """The Done items the brief has room for.
+
+    Declared items lead the stored list (``done_declared`` of them). When there is more than fits,
+    the brief shows both kinds, two declared and then what git recorded, so neither hides the other.
+    """
+    count = declared if isinstance(declared, int) and not isinstance(declared, bool) and 0 < declared < len(done) else 0
+    if not count or len(done) <= shown:
+        return done[:shown]
+    head = done[: min(count, shown // 2)]
+    return head + done[count:][: shown - len(head)]
+
+
 def latest_tests(tests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Last result per distinct command, in first-seen order."""
     by_cmd: dict[str, dict[str, Any]] = {}
     for test in tests:
         by_cmd[str(test.get("cmd") or "")] = test
     return list(by_cmd.values())
+
+
+MAX_DECLARED_DONE = 10
+
+
+def _declared_items(facts: dict[str, Any]) -> list[str]:
+    raw = facts.get("done")
+    return [clip(d, 200) for d in (raw if isinstance(raw, list) else []) if isinstance(d, str) and d.strip()]
+
+
+def declared_done(facts: dict[str, Any]) -> list[str]:
+    """The Done lines for work the agent declared (``facts["done"]``): at most ten, then a count.
+
+    Work that leaves no git trace (a live check, a deploy over SSH, artifacts on a drive) has no
+    other way into Done. The lines are the agent's words, shown under the handoff's facts label.
+    """
+    items = _declared_items(facts)
+    lines = items[:MAX_DECLARED_DONE]
+    if len(items) > MAX_DECLARED_DONE:
+        lines.append(f"(+{len(items) - MAX_DECLARED_DONE} more declared done)")
+    return lines
 
 
 def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> dict[str, Any]:
@@ -305,7 +339,9 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
 
     incomplete = {str(x) for x in facts.get("incomplete") or []}
 
-    done: list[str] = [f"{short_sha(c.get('sha'))} {clip(c.get('subject'), 100)}".strip() for c in commits[:10]]
+    declared = declared_done(facts)
+    done: list[str] = list(declared)
+    done.extend(f"{short_sha(c.get('sha'))} {clip(c.get('subject'), 100)}".strip() for c in commits[:10])
     if len(commits) > 10:
         done.append(f"(+{len(commits) - 10} more commits)")
     if "log" in incomplete:
@@ -378,6 +414,8 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
         done_part = "git facts incomplete (git timed out)"
     elif files or uncommitted:
         done_part = f"{len(set(files) | set(uncommitted))} file(s) changed, nothing committed"
+    elif declared:
+        done_part = f"{len(_declared_items(facts))} item(s) declared done (no commits or file changes recorded)"
     else:
         done_part = "no commits or file changes"
     open_count = len(todos) + sum(1 for item in not_done if not item.startswith(("TODO: ", "(+")) and "unknown (" not in item)
@@ -1067,7 +1105,7 @@ def render_last_session(
     else:
         next_part = f"next (derived from the recorded facts): {item(nxt, 160)}"
     parts = [
-        f"{done_label}: " + ("; ".join(item(x, 90) for x in done[:4]) or "nothing recorded"),
+        f"{done_label}: " + ("; ".join(item(x, 90) for x in _brief_done(done, relay.get("done_declared"))) or "nothing recorded"),
         "NOT done: " + ("; ".join(item(x, 90) for x in not_done[:4]) or "nothing open"),
         "failing: " + ("; ".join(item(x, 90) for x in failing[:3]) or "none"),
         next_part,
