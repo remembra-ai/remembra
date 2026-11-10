@@ -27,6 +27,7 @@ item, tags neutralised; nothing ever names a destructive command or the bypass m
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import shlex
@@ -35,7 +36,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, TypeVar, cast
 
 import httpx
 
@@ -614,6 +615,37 @@ def error_text(e: CrewApiError, what: str) -> str:
     return f"CREW ERROR ({what}: {e.status} {S.clip_item(e.error, 64)}): {e.message}"
 
 
+def crew_tag(seat: Seat) -> str:
+    """Which crew a write went to and as whom: the last line of every crew write's answer."""
+    return f"(in CREW {_safe(seat.project_id) or 'this project'} as {_safe(seat.callsign) or 'this session'})"
+
+
+_F = TypeVar("_F", bound=Callable[..., str])
+
+
+def _names_crew(fn: _F) -> _F:
+    """Decorate a crew write: its answer (or usage error) ends with the crew the write used (:func:`crew_tag`).
+
+    One MCP server process can serve several conversations in different projects, so an answer such as
+    ``SENT msg_…`` or ``Unknown zone 'api'`` has to say which crew it is about.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self: CrewBridge, caller: CallerInfo, **kwargs: Any) -> str:
+        self._written.seat = None
+        try:
+            text = fn(self, caller, **kwargs)
+        except CrewUsageError as e:
+            seat = getattr(self._written, "seat", None)
+            if seat is None:
+                raise
+            raise CrewUsageError(f"{e} {crew_tag(seat)}") from None
+        seat = getattr(self._written, "seat", None)
+        return f"{text}\n{crew_tag(seat)}" if seat is not None else text
+
+    return cast(_F, wrapper)
+
+
 # ---------------------------------------------------------------------------
 # The bridge
 # ---------------------------------------------------------------------------
@@ -628,6 +660,11 @@ class CrewBridge:
         self._seats: dict[tuple[str, str], dict[str, Seat]] = {}
         self._current: dict[tuple[str, str], str] = {}
         self._used = threading.local()
+        # every project this MCP session chose (session_brief, crew_status, a write that named none), in
+        # order; a write that names its project is for that call only and is not counted. With more than one,
+        # a crew write that names no project is refused instead of following the latest choice (write_seat)
+        self._pointed: dict[tuple[str, str], dict[str, None]] = {}
+        self._written = threading.local()  # the seat the running crew write uses (see _names_crew)
 
     # -- seat registry ------------------------------------------------------------
 
@@ -638,19 +675,57 @@ class CrewBridge:
             project = self._current.get(scope)
             return self._seats.get(scope, {}).get(project) if project else None
 
-    def seat_in(self, caller: CallerInfo, project_id: str) -> Seat | None:
-        """This MCP session's seat in ``project_id`` (None when it never joined that project's crew)."""
+    def seat_in(self, caller: CallerInfo, project_id: str | None) -> Seat | None:
+        """This MCP session's seat in exactly ``project_id`` (None when it holds none there). Never joins."""
+        if not project_id:
+            return None
         with self._lock:
             return self._seats.get((caller.fingerprint, caller.client_session_id), {}).get(project_id)
 
-    def _remember(self, seat: Seat) -> None:
+    def pointed_projects(self, caller: CallerInfo) -> list[str]:
+        """Every project this MCP session chose (a brief, crew_status, a write that named none), oldest first.
+
+        A write that named its project is for that call only: it moves nothing and is not counted here.
+        """
+        with self._lock:
+            return list(self._pointed.get((caller.fingerprint, caller.client_session_id), ()))
+
+    def seat_projects(self, caller: CallerInfo) -> list[str]:
+        """The projects this MCP session holds a crew seat in that has not left, oldest first."""
+        with self._lock:
+            seats = self._seats.get((caller.fingerprint, caller.client_session_id), {})
+            return [project for project, seat in seats.items() if not seat.left]
+
+    def single_conversation(self, caller: CallerInfo) -> bool:
+        """Whether this MCP session is known to serve one conversation, so "the latest choice wins" is safe.
+
+        True for a stdio server that crewd recognises as part of one agent's process tree (the agent's crew
+        hooks joined a session for it). A stdio server started by a desktop app for all its conversations is
+        not in any conversation's tree, and a remote transport's session is not local: both answer False.
+        """
+        if not caller.local:
+            return False
+        with self._lock:
+            seats = list(self._seats.get((caller.fingerprint, caller.client_session_id), {}).values())
+        return any(s.local is not None for s in seats) or local_crew() is not None
+
+    def _point(self, scope: tuple[str, str], project_id: str) -> None:
+        with self._lock:
+            if scope not in self._pointed and len(self._pointed) >= MAX_SCOPES:
+                self._pointed.pop(next(iter(self._pointed)), None)
+            self._pointed.setdefault(scope, {})[project_id] = None
+
+    def _remember(self, seat: Seat, *, sticky: bool = True) -> None:
         with self._lock:
             if seat.scope not in self._seats and len(self._seats) >= MAX_SCOPES:
                 oldest = next(iter(self._seats))
                 self._seats.pop(oldest, None)
                 self._current.pop(oldest, None)
+                self._pointed.pop(oldest, None)
             self._seats.setdefault(seat.scope, {})[seat.project_id] = seat
-            self._current[seat.scope] = seat.project_id
+            if sticky:
+                self._current[seat.scope] = seat.project_id
+                self._point(seat.scope, seat.project_id)
 
     def _join_body(
         self, caller: CallerInfo, project_id: str, client_session_id: str, checkout: Mapping[str, Any] | None
@@ -671,7 +746,9 @@ class CrewBridge:
             body["head"] = head
         return body
 
-    def _local_seat(self, caller: CallerInfo, scope: tuple[str, str], project_id: str | None) -> Seat | None:
+    def _local_seat(
+        self, caller: CallerInfo, scope: tuple[str, str], project_id: str | None, *, sticky: bool = True
+    ) -> Seat | None:
         """The agent's crew-hook session as this MCP session's seat (one crew session per agent), or None.
 
         Used when the MCP server runs inside that agent's process tree (stdio, ``caller.local``) and neither this
@@ -711,13 +788,17 @@ class CrewBridge:
                 self._seats.setdefault(scope, {})[project] = seat
             else:
                 seat.local = local
-            self._current[scope] = project
+            if sticky:
+                self._current[scope] = project
+                self._point(scope, project)
         return seat
 
     def note_project(self, caller: CallerInfo, project_id: str) -> None:
         """Record a project the agent chose outside the crew tools (session_brief): the latest choice wins."""
+        scope = (caller.fingerprint, caller.client_session_id)
         with self._lock:
-            self._current[(caller.fingerprint, caller.client_session_id)] = project_id
+            self._current[scope] = project_id
+            self._point(scope, project_id)
 
     def _shadow(self, caller: CallerInfo, seat: Seat) -> HookShadow | None:
         """Hook sessions of the caller's own program beside this MCP seat (see :class:`HookShadow`), or None.
@@ -774,17 +855,20 @@ class CrewBridge:
         caller: CallerInfo,
         project_id: str | None = None,
         checkout: Mapping[str, Any] | None = None,
+        *,
+        sticky: bool = True,
     ) -> tuple[Seat, dict[str, Any] | None]:
         """:meth:`_seat`, remembering the seat's project for :meth:`used_project`.
 
-        A project named by one call (``caller.call_project``) is used for that call only: the session's
-        current project, which later calls without a project follow, is left as it was.
+        A project named by one call (``caller.call_project``, or ``sticky=False``: a write that named its
+        project) is used for that call only: the session's current project, which later calls without a
+        project follow, is left as it was.
         """
         call_only = bool(caller.call_project) and not project_id
         scope = (caller.fingerprint, caller.client_session_id)
         with self._lock:
             before = self._current.get(scope)
-        seat, joined = self._seat(caller, project_id or caller.call_project, checkout)
+        seat, joined = self._seat(caller, project_id or caller.call_project, checkout, sticky=sticky and not call_only)
         if call_only:
             with self._lock:
                 if before is None:
@@ -799,11 +883,14 @@ class CrewBridge:
         caller: CallerInfo,
         project_id: str | None = None,
         checkout: Mapping[str, Any] | None = None,
+        *,
+        sticky: bool = True,
     ) -> tuple[Seat, dict[str, Any] | None]:
         """The seat for ``project_id`` (default: the current seat, else the caller's default project).
 
         Joins on first use (implicit join, §7) and re-joins a seat that left. Returns the seat and
-        the join response when one was made now.
+        the join response when one was made now. ``sticky=False`` (a write that named its project) uses
+        the seat without making its project the current one for later calls.
         """
         if not caller.agent_id:
             raise CrewUsageError(
@@ -811,7 +898,7 @@ class CrewBridge:
                 "(or send the X-Remembra-Agent-Id header), e.g. claude-desktop or codex."
             )
         scope = (caller.fingerprint, caller.client_session_id)
-        local_seat = self._local_seat(caller, scope, project_id)
+        local_seat = self._local_seat(caller, scope, project_id, sticky=sticky)
         if local_seat is not None:
             return local_seat, None
         with self._lock:
@@ -832,7 +919,9 @@ class CrewBridge:
             )
         if existing is not None and not existing.left:
             with self._lock:
-                self._current[scope] = project
+                if sticky:
+                    self._current[scope] = project
+                    self._point(scope, project)
             return existing, None
         http = CrewHttp(caller.client)
         if existing is not None:
@@ -847,7 +936,7 @@ class CrewBridge:
             existing.observe_only = bool(body.get("observe_only"))
             existing.current_task_id = (body.get("session") or {}).get("current_task_id")
             existing.callsign = str(body.get("callsign") or existing.callsign)
-            self._remember(existing)
+            self._remember(existing, sticky=sticky)
             return existing, body
         client_session_id = caller.client_session_id
         try:
@@ -880,8 +969,33 @@ class CrewBridge:
             last_touch=self._clock(),
             current_task_id=session.get("current_task_id"),
         )
-        self._remember(seat)
+        self._remember(seat, sticky=sticky)
         return seat, body
+
+    def write_seat(self, caller: CallerInfo, project_id: str | None, tool: str) -> Seat:
+        """The seat a crew write acts as: the project it names, else the only project this session knows.
+
+        A write that names its project (``project_id``, or ``caller.call_project``: the tool's project_id or
+        root_path) never moves the current project. One that names none is refused once this MCP session has
+        chosen more than one project (:meth:`pointed_projects`), unless it is known to serve a single
+        conversation (:meth:`single_conversation`): a desktop app runs one server for all its conversations,
+        and "the latest choice" may be another conversation's ``session_brief`` or ``crew_status``.
+        """
+        named = project_id or caller.call_project
+        if named:
+            seat, _ = self.seat(caller, named, sticky=False)
+        else:
+            pointed = self.pointed_projects(caller)
+            if len(pointed) > 1 and not self.single_conversation(caller):
+                names = ", ".join(n for n in (_safe(p) for p in pointed[-6:]) if n)
+                raise CrewUsageError(
+                    f"This MCP server has been used for more than one project ({names}) and one server can serve "
+                    f"several conversations, so {tool} without project_id could reach another conversation's crew. "
+                    f'Nothing was done. Call {tool} again with project_id="<the project you are working in>".'
+                )
+            seat, _ = self.seat(caller)
+        self._written.seat = seat
+        return seat
 
     def touch(self, caller: CallerInfo, seat: Seat, *, force: bool = False) -> dict[str, Any] | None:
         """Re-join with the current token (liveness + lease renewal) at most once per minute."""
@@ -906,8 +1020,9 @@ class CrewBridge:
                 seat.callsign = str(body["callsign"])
         return dict(body)
 
-    def mark_left(self, caller: CallerInfo) -> None:
-        seat = self.seat_for_scope(caller)
+    def mark_left(self, caller: CallerInfo, seat: Seat | None = None) -> None:
+        """Mark ``seat`` (default: the current seat) as left: no liveness calls or notices until it re-joins."""
+        seat = seat or self.seat_for_scope(caller)
         if seat is not None:
             with seat.lock:
                 seat.left = True
@@ -1255,7 +1370,11 @@ class CrewBridge:
     def notice(self, caller: CallerInfo, *, force: bool = False) -> str | None:
         """The ``crew_notice`` for this MCP session's latest call, or None. Never raises."""
         seat = self.seat_for_scope(caller)
-        if seat is None or seat.left:
+        return self.seat_notice(caller, seat, force=force) if seat is not None else None
+
+    def seat_notice(self, caller: CallerInfo, seat: Seat, *, force: bool = False) -> str | None:
+        """The ``crew_notice`` of one seat (the crew a write just used), or None. Never raises."""
+        if seat.left:
             return None
         try:
             return self._notice(caller, seat, force=force)
@@ -1305,6 +1424,7 @@ class CrewBridge:
 
     # -- crew_claim -------------------------------------------------------------------
 
+    @_names_crew
     def claim(
         self,
         caller: CallerInfo,
@@ -1318,8 +1438,9 @@ class CrewBridge:
         baton: bool | None,
         reason: str | None,
         wait_s: int,
+        project_id: str | None = None,
     ) -> str:
-        seat, _ = self.seat(caller)
+        seat = self.write_seat(caller, project_id, "crew_claim")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         shadow = self._shadow(caller, seat)
@@ -2045,8 +2166,17 @@ class CrewBridge:
 
     # -- crew_guard ---------------------------------------------------------------------
 
-    def guard(self, caller: CallerInfo, *, paths: Sequence[str], command: str | None, mcp_tool: str | None) -> str:
-        seat, _ = self.seat(caller)
+    @_names_crew
+    def guard(
+        self,
+        caller: CallerInfo,
+        *,
+        paths: Sequence[str],
+        command: str | None,
+        mcp_tool: str | None,
+        project_id: str | None = None,
+    ) -> str:
+        seat = self.write_seat(caller, project_id, "crew_guard")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         shadow = self._shadow(caller, seat)
@@ -2083,6 +2213,7 @@ class CrewBridge:
 
     # -- crew_task ------------------------------------------------------------------------
 
+    @_names_crew
     def task(
         self,
         caller: CallerInfo,
@@ -2095,8 +2226,9 @@ class CrewBridge:
         acceptance: Sequence[Mapping[str, Any]] | None,
         phase: str | None,
         note: str | None,
+        project_id: str | None = None,
     ) -> str:
-        seat, _ = self.seat(caller)
+        seat = self.write_seat(caller, project_id, "crew_task")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         if action == "list":
@@ -2217,8 +2349,19 @@ class CrewBridge:
 
     # -- crew_say -------------------------------------------------------------------------
 
-    def say(self, caller: CallerInfo, *, body: str, kind: str, to: str, thread: str | None, wait_s: int) -> str:
-        seat, _ = self.seat(caller)
+    @_names_crew
+    def say(
+        self,
+        caller: CallerInfo,
+        *,
+        body: str,
+        kind: str,
+        to: str,
+        thread: str | None,
+        wait_s: int,
+        project_id: str | None = None,
+    ) -> str:
+        seat = self.write_seat(caller, project_id, "crew_say")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         text = body
@@ -2263,6 +2406,7 @@ class CrewBridge:
 
     # -- crew_checkpoint ------------------------------------------------------------------
 
+    @_names_crew
     def checkpoint(
         self,
         caller: CallerInfo,
@@ -2273,8 +2417,9 @@ class CrewBridge:
         tests: Sequence[Mapping[str, Any]] | None,
         next_step: str | None,
         task: str | None,
+        project_id: str | None = None,
     ) -> str:
-        seat, _ = self.seat(caller)
+        seat = self.write_seat(caller, project_id, "crew_checkpoint")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         task_row = self._task(http, seat, task) if task else None
@@ -2315,7 +2460,7 @@ class CrewBridge:
                 "editing the same files."
             )
         lines.extend(self._collision_lines(http, seat, data))
-        notice = self.notice(CallerInfo(caller.client, caller.fingerprint, caller.client_session_id, caller.agent_id), force=True)
+        notice = self.seat_notice(caller, seat, force=True)  # this crew's queue, not the current project's
         if notice:
             lines.append(notice)
         return join_text(lines, data)
@@ -2350,6 +2495,7 @@ class CrewBridge:
 
     # -- crew_report ----------------------------------------------------------------------
 
+    @_names_crew
     def report(
         self,
         caller: CallerInfo,
@@ -2361,8 +2507,9 @@ class CrewBridge:
         tests: Sequence[Mapping[str, Any]] | None,
         summary: str | None,
         release: bool,
+        project_id: str | None = None,
     ) -> str:
-        seat, _ = self.seat(caller)
+        seat = self.write_seat(caller, project_id, "crew_report")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         row = self._task(http, seat, task)

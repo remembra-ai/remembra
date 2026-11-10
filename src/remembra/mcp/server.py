@@ -434,6 +434,7 @@ def store_memory(
             store_status instead — it replaces the previous value.
         project_id: Project to store in. Default: the project your
             session_brief or crew_status resolved, else the configured one.
+            Pass it when this MCP server was briefed on more than one project.
 
     Returns:
         JSON with status "stored" (id, project_id, extracted_facts) or
@@ -452,10 +453,12 @@ def store_memory(
 
         client = _get_client()
         # This call's project, else the one this session's session_brief / crew_status resolved.
-        target = None
-        if isinstance(project_id, str) and project_id.strip():
-            target = normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
-        target = target or _session_project().get("project_id")
+        target = _named_project(project_id)
+        if not target:
+            refusal = _unnamed_project_refusal("store_memory", _briefed_projects())
+            if refusal:
+                return json.dumps({"status": "error", "error": refusal})
+            target = _session_project().get("project_id")
         stored_in = client._project(target)
         result = client.store(
             content=content,
@@ -890,8 +893,12 @@ def _hostname() -> str:
 # The project the last session_brief resolved, per MCP session (stdio: the
 # process). close_session and store_memory default to it, so an agent that
 # briefs by location closes and stores into the same project.
+# Each entry also keeps "projects": every project a brief resolved in that MCP session, oldest first. One
+# stdio server can serve several conversations (a desktop app starts one for all of them), so with more
+# than one project there a write that names none is refused instead of following whichever briefed last.
 _session_projects: dict[str, dict[str, Any]] = {}
 _MAX_SESSION_PROJECTS = 256
+_MAX_BRIEFED_PROJECTS = 32
 
 
 def _session_scope() -> str:
@@ -905,7 +912,12 @@ def _session_scope() -> str:
 def _remember_session_project(project_id: str, locator: dict[str, Any] | None) -> None:
     if len(_session_projects) >= _MAX_SESSION_PROJECTS:
         _session_projects.clear()
-    _session_projects[_session_scope()] = {"project_id": project_id, "locator": dict(locator) if locator else None}
+    seen = [p for p in _briefed_projects() if p != project_id]
+    _session_projects[_session_scope()] = {
+        "project_id": project_id,
+        "locator": dict(locator) if locator else None,
+        "projects": [*seen, project_id][-_MAX_BRIEFED_PROJECTS:],
+    }
     try:  # the crew tools follow the latest project chosen here (CrewBridge.note_project)
         _crew.note_project(_crew_caller(), project_id)
     except Exception:  # noqa: S110 - crew follow-up is best effort; the brief's project is kept above
@@ -914,6 +926,32 @@ def _remember_session_project(project_id: str, locator: dict[str, Any] | None) -
 
 def _session_project() -> dict[str, Any]:
     return _session_projects.get(_session_scope()) or {}
+
+
+def _briefed_projects() -> list[str]:
+    """Every project a session_brief (or a crew_status by location) resolved in this MCP session, oldest first."""
+    return [str(p) for p in _session_project().get("projects") or []]
+
+
+def _unnamed_project_refusal(tool: str, projects: list[str]) -> str | None:
+    """Why ``tool`` may not guess its project (None when it may): this MCP session knows several.
+
+    Not refused when the server is known to serve one conversation (a stdio server inside one agent's
+    process tree, see ``CrewBridge.single_conversation``): there the latest choice is that conversation's.
+    """
+    if len(projects) < 2:
+        return None
+    try:
+        if _crew.single_conversation(_crew_caller()):
+            return None
+    except Exception:  # noqa: S110 - cannot tell: refuse rather than guess
+        pass
+    names = ", ".join(projects[-6:])
+    return (
+        f"This MCP server has been used for more than one project ({names}) and one server can serve several "
+        f"conversations, so {tool} without a project could write into another conversation's project. Nothing "
+        f'was written. Call {tool} again with project_id="<the project you are working in>".'
+    )
 
 
 def _configured_hint() -> str | None:
@@ -1026,7 +1064,10 @@ def close_session(
         project_id: Project. Default: the project your session_brief or
             crew_status resolved, else your crew session's. A local (stdio)
             server with none of these asks for root_path or project_id
-            instead of filing under the configured REMEMBRA_PROJECT.
+            instead of filing under the configured REMEMBRA_PROJECT. Pass it
+            (or root_path / git_remote) when this MCP server was used for
+            more than one project: the close then ends that project's crew
+            session.
         git_remote: Resolve the project from your repo's remote instead (pass
             the same value you gave session_brief).
         root_path: Resolve the project from your working directory instead.
@@ -1054,18 +1095,25 @@ def close_session(
         # how the project was found: named on this call, a location on this call (then the server's
         # resolution source), or inherited: remembered / crew-seat / relay-project / configured
         origin: str | None = "named" if project_id else None
+        # The project this close is for, when it is known before the call: it picks the crew seat to end.
+        close_project: str | None = _named_project(project_id)
         if not project_id:
             locator, _ = _locator(git_remote=git_remote, root_path=root_path)
             if locator is not None:
                 refused = _folder_fallback_refusal(client, locator, root_path, _session_project().get("project_id"))
                 if refused:
                     return json.dumps({"status": "error", "error": refused})
+                close_project = _project_for_locator(client, locator)
             else:
+                refusal = _unnamed_project_refusal("close_session", _known_projects())
+                if refusal:
+                    return json.dumps({"status": "error", "error": refusal + " (root_path or git_remote also work.)"})
                 remembered = _session_project()
                 locator = remembered.get("locator")
                 project_id = None if locator else remembered.get("project_id")
                 origin = "remembered" if (locator or project_id) else None
-        seat = _crew_seat_for_close(project_id)
+                close_project = remembered.get("project_id")
+        seat = _crew_seat_for_close(close_project)
         if not project_id and locator is None:
             # Nothing names a project: the handoff belongs with this session's crew seat, else with the
             # agent's crew-hook session on this machine. Without either a stdio server does not guess
@@ -1166,19 +1214,51 @@ def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | No
     )
 
 
-def _crew_seat_for_close(project_id: str | None = None) -> Any:
-    """This MCP session's live crew seat, so the close also ends the crew session (§6 relay close).
+def _known_projects() -> list[str]:
+    """Every project this MCP session chose, oldest first: briefed on, or pointed at with crew_status or a
+    crew write that named none. A write that named its project is for that call only and is not counted."""
+    projects = dict.fromkeys(_briefed_projects())
+    try:
+        projects.update(dict.fromkeys(_crew.pointed_projects(_crew_caller())))
+    except Exception:  # noqa: S110 - the briefed projects are still known
+        pass
+    return list(projects)
 
-    A close that names its project ends the seat this session holds in that project, when it has one
-    (a call that named the project opened it); otherwise the session's current seat, as before.
-    """
+
+def _configured_crew_project(client: Memory) -> str | None:
+    return client.project if client.project and client.project != "default" else None
+
+
+def _project_for_locator(client: Memory, locator: dict[str, Any]) -> str | None:
+    """The project a close by location is for, to pick its crew seat (None: unknown, or no seat to pick)."""
+    try:
+        if not _crew.seat_projects(_crew_caller()):
+            return None  # this MCP session holds no crew seat: nothing to resolve for
+        remembered = _session_project()
+        if remembered.get("locator") == locator and remembered.get("project_id"):
+            return str(remembered["project_id"])
+        brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
+        resolved = brief.get("project_id")
+        return str(resolved) if resolved else None
+    except Exception:
+        return None
+
+
+def _crew_seat_for_close(project_id: str | None = None) -> Any:
+    """This MCP session's live crew seat in the project being closed, so the close also ends that crew
+    session (§6 relay close). The seat is chosen by the close's own project, never by the current project:
+    one server can serve several conversations, and a close must not end another conversation's seat
+    (a call that named the project may have opened it). When the project is not known before the call,
+    only the session's current seat is used, and only when it is the one seat this session holds."""
     try:
         caller = _crew_caller()
         project = _named_project(project_id)
-        named = _crew.seat_in(caller, project) if project else None
+        if project:
+            seat = _crew.seat_in(caller, project)
+        else:
+            seat = _crew.seat_for_scope(caller) if len(_crew.seat_projects(caller)) == 1 else None
     except Exception:
         return None
-    seat = named if named is not None and not named.left else _crew.seat_for_scope(caller)
     return seat if seat is not None and not seat.left else None
 
 
@@ -1190,12 +1270,7 @@ def _named_project(project_id: str | None) -> str | None:
 
 def _crew_mark_left(seat: Any = None) -> None:
     try:
-        if seat is None:
-            _crew.mark_left(_crew_caller())
-            return
-        with seat.lock:
-            seat.left = True
-            seat.pending.clear()
+        _crew.mark_left(_crew_caller(), seat)
     except Exception:
         return
 
@@ -2265,6 +2340,11 @@ def _call_project(client: Memory, project_id: str, root_path: str, chosen: str |
     return str(resolved)
 
 
+def _write_project(project_id: str | None) -> str | None:
+    """The project a crew write named (aliases applied), or None when it named none."""
+    return _named_project(project_id)
+
+
 def _crew_project(
     project_id: str | None, git_remote: str | None, root_path: str | None
 ) -> tuple[str | None, dict[str, Any] | None, Memory]:
@@ -2377,7 +2457,9 @@ async def crew_claim(
         baton: For release: keep the area reserved for the next agent.
         reason: Short note shown to the crew.
         wait_s: Seconds to wait for a grant (0–300).
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
@@ -2407,6 +2489,7 @@ async def crew_claim(
             baton=baton,
             reason=reason,
             wait_s=wait_s,
+            project_id=_write_project(project_id),
         ),
     )
 
@@ -2433,11 +2516,17 @@ async def crew_guard(
         paths: Repo-relative paths you are about to write (can be empty with command/mcp_tool).
         command: A shell command you are about to run.
         mcp_tool: The name of an MCP tool you are about to call.
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {"paths": paths, "command": command, "mcp_tool": mcp_tool, "project_id": project_id, "root_path": root_path}
-    return await _run_crew("crew_guard", args, lambda who: _crew.guard(who, paths=paths, command=command, mcp_tool=mcp_tool))
+    return await _run_crew(
+        "crew_guard",
+        args,
+        lambda who: _crew.guard(who, paths=paths, command=command, mcp_tool=mcp_tool, project_id=_write_project(project_id)),
+    )
 
 
 @mcp.tool(
@@ -2472,7 +2561,9 @@ async def crew_task(
         acceptance: Criteria [{id, text, kind: test|command|file|commit|deploy|manual, match?, url?, required}].
         phase: Optional phase label.
         note: Body for create/update, or the reason for block.
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
@@ -2500,6 +2591,7 @@ async def crew_task(
             acceptance=acceptance,
             phase=phase,
             note=note,
+            project_id=_write_project(project_id),
         ),
     )
 
@@ -2530,7 +2622,9 @@ async def crew_say(
         to: crew, or @callsign / @agent / @crew / @mani.
         thread: Message id to reply in (msg_…).
         wait_s: Seconds to wait for a reply (0–120).
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
@@ -2543,7 +2637,11 @@ async def crew_say(
         "root_path": root_path,
     }
     return await _run_crew(
-        "crew_say", args, lambda who: _crew.say(who, body=body, kind=kind, to=to, thread=thread, wait_s=wait_s)
+        "crew_say",
+        args,
+        lambda who: _crew.say(
+            who, body=body, kind=kind, to=to, thread=thread, wait_s=wait_s, project_id=_write_project(project_id)
+        ),
     )
 
 
@@ -2574,7 +2672,9 @@ async def crew_checkpoint(
         tests: Test runs [{command, passed, failed}] (counts).
         next_step: What you do next.
         task: Task ref (default: none).
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
@@ -2598,6 +2698,7 @@ async def crew_checkpoint(
             tests=tests,
             next_step=next_step,
             task=task,
+            project_id=_write_project(project_id),
         ),
     )
 
@@ -2631,7 +2732,9 @@ async def crew_report(
         tests: Test runs [{command, passed, failed}].
         summary: Optional short summary (checked against the facts).
         release: Release the task's claims when it is done (default true).
-        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
+            you work in more than one project or share this MCP server with other conversations (default:
+            the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
@@ -2657,6 +2760,7 @@ async def crew_report(
             tests=tests,
             summary=summary,
             release=release,
+            project_id=_write_project(project_id),
         ),
     )
 

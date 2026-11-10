@@ -60,6 +60,7 @@ Store information in persistent memory.
 | `content` | string | ✅ | Text content to memorize |
 | `metadata` | object | ❌ | Key-value metadata (e.g., `{"source": "meeting"}`) |
 | `ttl` | string | ❌ | Time-to-live: a number and a unit, e.g. `24h`, `7d`, `30d`, `1y` ([TTL formats](../guides/temporal.md#ttl-formats)); a value the server cannot read is refused. Omit for permanent |
+| `project_id` | string | ❌ | Project to store into. Default: the project your `session_brief` resolved, else the configured one. Required once this MCP server was briefed on more than one project ([one server, several conversations](#one-server-several-conversations)) |
 
 **Example:**
 ```
@@ -533,7 +534,7 @@ Every store is stamped with provenance metadata: `agent_id`, `session_id`, `host
 `client_version`, and `source: "mcp"`. Keys you pass in `metadata` take precedence, except
 that an agent-scoped API key always stamps its own `agent_id`, and the relay-only keys
 `relay` / `relay_key` are dropped. After a `session_brief` that resolved a project by
-location, `store_memory` stores into that project.
+location, `store_memory` stores into that project, unless you pass `project_id`.
 Recall, timeline and list results include `metadata`, `memory_type`, `source_id` and `agent_id`.
 
 `recall_memories` also accepts `retrieval_mode` (`balanced`, `debug` for recent-first,
@@ -582,12 +583,30 @@ Agents with crew hooks get the same checks from the hooks; for MCP-only agents t
 | Tool | Purpose |
 |------|---------|
 | `crew_status(project_id?, git_remote?, root_path?, verbose=false)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. |
-| `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
-| `crew_guard(paths, command?, mcp_tool?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
-| `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
-| `crew_say(body, kind="chat", to="crew", thread?, wait_s=0)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
-| `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
-| `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true)` | The completion report (done / not done / failing / next) a task needs before it is done. |
+| `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0, project_id?)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
+| `crew_guard(paths, command?, mcp_tool?, project_id?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
+| `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?, project_id?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
+| `crew_say(body, kind="chat", to="crew", thread?, wait_s=0, project_id?)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
+| `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?, project_id?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
+| `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true, project_id?)` | The completion report (done / not done / failing / next) a task needs before it is done. |
+
+### One server, several conversations
+
+On stdio one MCP server process is one MCP session. Some clients start one process per conversation; a
+desktop app can start a single process for all its conversations, which then share that session.
+
+- Every crew tool that writes takes `project_id`. A write that names its project goes to that project's crew
+  and does not change which project later calls default to.
+- The answer of every crew write ends with the crew it used and your callsign there, for example
+  `(in CREW my-project as cd-1)`.
+- Once a server has been used for more than one project, a crew write, `store_memory` or `close_session`
+  that names no project is refused with a message asking for `project_id` (for `close_session`, `root_path`
+  or `git_remote` also work). Nothing is written. Before, such a call followed the project chosen last,
+  which could be another conversation's.
+- `close_session` ends the crew session of the project it closes, not the one used last.
+- A server that crewd recognises as part of one agent's process tree (the agent has crew hooks) serves one
+  conversation, so there the project chosen last is still the default.
+- `crew_status` without a project still shows the project chosen last; its first line names the crew.
 
 ---
 

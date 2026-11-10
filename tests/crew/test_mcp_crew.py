@@ -389,7 +389,9 @@ def test_claim_by_paths_release_handover_and_accept(live, clock):
     assert holder == [{"callsign": b_sign, "epoch": 2}]
     released = call("crew_claim", action="release", zone="billing")
     assert released.startswith("RELEASED zone billing"), released
-    assert call("crew_claim", action="release", zone="billing") == "NOTHING RELEASED: you hold no live claim on that."
+    assert call("crew_claim", action="release", zone="billing") == (
+        f"NOTHING RELEASED: you hold no live claim on that.\n(in CREW {project} as {b_sign})"
+    )
 
 
 def test_claim_wait_s_long_polls_until_the_holder_releases(live, clock):
@@ -440,7 +442,7 @@ def test_adopt_a_baton_offered_in_the_crew_block(live, clock):
     call("crew_task", action="create", title="Invoice PDF", zones=["pos"])
     call("crew_task", action="start", task="T-1")
     released = call("crew_task", action="release", task="T-1")
-    assert released == "RELEASED T-1: now stalled.", released
+    assert released == f"RELEASED T-1: now stalled.\n(in CREW {project} as {a_sign})", released
     use(b)
     refused = call("crew_claim", zone="pos")
     assert refused.startswith(f"REFUSED: zone pos RESERVED for the next pickup by {a_sign} for T-1"), refused
@@ -458,7 +460,7 @@ def test_adopt_a_baton_offered_in_the_crew_block(live, clock):
 
 
 def test_task_update_block_and_the_done_rule(live, clock):
-    project, a, *_ = _two_agents(live, "update")
+    project, a, a_sign, *_ = _two_agents(live, "update")
     use(a)
     call("crew_task", action="create", title="Reports export", zones=["reports"])
     call("crew_task", action="start")  # no task named: nothing current yet
@@ -467,9 +469,9 @@ def test_task_update_block_and_the_done_rule(live, clock):
         "NOT UPDATED T-1: a task is finished by a report"
     )
     blocked = call("crew_task", action="update", task="T-1", status="blocked", note="waiting for the API key")
-    assert blocked == "UPDATED T-1: status → blocked.", blocked
+    assert blocked == f"UPDATED T-1: status → blocked.\n(in CREW {project} as {a_sign})", blocked
     unblocked = call("crew_task", action="update", task="T-1", status="in_progress", phase="build")
-    assert unblocked == "UPDATED T-1: status → in_progress; changed phase.", unblocked
+    assert unblocked == f"UPDATED T-1: status → in_progress; changed phase.\n(in CREW {project} as {a_sign})", unblocked
     row = live.crew_rows("SELECT status, phase FROM crew_tasks WHERE crew_id = ?", (crew_id_of(live, project),))[0]
     assert (row["status"], row["phase"]) == ("in_progress", "build")
 
@@ -792,7 +794,9 @@ def test_resource_claims_and_declining_a_handover(live, clock):
     use(a)
     assert call("crew_claim", action="handover", zone="schema:main", to=b_sign).startswith("OFFERED schema:main")
     use(b)
-    assert call("crew_claim", action="decline", zone="schema:other") == "NOTHING TO DECLINE: no handover is offered to you."
+    assert call("crew_claim", action="decline", zone="schema:other") == (
+        f"NOTHING TO DECLINE: no handover is offered to you.\n(in CREW {project} as {b_sign})"
+    )
     declined = call("crew_claim", action="decline", zone="schema:main")
     assert declined.startswith("DECLINED schema:main"), declined
     holder = live.crew_rows(

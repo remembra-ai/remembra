@@ -16,13 +16,17 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 
 **Which project a call acts in.** `project_id` (or `root_path`, the repository checkout, resolved
 read-only like `session_brief`) on one of these tools names the project for that call only; it does
-not change what later calls default to. Without it the call follows the latest project this MCP
-session chose with `session_brief` or `crew_status`, else the agent's crew-hook session. A local
+not change what later calls default to. Without it the call uses the project this MCP session chose
+with `session_brief` or `crew_status`, else the agent's crew-hook session; when the session chose
+several (one stdio server can serve several conversations) the call is refused and asks for
+`project_id`, unless the server runs inside one agent's process tree. A local
 stdio server does not fall back to the configured `REMEMBRA_PROJECT` on its own (only
 `REMEMBRA_RELAY_PROJECT`, the one-namespace opt-in, is a default): with no project chosen the tool
 answers `CREW: No project yet …`, and a `root_path` that is not a git repository and is bound to no
 project is refused unless the session already chose the configured project. On a stdio server
-every result but `crew_status`'s ends with `(project <id>)`, the project the call used. An argument
+every result but `crew_status`'s ends with `(project <id>)`, the project the call used, and on every
+transport the answer of each of these six tools carries the line `(in CREW <project> as <callsign>)`.
+An argument
 a tool does not have is refused with the list of the ones it takes.
 
 Parameter order in the Python signature is free (required parameters first); names, types,
