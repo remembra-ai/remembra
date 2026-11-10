@@ -529,13 +529,17 @@ _LOOSE_SUMMARY_RE = re.compile(
     r"\b\d+\s+(?:passed|failed|errors?|failures?)\b|^Tests?:\s|\bTEST (?:SUCCEEDED|FAILED)\b|^(?:ok|FAIL)\s|\btest result:",
     re.IGNORECASE,
 )
+# A count is read as a count: zero ("FAIL: 0", "0 failed", "failures=0", "00") is never a failure,
+# any other number is, zero-padded or not, whichever side of the word it is written on.
 _FAILURE_RES = (
-    re.compile(r"(?<![\w.])[1-9]\d*\s+(?:failed|failing|failures?|errors?)\b", re.IGNORECASE),
+    # "3 failed", and not the "5 failed" inside "passed=5 failed=0" (there the word labels the next count)
+    re.compile(r"(?<![\w.])0*[1-9]\d*\s+(?:failed|failing|failures?|errors?)\b(?!\s*[:=]\s*\d)", re.IGNORECASE),
     re.compile(r"\bTEST FAILED\b"),
     re.compile(r"\btest result: FAILED\b", re.IGNORECASE),
-    re.compile(r"^FAIL(?:ED)?\b"),
-    re.compile(r"\b(?:failures|errors|failed)\s*[:=]\s*[1-9]", re.IGNORECASE),
-    re.compile(r"^# fail [1-9]"),
+    # the verdict word a runner starts a failure line with; not the label of a zero count ("FAIL: 0", "FAILED=0", "FAIL 0")
+    re.compile(r"^FAIL(?:ED)?\b(?!\s*[:=]\s*0+(?!\.?\d)|\s+0+$)"),
+    re.compile(r"\b(?:fail(?:ed|ures?)?|errors?)\s*[:=]\s*0*[1-9]", re.IGNORECASE),
+    re.compile(r"^# fail 0*[1-9]"),
     re.compile(r"^not ok\b"),
     re.compile(r"^Some tests failed\b"),
     re.compile(r"^FAILURES!"),
@@ -548,6 +552,13 @@ _COUNTS_ONLY_RE = re.compile(
     r"(?: in \d[\d.:]*\s*[a-z]*)?\.?$",
     re.IGNORECASE,
 )
+# A line of nothing but labelled counts ("FAIL: 0", "PASS: 12, FAIL: 3", "passed=5 failed=0 errors=0",
+# automake's "# FAIL:  0"): a runner's or a wrapper's tally, read like the counts-only line above.
+_COUNT_LABEL = (
+    r"(?:total|tests?|ran|pass(?:ed|es)?|ok|fail(?:ed|ures?)?|errors?|skip(?:ped|s)?|xfail(?:ed)?|xpass(?:ed)?"
+    r"|todo|pending|ignored|warnings?|deselected|assertions?)"
+)
+_LABELLED_COUNTS_RE = re.compile(rf"^(?:#\s*)?(?:{_COUNT_LABEL}\s*[:=]\s*\d+(?:\s*[,;|]\s*|\s+|(?=\.?$)))+\.?$", re.IGNORECASE)
 # A summary that says tests ran and passed ...
 _RAN_RES = (
     re.compile(r"(?<![\w.])[1-9]\d*\s+(?:tests?\s+)?(?:passed|passing|pass|succeeded|examples?)\b", re.IGNORECASE),
@@ -569,16 +580,23 @@ def _reads_failed(text: str) -> bool:
 
 
 # Lines only a runner prints for a failure ("not ok 3 - parses the header", "FAILED tests/a.py::test_x", "FAILURES!").
-_FAILURE_LINE_RE = re.compile(r"^(?:not ok\b|FAIL(?:ED|URES!)?(?=$|[\s:(])|# fail [1-9]|Some tests failed\b)|\bTEST FAILED\b")
+_FAILURE_LINE_RE = re.compile(r"^(?:not ok\b|FAIL(?:ED|URES!)?(?=$|[\s:(])|# fail 0*[1-9]|Some tests failed\b)|\bTEST FAILED\b")
 
 
 def _is_summary_line(text: str) -> bool:
-    return any(rx.search(text) for rx in _SUMMARY_RES) or bool(_COUNTS_ONLY_RE.match(text)) or bool(_FAILURE_LINE_RE.search(text))
+    return (
+        any(rx.search(text) for rx in _SUMMARY_RES)
+        or bool(_COUNTS_ONLY_RE.match(text))
+        or bool(_LABELLED_COUNTS_RE.match(text))
+        or bool(_FAILURE_LINE_RE.search(text))
+    )
 
 
 def summary_shows_failure(summary: Any) -> bool:
     """True when ``summary`` is a runner's summary line that reports failed tests or errors
-    (``"1 failed, 214 passed in 3.2s"``, ``"1 failed, 214 passed"``, ``"Tests: 1 failed, 10 total"``).
+    (``"1 failed, 214 passed in 3.2s"``, ``"1 failed, 214 passed"``, ``"Tests: 1 failed, 10 total"``,
+    ``"FAIL: 2"``, ``"failed=2"``). A zero count is not a failure in any form (``"FAIL: 0"``,
+    ``"0 failed"``, ``"failures: 0"``, ``"errors=0"``).
 
     Only a runner's line counts. A sentence an agent wrote about its run (``"214 passed after
     fixing the 2 failures from the first run"``) is not one and never overrides the verdict it
