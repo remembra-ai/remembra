@@ -251,14 +251,19 @@ def _print_json(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
-def _fail(res: Mapping[str, Any]) -> int:
+def _fail(res: Mapping[str, Any], resource_example: str | None = None) -> int:
+    """Print why a command was refused. ``resource_example`` (how this command names a resource)
+    adds the server's reasons for an invalid body and the form of resource it takes."""
     msg = res.get("message") or res.get("error") or f"HTTP {res.get('status')}"
     body = res.get("body")
+    why = ""
     if isinstance(body, dict):
         detail = body.get("detail", body)
         if isinstance(detail, dict):
             msg = detail.get("message") or detail.get("error") or msg
-    print(f"REFUSED: {S.clip_item(str(msg), 300)}")
+            if resource_example:
+                why = S.body_problems_text(detail.get("problems"), resource_example)
+    print(f"REFUSED: {S.clip_item(str(msg), 300)}{why}")
     return 1
 
 
@@ -916,9 +921,6 @@ def _own_claim(snap: Mapping[str, Any], session_id: str, target: str) -> dict[st
     return min(hits, key=lambda c: _CLAIM_PICK_ORDER.get(str(c.get("state")), 3), default=None)
 
 
-_CLASSIC_RESOURCE_KINDS: Final = ("schema", "deploy", "service", "supabase", "mcp")
-
-
 def _is_file_here(target: str) -> bool:
     """A file or directory of that name exists (a path that merely looks like ``kind:name``)."""
     try:
@@ -928,8 +930,15 @@ def _is_file_here(target: str) -> bool:
 
 
 def _claim_target(snap: Mapping[str, Any], target: str) -> dict[str, Any]:
-    """What ``claim <target>`` names: a ``kind:name`` resource, a zone slug, else a path glob."""
-    if S.is_resource(target) and (target.split(":", 1)[0] in _CLASSIC_RESOURCE_KINDS or not _is_file_here(target)):
+    """What ``claim <target>`` names: a ``kind:name`` resource, a zone slug, else a path glob.
+
+    A schema:/deploy:/service:/supabase:/mcp: target is always a resource, well formed or not (the
+    server refuses a bad one; it must not be granted as a path glob that guards nothing). Any other
+    ``kind:name`` is a resource unless a file of that name is here.
+    """
+    if ":" in target and target.split(":", 1)[0] in S.CLASSIC_RESOURCE_KINDS:
+        return {"resource": target}
+    if S.is_resource(target) and not _is_file_here(target):
         return {"resource": target}
     zone = _zone_by_slug(snap, target)
     if zone is not None:
@@ -968,7 +977,7 @@ def cmd_claim(args: argparse.Namespace, layout: Layout) -> int:
             f'Work elsewhere or ask with: remembra-crew say --to @{b.get("holder_callsign") or "mani"} --kind request_release "…"'
         )
         return 1
-    return _fail(res)
+    return _fail(res, "remembra-crew claim {}")
 
 
 def cmd_release(args: argparse.Namespace, layout: Layout) -> int:

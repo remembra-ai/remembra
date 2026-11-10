@@ -712,6 +712,44 @@ def is_resource(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(RESOURCE_PATTERN, value) is not None
 
 
+# The five kinds a server before 0.17.7 takes (its RESOURCE_PATTERN, as it appears in its 422 problems).
+CLASSIC_RESOURCE_KINDS: Final = ("schema", "deploy", "service", "supabase", "mcp")
+_PROBLEM_RE: Final = re.compile(r"\$\.?(?P<field>[A-Za-z0-9_.\[\]]{0,80}): (?P<what>.{1,400})", re.S)
+_PROBLEM_VALUE_RE: Final = re.compile(r"^.*? (?=(?:not in|does not match) )", re.S)
+
+
+def body_problems_text(problems: Any, example: str = 'zone="{}"', clean: Callable[[str, int], str] | None = None) -> str:
+    """A 422's ``problems`` as text to put after "The body is invalid.", without the values the server quotes back.
+
+    The route lists its reasons next to the message; without them a caller cannot tell which field
+    to change. A refused resource also gets the form this server takes: the five classic kinds for
+    a server before 0.17.7, ``kind:name`` otherwise. ``example`` is how the caller names a resource
+    (an MCP argument, a CLI command line); ``clean`` clips and sanitizes one reason.
+    """
+    if not isinstance(problems, list):
+        return ""
+    clean = clean or clip_item
+    shown: list[str] = []
+    resource_form = ""
+    for problem in problems:
+        m = _PROBLEM_RE.fullmatch(problem) if isinstance(problem, str) else None
+        if m is None:
+            continue
+        what = _PROBLEM_VALUE_RE.sub("", m["what"], count=1)
+        if m["field"] == "resource" and "does not match" in what:
+            resource_form = (
+                " This server takes only schema:, deploy:, service:, supabase: and mcp: resources: "
+                f"name it with one of those, e.g. {example.format('service:<name>')}."
+                if "|".join(CLASSIC_RESOURCE_KINDS) in what
+                else " A resource is kind:name: a lowercase kind (2-15 letters, digits or -), then a name of letters, "
+                f"digits and . _ / - (up to 64), e.g. {example.format('artifact:qa-report')}."
+            )
+        shown.append(clean(f"{m['field'] or 'body'}: {what}", 200))
+        if len(shown) == 3:
+            break
+    return (" " + "; ".join(shown) + "." if shown else "") + resource_form
+
+
 def is_path_rel(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(PATH_REL_PATTERN, value) is not None
 
