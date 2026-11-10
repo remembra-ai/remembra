@@ -14,6 +14,8 @@ GIT_ENV = {
     "GIT_COMMITTER_NAME": "Relay Test",
     "GIT_COMMITTER_EMAIL": "relay@example.test",
     "GIT_CONFIG_NOSYSTEM": "1",
+    # the relay CLI's subprocess env is built from this: no detached `remembra-relay drain` unless a test asks
+    "REMEMBRA_RELAY_DRAIN": "off",
 }
 
 

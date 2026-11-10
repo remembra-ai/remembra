@@ -8,6 +8,9 @@ os.environ.setdefault("REMEMBRA_RATE_LIMIT_ENABLED", "false")
 # Never let the suite reach the live TypeSafe API because a developer shell
 # exports TYPESAFE_API_KEY. The opt-in live smoke test sets its own mode.
 os.environ["REMEMBRA_TYPESAFE_MODE"] = "off"
+# A close that queues starts a detached `remembra-relay drain`; tests that do not test it must not
+# leave background processes behind (tests/test_fs_relay_drain.py turns it on for itself).
+os.environ.setdefault("REMEMBRA_RELAY_DRAIN", "off")
 
 import aiosqlite
 import pytest

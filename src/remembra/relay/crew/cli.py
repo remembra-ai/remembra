@@ -369,6 +369,22 @@ def relay_hook_verdict(adapter: str, payload: Mapping[str, Any], verb: str) -> t
     return None
 
 
+def kick_relay_drain() -> None:
+    """Have the RELAY outbox (``~/.remembra/relay/outbox``) sent in the background, when something is queued.
+
+    A crew session's start and end go to crewd, which sends its own crew outbox and never this one; only
+    the plain ``remembra-relay brief`` / ``close`` of a session that is not a crew session did. So a handoff
+    queued at a shutdown or on a timeout waited for the next such session. One directory listing when the
+    queue is empty; never raises, never waits (:func:`remembra.relay.outbox.kick_drain`).
+    """
+    try:
+        from remembra.relay import outbox
+
+        outbox.kick_drain(Path(os.environ.get("HOME") or Path.home()), now=True)
+    except Exception as e:
+        _err(f"relay drain not started: {e.__class__.__name__}")
+
+
 def _hook_ack(adapter: str) -> None:
     """What a hook prints when it has nothing to say: ``{}`` for Cursor, which logs empty stdout as a failed hook."""
     if HOOK_OUTPUT.get(adapter) == "cursor-json":
@@ -599,6 +615,7 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             )
             return 0
         _env_file(join)
+        kick_relay_drain()  # a crew session never runs the relay's brief: what an earlier close queued goes now
         # a late join has used up the deadline: its brief gets what is left of the hard limit instead
         brief_s = max(left(), started + START_HARD_S - time.monotonic()) if late else left()
         brief = rpc(layout, "brief", {"key": join["key"]}, timeout=brief_s) if brief_s >= MIN_STEP_S else None
@@ -676,6 +693,7 @@ def cmd_end(args: argparse.Namespace, layout: Layout) -> int:
         }
         if not rpc_send(layout, "end", body):
             _spool_hook(layout, "leave", key, {k: v for k, v in body.items() if k != "key"})
+        kick_relay_drain()  # a crew session never runs the relay's close: what an earlier close queued goes now
     except Exception as e:
         _err(f"end failed: {e.__class__.__name__}")
     return 0

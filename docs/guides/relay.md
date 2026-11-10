@@ -275,6 +275,25 @@ orders by that time: one that arrives late is kept in the trail but does not rep
 (`2d ago, received just now`). The queue keeps at most 50 entries for at most 14 days; anything dropped
 is logged.
 
+A queued handoff does not wait for the next `brief` or `close`. A close that queues on a failure that
+waiting can fix (no network, a timeout, HTTP 429 or 5xx) starts `remembra-relay drain` in the background:
+it tries again after 45 seconds and after 3 more minutes, then exits. A crew session's start and end
+(`remembra-crew start` / `end`) start one too when something is queued, so the first session after a
+restart sends what the shutdown left behind. One drain runs per machine account; `REMEMBRA_RELAY_DRAIN=off`
+turns it off, `REMEMBRA_RELAY_DRAIN=30,120` sets the waits in seconds.
+
+A handoff the server refuses (HTTP 403) is held instead of being sent again by every `brief` and `close`.
+When the key is scoped to another agent than the one the handoff is from, it is never sent on its own
+again; any other refusal (the key may not write to that project) is tried again after 1 hour, 6 hours,
+then once a day. The brief then says a queued handoff was refused, not that your key was. To see, drop or
+send what is queued:
+
+```bash
+remembra-relay outbox list                       # every queued handoff, its last error, why it is held
+remembra-relay outbox drop <agent> <session>     # remove one without sending it
+remembra-relay outbox send <agent> <session>     # send one now (--source <key source> to use another key)
+```
+
 While something is queued, or when the server rejects your key, the brief starts with one line that says
 so (`Remembra: 1 handoff (1 from claude-code) could not be sent yet …`, or `your API key was rejected`).
 `remembra-relay status` shows the queue, the last success and failure per agent and whether the server

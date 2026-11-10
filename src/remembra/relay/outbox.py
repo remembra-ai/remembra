@@ -4,7 +4,10 @@ When ``close`` cannot deliver a handoff (server down, timeout, 5xx, 429, a
 rejected key, no key yet) the request body is queued in
 ``~/.remembra/relay/outbox/<agent>-<session>.json`` and a line goes to
 ``~/.remembra/relay/relay.log``. Every later ``brief`` and ``close`` sends the
-queue again. The server keeps one current handoff per (agent, session): a
+queue again, and so does ``remembra-relay drain``: a detached process a close
+starts when it queues on a failure that waiting can fix, and a crew session's
+start and end start when something is queued (:func:`kick_drain`), so a queued
+handoff does not wait for the next relay hook. The server keeps one current handoff per (agent, session): a
 repeat close supersedes the previous one, an identical one changes nothing,
 so sending an entry twice (a crash between the send and the delete) is safe.
 
@@ -32,6 +35,8 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Mapping
@@ -533,6 +538,149 @@ def discard(home: Path, agent_id: str, session_id: str) -> bool:
         return False
     log(home, f"outbox: dropped queued {agent_id} session {session_id[:40]}: a newer close was delivered")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Drain: send the queue without waiting for the next brief or close
+# ---------------------------------------------------------------------------
+
+DRAIN_ENV = "REMEMBRA_RELAY_DRAIN"  # "off", or the waits in seconds ("45,180")
+# Seconds a drain waits before each try. Short on purpose: it covers a network that comes back within
+# minutes (Wi-Fi, DNS, a timeout); after that the next hook starts another drain.
+DRAIN_WAITS_SECONDS = (45.0, 180.0)
+DRAIN_MAX_SECONDS = 1800.0  # a drain never lives longer, however often it is asked to go again
+
+
+def drain_waits(environ: Mapping[str, str] | None = None) -> tuple[float, ...] | None:
+    """The waits of a drain, or None when ``REMEMBRA_RELAY_DRAIN`` turns it off. A value that is not a list of
+    seconds counts as unset."""
+    raw = ((os.environ if environ is None else environ).get(DRAIN_ENV) or "").strip().lower()
+    if raw in ("off", "0", "no", "false"):
+        return None
+    try:
+        waits = tuple(min(max(float(part), 0.0), DRAIN_MAX_SECONDS) for part in raw.split(",") if part.strip())
+    except ValueError:
+        waits = ()
+    return waits or DRAIN_WAITS_SECONDS
+
+
+def drain_lock_path(home: Path) -> Path:
+    return relay_dir(home) / "drain.lock"
+
+
+def drain_kick_path(home: Path) -> Path:
+    return relay_dir(home) / "drain.kick"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":  # pragma: no cover - no cheap liveness check: the lock's age decides
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # it exists and belongs to someone else
+    return True
+
+
+def drain_running(home: Path) -> bool:
+    """Whether a live drain holds the lock (its process exists and the lock is not older than a drain can live)."""
+    path = drain_lock_path(home)
+    try:
+        age = time.time() - path.stat().st_mtime
+        pid = int(path.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        return False
+    return age < DRAIN_MAX_SECONDS + 120 and _pid_alive(pid)
+
+
+def acquire_drain_lock(home: Path) -> bool:
+    """Take the single drain slot of this HOME (a pid file). False when a live drain has it. Never raises."""
+    path = drain_lock_path(home)
+    try:
+        _ensure_dir(path.parent)
+        for _ in range(2):
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                if drain_running(home):
+                    return False
+                with contextlib.suppress(OSError):
+                    path.unlink()  # left by a drain that was killed
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def release_drain_lock(home: Path) -> None:
+    path = drain_lock_path(home)
+    try:
+        if int(path.read_text(encoding="utf-8").strip() or 0) == os.getpid():
+            path.unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def read_drain_kick(home: Path) -> tuple[float, float] | None:
+    """``(when it was asked, not before when)`` of the newest request to a running drain, or None."""
+    path = drain_kick_path(home)
+    try:
+        return path.stat().st_mtime, float(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _worth_a_drain(path: Path) -> bool:
+    """A queued entry that trying again may deliver: not one waiting for a new key (401) or held after a refusal."""
+    entry = read_entry(path)
+    return entry is not None and entry.data.get("last_status") != 401 and refusal_hold(entry) is None
+
+
+def kick_drain(home: Path, *, now: bool = False, environ: Mapping[str, str] | None = None) -> bool:
+    """Have the queue sent in the background: start a detached ``remembra-relay drain``, or tell the running one.
+
+    ``now`` is for a caller that has no reason to think the server is unreachable (a session start or end
+    finding older entries): the first try is immediate. Without it the first try waits (the caller's own
+    request has just failed). Nothing happens when the drain is turned off (``REMEMBRA_RELAY_DRAIN=off``) or
+    nothing is queued. True when a drain is running or was started. Never raises, never blocks: the child
+    has its own session and no pipe of the caller's, so a hook returns at once.
+    """
+    env = os.environ if environ is None else environ
+    try:
+        waits = drain_waits(env)
+        if waits is None or not any(_worth_a_drain(path) for path in outbox_dir(home).glob("*.json")):
+            return False
+        if drain_running(home):
+            atomic_write_private(drain_kick_path(home), str(time.time() + (0.0 if now else waits[0])))
+            return True
+        argv = [sys.executable, "-m", "remembra.relay.cli", "drain", *(["--now"] if now else [])]
+        kwargs: dict[str, Any] = {}
+        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+            kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen(  # noqa: S603
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            env={**env, "HOME": str(home)},
+            **kwargs,
+        )
+        return True
+    except Exception as e:
+        log(home, f"drain: could not start ({e.__class__.__name__})")
+        return False
 
 
 # ---------------------------------------------------------------------------

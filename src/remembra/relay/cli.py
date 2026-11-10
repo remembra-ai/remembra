@@ -126,6 +126,9 @@ REPLAY_BUDGET_SECONDS = 3.5
 CLOSE_RESERVE_SECONDS = 4.0
 # `remembra-relay outbox send` is run by hand, not by a hook: one request may take this long.
 OUTBOX_SEND_SECONDS = 30.0
+# `remembra-relay drain` runs detached, nobody waits for it: one resend, and one pass over the queue.
+DRAIN_ENTRY_SECONDS = 20.0
+DRAIN_PASS_SECONDS = 120.0
 USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usage-limit stop
 DOCTOR_POINTER = " Ask your agent to run remembra_doctor, or run `remembra-relay doctor`."
 
@@ -607,7 +610,13 @@ def _failure(response: httpx.Response | None, error: BaseException | None) -> st
     return f"{error.__class__.__name__}: {error}" if error else "unknown error"
 
 
-def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: float = 0.0, drop_skipped: bool = True) -> Replay:
+def replay_outbox(
+    ctx: Context,
+    skip: tuple[str, str] | None = None,
+    reserve: float = 0.0,
+    drop_skipped: bool = True,
+    entry_budget: float = REPLAY_BUDGET_SECONDS,
+) -> Replay:
     """Send queued closes, oldest first, within a small budget. Never raises.
 
     Each entry goes with the key of the config source that queued it, to the
@@ -623,7 +632,8 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
     its own when the key is scoped to another agent, else on a backoff). ``skip`` is the
     (agent, session) the caller closes itself: its queued copy is never sent, and with ``drop_skipped`` it is
     dropped (the caller's close has been delivered and supersedes it).
-    ``reserve`` is time left untouched for the caller's own request.
+    ``reserve`` is time left untouched for the caller's own request. ``entry_budget`` is what one resend
+    may use: small inside a hook, larger for ``remembra-relay drain``, which nobody waits for.
     """
     report = Replay()
     try:
@@ -642,7 +652,7 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
                 outbox.discard(ctx.home, entry.agent_id, entry.session_id)
             continue
         left = ctx.deadline.end - time.monotonic()
-        if stop or attempted >= REPLAY_MAX_ENTRIES or left < REPLAY_BUDGET_SECONDS + reserve:
+        if stop or attempted >= REPLAY_MAX_ENTRIES or left < entry_budget + reserve:
             report.remaining.append(entry)
             continue
         config, _held = replay_config(entry)
@@ -669,7 +679,7 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
                 json=entry.payload,
                 config=config,
                 agent=entry.agent_id or None,
-                budget=REPLAY_BUDGET_SECONDS,
+                budget=entry_budget,
             )
         except Exception as e:
             error = e
@@ -709,6 +719,13 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
             report.key_rejected.append(config.source)
         stop = True  # unreachable, rate-limited or a rejected key: try again next time
     return report
+
+
+def _retry_words() -> str:
+    """What sends a waiting handoff, for a notice."""
+    if outbox.drain_waits() is None:
+        return "the next brief or close retries"
+    return "it is retried in the background, and by the next brief or close"
 
 
 def _refusal_hold(entry: outbox.Entry) -> tuple[str, str] | None:
@@ -764,7 +781,7 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
         total = len(waiting)
         notices.append(
             f"Remembra: {total} handoff{'s' if total != 1 else ''} ({who}) could not be sent yet and"
-            f" {'are' if total != 1 else 'is'} queued on this machine; the next brief or close retries."
+            f" {'are' if total != 1 else 'is'} queued on this machine; {_retry_words()}."
             " The trail may be missing the newest session. `remembra-relay status` shows why." + DOCTOR_POINTER
         )
     if elsewhere:
@@ -1341,6 +1358,12 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
             f"the server refused the handoff (HTTP 403); it is queued in {path.parent} and held, not re-sent by every"
             " brief or close. `remembra-relay outbox list` says when or whether it goes again;"
             " `remembra-relay outbox drop <agent> <session>` removes it."
+        )
+    elif path is not None and http_status != 401 and ctx.config.api_key and outbox.kick_drain(ctx.home):
+        # a failure that waiting can fix (unreachable, timeout, 5xx, 429): do not wait for the next hook
+        _err(
+            f"the handoff is queued in {path.parent}; it is retried in the background over the next minutes,"
+            " and sent by the next brief or close at the latest"
         )
     elif path is not None:
         _err(f"the handoff is queued in {path.parent} and will be sent by the next brief or close")
@@ -2037,6 +2060,75 @@ def _check_key(config: RelayConfig) -> dict[str, Any]:
     return {"state": "unchecked", "http_status": response.status_code, "error": _http_error(response)}
 
 
+def _sendable(home: Path) -> list[outbox.Entry]:
+    """Queued entries a drain may still deliver by trying again: not held, not refused, key not rejected."""
+    try:
+        entries = outbox.pending(home)
+    except Exception:
+        return []
+    return [e for e in entries if e.data.get("last_status") != 401 and _held(e) is None]
+
+
+def cmd_drain(args: argparse.Namespace) -> int:
+    """Send the queue in the background (started detached by :func:`outbox.kick_drain`; one per HOME).
+
+    Tries after each wait of ``outbox.drain_waits()`` (at once first with ``--now``) and stops as soon as
+    nothing is left that trying again can deliver: the queue is empty, or what remains is held, refused
+    (403) or waits for a new key (401). A request from :func:`outbox.kick_drain` while it runs (a newer
+    queued close, a session start) makes it go again. Not a hook: one resend may take ``DRAIN_ENTRY_SECONDS``.
+    """
+    home = _home()
+    waits = outbox.drain_waits()
+    if waits is None or not _sendable(home):
+        return 0
+    if not outbox.acquire_drain_lock(home):
+        outbox.log(home, "drain: another drain is running; it was told to go again")
+        outbox.kick_drain(home, now=bool(args.now))
+        return 0
+    started = time.monotonic()
+    sent = 0
+    try:
+        outbox.log(home, f"drain: started ({len(_sendable(home))} queued handoff(s) to send)")
+        delays = (0.0, *waits) if args.now else waits
+        step = 0
+        seen = time.time()
+        next_at = seen + delays[0]
+        while time.monotonic() - started < outbox.DRAIN_MAX_SECONDS:
+            while time.time() < next_at and time.monotonic() - started < outbox.DRAIN_MAX_SECONDS:
+                time.sleep(min(1.0, max(0.05, next_at - time.time())))
+                kick = outbox.read_drain_kick(home)
+                if kick is not None and kick[0] > seen:  # asked to go again: a newer queued close, a session start
+                    seen = kick[0]
+                    next_at = min(next_at, kick[1])
+                    step = 0
+            if not _sendable(home):
+                break
+            ns = argparse.Namespace(hook=None, agent=None, cwd=str(home), project=None, session_id=None)
+            ctx = Context(ns, payload={})
+            ctx.deadline = factlib.Deadline(DRAIN_PASS_SECONDS)
+            ctx.http_timeout = DRAIN_ENTRY_SECONDS
+            report = replay_outbox(ctx, entry_budget=DRAIN_ENTRY_SECONDS)
+            sent += len(report.sent)
+            if not _sendable(home):
+                break
+            if report.sent:
+                continue  # more than one pass sends: go on while it works
+            step += 1
+            if step >= len(delays):
+                break
+            next_at = time.time() + delays[step]
+    except Exception as e:
+        outbox.log(home, f"drain: stopped ({e.__class__.__name__}: {e})")
+    finally:
+        outbox.release_drain_lock(home)
+        try:
+            left = len(outbox.pending(home))
+        except Exception:
+            left = -1
+        outbox.log(home, f"drain: finished, sent {sent}, {left} still queued")
+    return 0
+
+
 def _held(entry: outbox.Entry) -> str | None:
     """Why a queued entry is not sent now (:func:`replay_config`, then :func:`outbox.refusal_hold`), or None."""
     reason = replay_config(entry)[1]
@@ -2422,6 +2514,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Send with the key of this source (`env`, `claude:<path>`, `codex:<path>`, ...), not the one that queued it",
     )
     p_outbox.set_defaults(func=cmd_outbox)
+
+    # Started detached by a close that queued, or by a crew session's start or end (outbox.kick_drain).
+    p_drain = sub.add_parser("drain", help="Send the queued handoffs now and over the next minutes, then exit")
+    p_drain.add_argument("--now", action="store_true", help="Try at once instead of waiting first")
+    p_drain.set_defaults(func=cmd_drain)
     projects.add_parser(sub)
     return parser
 
