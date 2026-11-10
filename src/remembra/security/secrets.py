@@ -371,12 +371,26 @@ _MIN_TOKEN_CHARS = 32
 # A URL up to the token: "https://www.youtube.com/channel/", "www.facebook.com/".
 _URL_HEAD_RE = re.compile(r"(?i)(?:[a-z][a-z0-9+.\-]*://|(?<![A-Za-z0-9.])www\.)[^\s\"'<>]*$")
 _URL_PART_RE = re.compile(r"[^/=]+")
+# In a query or fragment a value is one part, "/" and all: base64 has "/" in its alphabet.
+_URL_QUERY_PART_RE = re.compile(r"[^=]+")
 _URL_LOOKBACK = 2048
+# A reset link, a magic link and an OAuth code are 22 to 31 characters; in a URL a part that long
+# and random is cut out too. Outside a URL the 32-character threshold stands.
+_MIN_URL_PART_CHARS = 20
+_WORD_RUN_RE = re.compile(r"[a-z]{4,}|\d{4,}")
+# A name ("getUserProfileById2Handler") is mostly runs of lower-case letters or of digits; in a random
+# token such runs are under a third of the characters 19 times in 20.
+_MAX_WORD_SHARE = 0.4
+# "/channel/<id>", "/user/<id>": a public id, random by design, that names a page.
+_PUBLIC_ID_SEGMENTS = frozenset(
+    {"channel", "channels", "user", "users", "video", "videos", "playlist", "embed", "shorts", "profile", "profiles"}
+)
 
 
-def _in_url(text: str, start: int) -> bool:
-    """True when the token at ``start`` continues a URL (``scheme://host/...`` or ``www.host/...``)."""
-    return bool(_URL_HEAD_RE.search(text[max(0, start - _URL_LOOKBACK) : start]))
+def _url_head(text: str, start: int) -> str | None:
+    """The URL so far when the token at ``start`` continues one (``scheme://host/...``, ``www.host/...``)."""
+    head = _URL_HEAD_RE.search(text[max(0, start - _URL_LOOKBACK) : start])
+    return head.group() if head else None
 
 
 def _entropy(value: str) -> float:
@@ -420,6 +434,8 @@ _ASSIGN_PREFIX_RE = re.compile(r"^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=(?=[^=])")
 _NAME_SPLIT_RE = re.compile(r"[/_=\-]+")
 # Fewer class changes per character than this and the token is words, not random characters.
 _MAX_NAME_BREAKS = 0.15
+_LOWER_WORD_RE = re.compile(r"[a-z]{3,}")
+_LONG_CASE_RUN_RE = re.compile(r"[a-z]{21,}|[A-Z]{21,}")
 
 
 def _reads_like_names(token: str) -> bool:
@@ -433,12 +449,50 @@ def _reads_like_names(token: str) -> bool:
     parts = [part for part in _NAME_SPLIT_RE.split(token) if part]
     if len(parts) < 2:
         return False
+    # Two of the parts hold a word, and no part is one long run of a single case
+    # ("sess_ABCDEFGHJKLMNPQRSTUVWXYZABCDEFGHJK9" is a generated token with a prefix).
+    if sum(1 for part in parts if _LOWER_WORD_RE.search(part)) < 2 or _LONG_CASE_RUN_RE.search(token):
+        return False
     breaks = 0
     for part in parts:
         for prev, cur in zip(part, part[1:], strict=False):
             if prev.isdigit() != cur.isdigit() or (prev.islower() and cur.isupper()):
                 breaks += 1
     return breaks <= _MAX_NAME_BREAKS * sum(len(part) for part in parts)
+
+
+def _is_short_url_token(part: str) -> bool:
+    """True for a 20 to 31 character URL part that is a generated value, not a name or an id in hex."""
+    if _HEX_RE.fullmatch(part) or _UUID_RE.fullmatch(part):
+        return False
+    if _looks_like_path(part) or _reads_like_names(part):
+        return False
+    classes = (any(c.islower() for c in part), any(c.isupper() for c in part), any(c.isdigit() for c in part))
+    wordy = sum(len(run) for run in _WORD_RUN_RE.findall(part))
+    return all(classes) and wordy < _MAX_WORD_SHARE * len(part)
+
+
+def _url_part_spans(head: str, token: str) -> list[tuple[int, int]]:
+    """The parts of ``token`` (a stretch of a URL after ``head``) that are credentials, as offsets in it."""
+    in_query = "?" in head or "#" in head
+
+    def credential(value: str, public_id: bool = False) -> bool:
+        if len(value) >= _MIN_TOKEN_CHARS:
+            return _is_high_entropy_token(value)
+        return len(value) >= _MIN_URL_PART_CHARS and not public_id and _is_short_url_token(value)
+
+    found: list[tuple[int, int]] = []
+    previous = ""
+    for part in (_URL_QUERY_PART_RE if in_query else _URL_PART_RE).finditer(token):
+        value = part.group()
+        if in_query and _looks_like_path(value):
+            # "?next=/docs/setup" is a path; so, by its shape, is a base64 value that starts with "/".
+            segments = [(m.start(), m.end()) for m in _URL_PART_RE.finditer(value) if credential(m.group())]
+            found.extend((part.start() + start, part.start() + end) for start, end in segments)
+        elif credential(value, public_id=not in_query and previous.lower() in _PUBLIC_ID_SEGMENTS):
+            found.append((part.start(), part.end()))
+        previous = value
+    return found
 
 
 def _is_high_entropy_token(token: str) -> bool:
@@ -597,11 +651,11 @@ def _spans(text: str, decode: bool = True, fallback: bool = True) -> list[tuple[
         spans.extend(_encoded_spans(text))
     if fallback:
         for match in _TOKEN_RE.finditer(text):
-            if _in_url(text, match.start()):
+            head = _url_head(text, match.start())
+            if head is not None:
                 # "com/channel/<id>" is not one token: each path segment and query value is its own.
-                for part in _URL_PART_RE.finditer(match.group()):
-                    if len(part.group()) >= _MIN_TOKEN_CHARS and _is_high_entropy_token(part.group()):
-                        spans.append((match.start() + part.start(), match.start() + part.end(), "high_entropy_token"))
+                for start, end in _url_part_spans(head, match.group()):
+                    spans.append((match.start() + start, match.start() + end, "high_entropy_token"))
             elif _is_high_entropy_token(match.group()):
                 spans.append((match.start(), match.end(), "high_entropy_token"))
     return spans

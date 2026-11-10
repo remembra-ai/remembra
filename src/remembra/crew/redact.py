@@ -21,7 +21,8 @@ Rules, applied recursively to every value:
   other paths under ``home`` → ``~/…`` (without ``home``, as on the server, any
   ``/Users/<name>`` or ``/home/<name>`` prefix → ``~``); env assignments whose name has a
   word ending in ``KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH`` (``DB_PASS``,
-  ``dbUrl``, ``PGPASSWORD``; not ``passed``, ``author``, ``max_tokens=4096``),
+  ``dbUrl``, ``PGPASSWORD``; not ``passed``, ``author``, or a counter such as
+  ``PASS=120`` and ``max_tokens=4096``),
   and ``export X=<≥32 random chars>``, lose their value; ``Authorization``-style headers, ``-u user:pass``
   and URL credentials lose their secret part; then
   :func:`remembra.security.secrets.redact_secrets` (provider keys, JWTs, PEM
@@ -98,8 +99,40 @@ _ENV_PLAIN_WORDS: Final = frozenset(
         "purl",
     }
 )
-# A count as often as a credential: ``PASS=120``, ``TESTS_PASS=128``, ``max_tokens=4096``, ``keys=3``.
-_ENV_COUNT_WORD: Final = re.compile(r"(?:pass|keys|tokens|secrets|passwords|urls)$")
+# A credential word anywhere in a run-together name: ``SECRETKEYBASE``, ``APIKEYV2``, ``tokenvalue``,
+# ``PASSWORDFILE``. Not ``tokenizer``.
+_ENV_STRONG_WORD: Final = re.compile(r"password|passwd|passphrase|secret|apikey|token")
+_ENV_STRONG_PLAIN: Final = re.compile(r"tokeni[sz]|secretar")
+# A count as often as a credential, in a name that says so: ``PASS=120``, ``TESTS_PASS=128``,
+# ``max_tokens=4096``, ``keys=3``. ``DB_PASS=123456`` and ``SSHPASS=123456`` are passwords.
+_ENV_COUNT_WORDS: Final = frozenset({"pass", "keys", "tokens", "secrets", "passwords", "urls"})
+_ENV_COUNT_CONTEXT: Final = frozenset(
+    {
+        "test",
+        "tests",
+        "total",
+        "num",
+        "number",
+        "count",
+        "max",
+        "min",
+        "n",
+        "limit",
+        "new",
+        "input",
+        "output",
+        "prompt",
+        "completion",
+        "context",
+        "cached",
+        "used",
+        "remaining",
+        "generated",
+        "thinking",
+        "reasoning",
+        "budget",
+    }
+)
 _ENV_NOT_A_VALUE: Final = frozenset({"none", "null", "nil", "true", "false", "yes", "no", "on", "off"})
 _CAMEL_WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 _ENV_ASSIGN: Final = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|'\"`]+)")
@@ -133,24 +166,50 @@ def _name_words(name: str) -> list[str]:
     return words
 
 
-def _env_secret_name(name: str, value: str) -> bool:
-    """True when ``name=value`` assigns a credential: a word of the name ends in a credential word.
+def _is_secret_word(word: str) -> bool:
+    if word in _ENV_PLAIN_WORDS:
+        return False
+    if _ENV_SECRET_WORD.search(word):
+        return True
+    return bool(_ENV_STRONG_WORD.search(word)) and not _ENV_STRONG_PLAIN.search(word)
 
-    A short number or a literal such as ``None``/``true`` after a word that also names a count
+
+def _env_count_name(name: str, text: str) -> bool:
+    """True when ``name`` reads as a counter: ``PASS``, ``TESTS_PASS``, ``max_tokens``, ``numKeys``.
+
+    Every credential word in it is exactly a count word and every other word is a counting word
+    (test, total, max, input…); or it is a ``*_PASS`` with its ``*_FAIL=`` beside it in ``text``.
+    """
+    words = [w.lower() for part in name.split("_") for w in _CAMEL_WORD.findall(part)]
+    hits = [w for w in words if _is_secret_word(w)]
+    if not hits or any(w not in _ENV_COUNT_WORDS for w in hits):
+        return False
+    if all(w in _ENV_COUNT_CONTEXT for w in words if w not in hits):
+        return True
+    if hits != ["pass"]:
+        return False
+    at = name.lower().rindex("pass")
+    sibling = re.escape(name[:at]) + "fail(?:s|ed|ures?)?" + re.escape(name[at + 4 :])
+    return bool(re.search(rf"(?i)(?<![A-Za-z0-9_]){sibling}=", text))
+
+
+def _env_secret_name(name: str, value: str, text: str = "") -> bool:
+    """True when ``name=value`` assigns a credential: a word of the name is or holds a credential word.
+
+    A short number or a literal such as ``None``/``true`` in a name that reads as a counter
     (``PASS=120``, ``max_tokens=4096``) is a count, not a credential.
     """
-    hits = [w for w in _name_words(name) if w not in _ENV_PLAIN_WORDS and _ENV_SECRET_WORD.search(w)]
-    if not hits:
+    if not any(_is_secret_word(w) for w in _name_words(name)):
         return False
     bare = value.strip("'\"")
     if (bare.isdigit() and len(bare) < 8) or bare.lower() in _ENV_NOT_A_VALUE:
-        return not all(_ENV_COUNT_WORD.search(w) for w in hits)
+        return not _env_count_name(name, text)
     return True
 
 
 def _env_sub(match: re.Match[str]) -> str:
     name, value = match.group(1), match.group(2)
-    if value.strip("'\"") and not value.startswith("[REDACTED:") and _env_secret_name(name, value):
+    if value.strip("'\"") and not value.startswith("[REDACTED:") and _env_secret_name(name, value, match.string):
         return f"{name}={_REDACTED.format(kind='env')}"
     return match.group(0)
 

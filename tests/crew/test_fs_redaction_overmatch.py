@@ -131,7 +131,7 @@ DEVELOPER_NUMBERS = [
     "App Store Connect app ID 1234567890, bundle com.example.app",
     "app_id=6810035908 team id 1234567890",
     "epoch 1762735701",
-    "workflow run 4266499594512345 finished",
+    "workflow run 426649959451234 finished",
     "build 1234567890 deployed to staging",
     "see artifacts/20261110/1234567890123/report.html",
 ]
@@ -157,6 +157,8 @@ STILL_PII = [
     ("job contact: +1 203 555 0123", "203 555 0123", "[REDACTED_PHONE_US]"),
     ("card 4111111111111111 declined", "4111111111111111", "[REDACTED_"),
     ("card 4111 1111 1111 1111 for the build", "4111 1111 1111 1111", "[REDACTED_CREDIT_CARD]"),
+    # Sixteen digits are the shape of a card number, whatever word comes before.
+    ("workflow run 4266499594512345 finished", "4266499594512345", "[REDACTED_CREDIT_CARD]"),
     ("ssn 123-45-6789 in the run log", "123-45-6789", "[REDACTED_SSN]"),
 ]
 

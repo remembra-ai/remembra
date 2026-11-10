@@ -70,17 +70,27 @@ _HOST_TAIL = re.compile(r"-[A-Za-z0-9]+(?:\.[A-Za-z0-9-]+){2,}")
 # An account label shortly before the number means it is one, whatever follows it.
 _ACCOUNT_LABEL = re.compile(r"(?i)(?:\b|_)(?:acct|account|a/c|iban|acc(?:t)?\s*(?:no|num|number|#))(?:\b|_)")
 _LABEL_WINDOW = 24
-# A word that names a machine-issued number ("gh run view 42664995945", "migrations 590000000-599999",
-# "App Store Connect app ID 1234567890", "epoch 1762735701"), then at most one short word, then the
-# digits. A bare "id" or "#" is not enough: "Tax ID 123456789" and "check # 12345678" are personal.
+# A word that names a machine-issued number, then the digits: "CI run 40233615394",
+# "migrations 590000000-599999", "epoch 1762735701", "App Store Connect app ID 1234567890". Between
+# the two only "id"/"number" or a gh verb ("gh run view 42664995945"), never a free word: "run card
+# <digits>", "PR contact <digits>" and "release funds <digits>" are personal. A bare "id" or "#" is
+# not a label either: "Tax ID 123456789" and "check # 12345678" are personal.
 _DEVELOPER_LABEL = re.compile(
     r"(?i)(?<![A-Za-z0-9])"
-    r"(?:(?:runs?|jobs?|workflows?|builds?|pipelines?|deploy(?:s|ment|ments)?|releases?|migrations?|issues?|"
-    r"prs?|pulls?|commits?|artifacts?|epoch|timestamp|unix\s+time)(?:[\s_-]*ids?)?"
-    r"|(?:app|project|team|org|repo|installation|check|suite|message|thread|channel|chat|trace|span|request)[\s_-]*ids?)"
-    r"(?:[\s:=#(]+[A-Za-z][A-Za-z-]{0,11})?[\s:=#(]*$"
+    r"(?:(?:runs?|jobs?|workflows?|builds?|pipelines?|deploy(?:s|ment|ments)?|migrations?|commits?|artifacts?|"
+    r"epoch|timestamp|unix\s+time)"
+    r"(?:[\s_-]*(?:ids?|numbers?|num|no\.?)|\s+(?:view|watch|rerun|cancel|download|delete|logs?))?"
+    r"|(?:app|project|team|org|repo|installation|suite|message|thread|channel|chat|trace|span)[\s_-]*ids?)"
+    r"[\s:=#(]*$"
 )
 _URL_START = re.compile(r"(?i)^[\"'(<\[]*(?:[a-z][a-z0-9+.-]*://|www\.)")
+# A word in the URL or path that says the number is a person's: "tel://…", "wa.me/…", "phone/fax/…".
+_PERSONAL_HINT = re.compile(
+    r"(?i)(?<![a-z])(?:tel|sms|fax|phone|mobile|cell|whatsapp|wa\.me|card|cc|pay(?:ments?)?|charge|billing|"
+    r"bank|wire|ach|routing|iban|ssn|acct|accounts?)(?![a-z])"
+)
+_NAMED_SEGMENT = re.compile(r"[A-Za-z]{2,}")
+_CARD_DIGITS = 16
 
 
 def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
@@ -132,29 +142,58 @@ def _word_around(content: str, start: int, end: int) -> tuple[str, int]:
     return content[left:right], start - left
 
 
+def _luhn_valid(digits: str) -> bool:
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        n = int(ch)
+        if i % 2:
+            n = n * 2 - 9 if n > 4 else n * 2
+        total += n
+    return total % 10 == 0
+
+
+def _is_path_segment(word: str, offset: int, length: int) -> bool:
+    """True when the digits are one whole segment of a URL, or of a path with two named segments."""
+    before, after = word[:offset], word[offset + length :].rstrip(".,;:!?)]}>\"'")
+    if "/" not in word or _PERSONAL_HINT.search(word):
+        return False
+    if _URL_START.match(word):
+        return before.endswith(("/", "=")) and (not after or after[0] in "/?#&")
+    if not ((not before or before.endswith("/")) and (not after or after.startswith("/"))):
+        return False
+    named = [seg for seg in (before + after).split("/") if _NAMED_SEGMENT.search(seg)]
+    return len(named) >= 2
+
+
 def is_developer_number(content: str, start: int, end: int) -> bool:
     """True when the bare digit run at [start, end) is a machine-issued number, not a personal one.
 
     Only these contexts (the false positives seen), and never with an account
     label (``acct``, ``account``, ``a/c``, ``iban``, ``acc no``) just before:
 
-    * a segment of a URL or a slash-separated path: ``www.facebook.com/100063512345678``,
-      ``.../actions/runs/42664995945/job/7``, ``artifacts/20261110/1234567890123/report.html``;
-    * after a word naming such a number (run, job, workflow, build, deploy, release, migration,
-      issue, PR, commit, artifact, epoch, ``<thing> id``), with at most one short word between:
-      ``gh run view 42664995945``, ``migrations 590000000-599999``, ``app ID 1234567890``.
+    * a whole segment of a URL: ``www.facebook.com/100063512345678``,
+      ``.../actions/runs/42664995945/job/7``; or of a slash path that has two segments with a
+      name in them: ``artifacts/20261110/1234567890123/report.html``. Not ``12345678901/021000021``
+      or ``2035551234/ext``, and not when a segment says phone, card, pay, bank and the like;
+    * straight after a word naming such a number (run, job, workflow, build, deploy, migration,
+      commit, artifact, epoch, ``<thing> id``): ``gh run view 42664995945``,
+      ``migrations 590000000-599999``, ``app ID 1234567890``.
+
+    Sixteen digits are the shape of a card number: kept only as a URL segment, and only when the
+    number fails the card checksum.
     """
     word, offset = _word_around(content, start, end)
     # The label window reaches back from the start of the word: a URL can put the digits far from it.
     if _ACCOUNT_LABEL.search(content[max(0, start - offset - _LABEL_WINDOW) : start]):
         return False
-    if "/" in word and (_URL_START.match(word) or word[:offset].endswith("/") or word[offset + end - start :].startswith("/")):
-        return True
-    return bool(_DEVELOPER_LABEL.search(content[max(0, start - 2 * _LABEL_WINDOW) : start]))
+    in_path = _is_path_segment(word, offset, end - start)
+    if end - start == _CARD_DIGITS:
+        return in_path and bool(_URL_START.match(word)) and not _luhn_valid(content[start:end])
+    return in_path or bool(_DEVELOPER_LABEL.search(content[max(0, start - 2 * _LABEL_WINDOW) : start]))
 
 
 # The patterns that also match a bare run of digits: a CI run id is 11 digits, an epoch or an
-# App Store id 10 (the shape of a phone number), a long id 16 (the shape of a card number).
+# App Store id 10 (the shape of a phone number), a long id in a URL 16 (the shape of a card number).
 _BARE_DIGIT_TYPES = frozenset({"bank_account", "phone_us", "credit_card"})
 
 
@@ -214,17 +253,25 @@ class PIIScanResult:
 _SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1}
 
 
-def _merge_overlaps(matches: list[PIIMatch]) -> list[tuple[int, int, PIIMatch]]:
+def _merge_overlaps(matches: list[PIIMatch], content: str = "") -> list[tuple[int, int, PIIMatch]]:
     """Overlapping matches as one span each, in text order: ``(start, end, naming match)``.
 
     Two patterns often match the same digits (a 10-digit run is a phone number and a bank
     account). Replacing them one by one spliced the placeholders into each other
     (``[REDACTED_BANK_ACCOUNT]PHONE_US]``). The span is the union; the most severe match names
-    it, then the longest, then the earliest.
+    it, then the longest, then the earliest. On the very same span the specific pattern (phone,
+    card) names it rather than the generic digit run, unless ``content`` has an account label
+    just before.
     """
 
     def rank(m: PIIMatch) -> tuple[int, int, int]:
         return (_SEVERITY_RANK.get(m.severity, 0), m.end - m.start, -m.start)
+
+    def better(new: PIIMatch, named: PIIMatch) -> bool:
+        if (new.start, new.end) == (named.start, named.end) and "bank_account" in (new.type, named.type):
+            labelled = bool(_ACCOUNT_LABEL.search(content[max(0, new.start - _LABEL_WINDOW) : new.start]))
+            return (new.type == "bank_account") == labelled and new.type != named.type
+        return rank(new) > rank(named)
 
     merged: list[tuple[int, int, PIIMatch]] = []
     for match in sorted(matches, key=lambda m: (m.start, -(m.end - m.start))):
@@ -232,7 +279,7 @@ def _merge_overlaps(matches: list[PIIMatch]) -> list[tuple[int, int, PIIMatch]]:
             continue
         if merged and match.start < merged[-1][1]:
             start, end, named = merged[-1]
-            merged[-1] = (start, max(end, match.end), match if rank(match) > rank(named) else named)
+            merged[-1] = (start, max(end, match.end), match if better(match, named) else named)
             continue
         merged.append((match.start, match.end, match))
     return merged
@@ -364,7 +411,7 @@ class PIIDetector:
     def _redact_all(self, content: str, matches: list[PIIMatch]) -> str:
         """Replace all PII matches with redaction placeholders."""
         result = content
-        for start, end, match in reversed(_merge_overlaps(matches)):
+        for start, end, match in reversed(_merge_overlaps(matches, content)):
             placeholder = f"[REDACTED_{match.type.upper()}]"
             result = result[:start] + placeholder + result[end:]
 
@@ -395,7 +442,7 @@ class PIIDetector:
             return content
 
         hashed = content
-        for start, end, match in reversed(_merge_overlaps(result.matches)):
+        for start, end, match in reversed(_merge_overlaps(result.matches, content)):
             # Create deterministic hash (of the whole replaced span: overlapping matches are one value)
             hash_value = hashlib.sha256(content[start:end].encode()).hexdigest()[:12]
             placeholder = f"[HASH_{match.type.upper()}:{hash_value}]"

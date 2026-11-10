@@ -14,10 +14,13 @@ It returns a new payload (JSON value); the input is not mutated. It applies `red
   classified targets); test-runner fingerprints needed for criteria matching are kept, redacted.
 * **Env assignments.** `NAME=value` where a word of NAME (its `_`-separated parts and their
   camelCase words) ends in `KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH` (`DB_PASS`, `PGPASSWORD`,
-  `dbUrl`, `authToken`), and `export X=<≥32 high-entropy chars>`, lose the value. A name that
+  `dbUrl`, `authToken`) or holds `password|secret|token|apikey` (`SECRETKEYBASE`,
+  `PASSWORDFILE`), and `export X=<≥32 high-entropy chars>`, lose the value. A name that
   only contains such letters keeps it (`passed=41`, `author=`, `bypass=`, `curl=`), and so does a
-  count: a number under 8 digits or `None`/`true`/`false` after `PASS` or a plural
-  (`PASS=120`, `max_tokens=4096`).
+  count: a number under 8 digits or `None`/`true`/`false` in a name that reads as a counter,
+  which is `PASS` or a plural alone or with counting words (`PASS=120`, `TESTS_PASS=128`,
+  `max_tokens=4096`), or a `*_PASS` with its `*_FAIL=` beside it. `DB_PASS=123456` and
+  `SSHPASS=123456` are passwords.
 * **Headers and credentials.** `-H 'Authorization: …'`, `--header …`, `-u user:pass`, URL
   credentials (`https://user:token@host`), DSNs (`postgres://user:pass@…`).
 * **No stdout/stderr** of commands that read `.env*`, key or credential files.
