@@ -2464,7 +2464,7 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
             McpParam("project_id", "str"),
             McpParam("root_path", "str"),
         ),
-        "GRANTED …, QUEUED … (waited Ns), or REFUSED: … Work elsewhere or crew_say(to=…, kind=request_release).",
+        "GRANTED …, QUEUED … (waited Ns), or REFUSED: … Work elsewhere or crew_say(body=…, to=…, kind=request_release).",
     ),
     McpToolSpec(
         "crew_guard",
@@ -2509,7 +2509,7 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
     McpToolSpec(
         "crew_checkpoint",
         (
-            McpParam("files_changed", "list[str]", required=True),
+            McpParam("files_changed", "list[str]"),
             McpParam("summary", "str"),
             McpParam("commits", "list[str]"),
             McpParam("tests", "list[obj]"),

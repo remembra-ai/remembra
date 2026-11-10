@@ -53,6 +53,7 @@ from typing import Annotated, Any, Literal, cast
 import anyio
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
 
@@ -61,6 +62,7 @@ from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
 from remembra.client.project import aliases_from_env, normalize_project_id
 from remembra.crew import schemas as crew_schemas
 from remembra.crew.schemas import MCP_INSTRUCTIONS as CREW_MCP_INSTRUCTIONS
+from remembra.mcp import arguments as tool_arguments
 from remembra.mcp import close_queue
 from remembra.mcp.crew import GATEWAY_STATUSES as CREW_GATEWAY_STATUSES
 from remembra.mcp.crew import (
@@ -3062,14 +3064,16 @@ def _inbox_sender_label(row: dict[str, Any]) -> str:
     )
 )
 def ack_inbox(
-    inbox_id: str,
+    inbox_id: str | None = None,
     result: str | None = None,
     note: str | None = None,
+    inbox_ids: list[str] | None = None,
 ) -> str:
     """Acknowledge an inbox item: take it on, or close it after acting on it.
 
     Args:
         inbox_id: The inbox row id (from session_brief or get_inbox).
+        inbox_ids: Several row ids to acknowledge the same way in one call (instead of inbox_id).
         result: "accepted" when you take the message on but are not finished: it stays
                 open, your next session_brief lists it, get_inbox(status="accepted")
                 shows it, and the sender can tell it from one merely read. "done",
@@ -3078,21 +3082,35 @@ def ack_inbox(
         note: Optional free-text note (what was done, why it was blocked, etc.).
 
     Returns:
-        JSON with the updated row (status, ack_at, ack_result, ack_note).
+        JSON with the updated row (status, ack_at, ack_result, ack_note). With inbox_ids:
+        ok (true only if every row was acknowledged), count and one such item per id.
     """
+    ids = list(dict.fromkeys(str(i).strip() for i in [inbox_id, *(inbox_ids or [])] if i and str(i).strip()))
+    if not ids:
+        return tool_arguments.refusal("ack_inbox", ("inbox_id", "inbox_ids", "result", "note"), ["inbox_id: required"])
+
+    def view(updated: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "inbox_id": updated.get("inbox_id"),
+            "row_status": updated.get("status"),
+            "ack_at": updated.get("ack_at"),
+            "ack_result": updated.get("ack_result"),
+            "ack_note": updated.get("ack_note"),
+        }
+
     try:
         client = _get_client()
-        updated = client.ack_inbox(inbox_id=inbox_id, result=result, note=note)
-        return _dump(
-            {
-                "ok": True,
-                "inbox_id": updated.get("inbox_id"),
-                "row_status": updated.get("status"),
-                "ack_at": updated.get("ack_at"),
-                "ack_result": updated.get("ack_result"),
-                "ack_note": updated.get("ack_note"),
-            }
-        )
+        if len(ids) == 1:
+            return _dump(view(client.ack_inbox(inbox_id=ids[0], result=result, note=note)))
+        items: list[dict[str, Any]] = []
+        for one in ids[:200]:
+            try:
+                items.append(view(client.ack_inbox(inbox_id=one, result=result, note=note)))
+            except MemoryError as e:
+                items.append({"ok": False, "inbox_id": one, "error": sanitize_error_message(e), "code": e.status_code})
+        done = sum(1 for i in items if i["ok"])
+        return _dump({"ok": done == len(items), "count": done, "failed": len(items) - done, "items": items})
     except MemoryError as e:
         own = _own_inbox_agent()
         if e.status_code == 404 and own:
@@ -3413,7 +3431,7 @@ async def crew_claim(
 
     claim: zone="pos" (or paths=["src/app/pos/cart.ts"], or task="T-14" for all its zones).
     Answers GRANTED, QUEUED or REFUSED. When REFUSED, do not edit there: work elsewhere or ask
-    the holder with crew_say(to="@holder", kind="request_release"). wait_s waits for the grant
+    the holder with crew_say(body="…", to="@holder", kind="request_release"). wait_s waits for the grant
     instead: one call holds at most 45 seconds in all (a larger wait_s is held that long), then
     answers QUEUED; you keep your place in line, so call again with wait_s to keep waiting.
     release: zone/paths/task you hold, also one crew_status shows as yours and reserved
@@ -3639,7 +3657,7 @@ async def crew_say(
     )
 )
 async def crew_checkpoint(
-    files_changed: list[str],
+    files_changed: list[str] | None = None,
     summary: str | None = None,
     commits: CrewCommits = None,
     tests: CrewTests = None,
@@ -3654,7 +3672,8 @@ async def crew_checkpoint(
     those files further; tell the other agent with crew_say) and what changed for you.
 
     Args:
-        files_changed: Repo-relative paths you changed since the last checkpoint.
+        files_changed: Repo-relative paths you changed since the last checkpoint. The overlap
+            check covers only these; leave it out when nothing changed (a deploy, a test run).
         summary: Short note on what you did.
         commits: Commit shas since the last checkpoint, e.g. ["1ec6d03"].
         tests: Test runs with counts, e.g. [{"command": "pytest -q", "passed": 170, "failed": 0}].
@@ -4049,6 +4068,55 @@ def _close_tool_arguments() -> None:
 
 
 _close_tool_arguments()
+
+
+# ---------------------------------------------------------------------------
+# Arguments: no key is silently dropped, and one error format
+# ---------------------------------------------------------------------------
+
+# tool -> the arguments its function declares (before the advertised aliases are added to its schema)
+_DECLARED_ARGUMENTS: dict[str, tuple[str, ...]] = {}
+
+
+def _install_argument_guard() -> None:
+    """Put ``remembra.mcp.arguments`` in front of every registered tool.
+
+    FastMCP validates a call with a model that ignores unknown keys and reports a failure as raw
+    pydantic text. The guard runs first: it maps the names agents guess, refuses a key no tool
+    argument stands for, and answers an argument failure in one ``INVALID ARGUMENTS`` line. The
+    published inputSchema says the same (``additionalProperties: false`` and the aliases), for
+    clients that validate before they send.
+    """
+    manager = mcp._tool_manager
+    for name, tool in manager._tools.items():
+        _DECLARED_ARGUMENTS[name] = tuple((tool.parameters.get("properties") or {}).keys())
+        tool_arguments.advertise(name, tool.parameters)
+    dispatch = manager.call_tool
+
+    async def call_tool(name: str, arguments: dict[str, Any], context: Any = None, convert_result: bool = False) -> Any:
+        tool = manager.get_tool(name)
+        declared = _DECLARED_ARGUMENTS.get(name)
+        if tool is None or declared is None:
+            return await dispatch(name, arguments, context=context, convert_result=convert_result)
+        prepared = tool_arguments.prepare(
+            name, declared, arguments, normalize_project=lambda p: normalize_project_id(p, REMEMBRA_PROJECT_ALIASES)
+        )
+        text = prepared.refusal
+        if text is None:
+            try:
+                return await dispatch(name, prepared.arguments, context=context, convert_result=convert_result)
+            except ToolError as e:
+                errors = getattr(e.__cause__, "errors", None)
+                if type(e.__cause__).__name__ != "ValidationError" or not callable(errors):
+                    raise
+                sent = [k for k in arguments if arguments[k] is not None] if isinstance(arguments, dict) else []
+                text = tool_arguments.validation_text(name, declared, sent, errors(include_input=False), prepared.sent_as)
+        return tool.fn_metadata.convert_result(text) if convert_result else text
+
+    manager.call_tool = call_tool  # type: ignore[method-assign]
+
+
+_install_argument_guard()
 
 
 # ---------------------------------------------------------------------------

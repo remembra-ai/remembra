@@ -2453,7 +2453,7 @@ class CrewBridge:
             reason = str(b.get("reason") or "")
             if holder:
                 how = "RESERVED for the next pickup" if "reserved" in reason else "held EXCLUSIVELY"
-                ask = f'Work elsewhere or crew_say(to="@{holder}", kind="request_release").'
+                ask = f'Work elsewhere or crew_say(body="…", to="@{holder}", kind="request_release").'
                 tail = f" for {ref}" if ref else ""
                 # say what the blocker really holds: one file inside the zone asked for, or the whole zone
                 # around the file asked for, is not "the zone/the path held by" that session
@@ -3196,7 +3196,7 @@ class CrewBridge:
         self,
         caller: CallerInfo,
         *,
-        files_changed: Sequence[str],
+        files_changed: Sequence[str] | None,
         summary: str | None,
         commits: Sequence[str] | None,
         tests: Sequence[Mapping[str, Any]] | None,
@@ -3212,7 +3212,7 @@ class CrewBridge:
         shadowed = shadow is not None and bool(shadow.here)
         # the hook session reports the working tree itself: the same files under this second identity would be
         # recorded as two sessions editing one file (same_file / exclusive_breach between the two)
-        facts: dict[str, Any] = {"files_changed": [] if shadowed else [str(p) for p in files_changed][:500]}
+        facts: dict[str, Any] = {"files_changed": [] if shadowed else [str(p) for p in (files_changed or [])][:500]}
         if commits:
             facts["commits"] = [{"sha": str(c)} for c in commits][:200]
         if tests:
@@ -3245,6 +3245,9 @@ class CrewBridge:
                 "editing the same files."
             )
         lines.extend(self._collision_lines(http, seat, data))
+        if not files_changed and not shadowed:
+            # an MCP session's footprints come only from files_changed: say what the check did not see
+            lines.append("No files declared: the overlap check covers only the paths you pass in files_changed.")
         notice = self.seat_notice(caller, seat, force=True)  # this crew's queue, not the current project's
         if notice:
             lines.append(notice)

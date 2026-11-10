@@ -347,7 +347,7 @@ def test_task_start_claims_zones_and_a_second_agent_is_refused_and_denied(live, 
     use(b)
     refused = call("crew_claim", zone="pos")
     assert refused.startswith(f"REFUSED: zone pos held EXCLUSIVELY by {a_sign} for T-1."), refused
-    assert f'crew_say(to="@{a_sign}", kind="request_release")' in refused
+    assert f'crew_say(body="…", to="@{a_sign}", kind="request_release")' in refused
     assert "POS split tender" not in refused.split("<remembra-data")[0]  # the title only as data
     assert_clean(refused)
 

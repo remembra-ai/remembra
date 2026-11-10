@@ -861,7 +861,7 @@ async def request_claim(
                 "how_to_request": (
                     "The baton is reserved: work elsewhere, or ask the owner to hand it over from the dashboard."
                     if first["state"] == "reserved"
-                    else f'crew_say(to="@{holder}", kind="request_release")'
+                    else f'crew_say(body="…", to="@{holder}", kind="request_release")'
                     if first.get("holder_kind") == "session"
                     else "Ask the owner in the dashboard."
                 ),
