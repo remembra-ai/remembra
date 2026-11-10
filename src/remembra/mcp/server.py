@@ -2654,6 +2654,10 @@ async def crew_say(
     either way, so never send the message again after a wait.
     A decision stays proposed until a human confirms it.
 
+    The answer says who the message reached ("to @codex-1"); NOT DELIVERED names an @token that
+    matched nobody. Every @word in the body is read as a mention, so write a commit as 4b478d5,
+    not @4b478d5.
+
     Args:
         body: The message.
         kind: chat | question | answer | note | request_release | decision.

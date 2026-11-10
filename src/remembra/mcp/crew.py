@@ -100,6 +100,9 @@ _TASK_NUMBER_RE: Final = re.compile(r"(?:t-?|#)?([1-9][0-9]{0,6})", re.IGNORECAS
 _TARGET_RE: Final = re.compile(r"@?[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
 _CLIENT_ID_RE: Final = re.compile(r"[^A-Za-z0-9._:-]+")
 _RETRY_TAIL_RE: Final = re.compile(r"\s*Retry in [0-9]+(?:\.[0-9]+)?s\.?\s*$")
+# The server's mention grammar (remembra.crew.channel.MENTION_RE and parse_mentions; that module needs
+# the server extras, so the pattern is repeated here and a test keeps the two equal).
+_MENTION_RE: Final = re.compile(r"(?<![A-Za-z0-9_@/.\\-])@([A-Za-z0-9][A-Za-z0-9._:-]{0,79})")
 _LIVE_CLAIM_STATES: Final = ("active", "offered", "reserved", "queued")
 _OPEN_TASK_STATUSES: Final = ("backlog", "ready", "claimed", "in_progress", "blocked", "review", "stalled")
 
@@ -2746,7 +2749,8 @@ class CrewBridge:
                     'to must be "crew", "@crew", a callsign like "@codex-1", an agent like "@codex", or "@mani".'
                 )
             mention = "@" + target.lstrip("@")
-            if mention.lower() not in text.lower():
+            # as its own token: "@codex" is not in a body that only names "@codex-5"
+            if mention_token(mention) not in body_mentions(text):
                 text = f"{mention} {text}"
         payload: dict[str, Any] = {"kind": kind, "body": text, "client_msg_id": f"mcp-{uuid.uuid4().hex[:24]}"}
         asked = wait_s
@@ -2783,9 +2787,14 @@ class CrewBridge:
             cut_short = True
         res = res or {}
         msg = res.get("message") or {}
-        lines = [
-            f"SENT {msg.get('id')} (seq {res.get('seq')}, {kind})" + (f" to {mention_list(msg)}" if msg.get("mentions") else "")
-        ]
+
+        def callsign_of(session_id: str) -> str | None:
+            try:
+                return self._callsign(http, seat, session_id)
+            except CrewApiError:
+                return None
+
+        lines = sent_lines(res, msg, kind, callsign_of)
         decision = res.get("decision")
         if isinstance(decision, dict):
             lines.append(
@@ -2977,6 +2986,64 @@ def _version(row: Mapping[str, Any]) -> str:
 
 def mention_list(message: Mapping[str, Any]) -> str:
     return ", ".join("@" + m for m in (message.get("mentions") or []) if _safe(m))
+
+
+def mention_token(mention: str) -> str:
+    """``@Codex-1.`` as the server stores it: no ``@``, trailing punctuation dropped, lowercased."""
+    return mention.lstrip("@").rstrip(".:-").lower()
+
+
+def body_mentions(text: str) -> set[str]:
+    """The ``@tokens`` the server will parse out of ``text`` (:data:`_MENTION_RE`)."""
+    return {mention_token(m.group(1)) for m in _MENTION_RE.finditer(text or "")} - {""}
+
+
+def sent_lines(res: Mapping[str, Any], msg: Mapping[str, Any], kind: str, callsign_of: Callable[[str], str | None]) -> list[str]:
+    """The ``SENT`` line of ``crew_say`` and what follows it, from the server's routing: ``to`` lists
+    who the message was queued for, never the raw ``@tokens`` of the body. A token that matched
+    nothing (a commit SHA, a callsign with no live session) is reported as NOT DELIVERED. Without a
+    routing (a replayed post, an older server) the tokens are listed as mentions, with no delivery claim."""
+    head = f"SENT {msg.get('id')} (seq {res.get('seq')}, {kind})"
+    mentions = ["@" + m for m in (msg.get("mentions") or []) if isinstance(m, str) and _safe(m)]
+    routing = res.get("routing")
+    if not isinstance(routing, Mapping) or not routing:
+        if mentions:
+            head += f" · mentions {', '.join(mentions)} (delivery not reported by the server)"
+        return [head]
+
+    def strings(key: str) -> list[str]:
+        value = routing.get(key)
+        return [v for v in value if isinstance(v, str)] if isinstance(value, (list, tuple)) else []
+
+    sessions = list(dict.fromkeys(strings("sessions")))
+    callsigns = [c for c in (callsign_of(sid) for sid in sessions) if c]
+    reached = ["@" + c for c in dict.fromkeys(callsigns)]
+    unnamed = len(sessions) - len(callsigns)
+    if unnamed > 0:
+        reached.append(f"{unnamed} other session{'s' if unnamed != 1 else ''}")
+    if routing.get("needs_you"):
+        reached.append("@mani (needs-you)")
+    reached.extend(
+        f"the inbox of {a} (no live session; get_inbox shows it)" for a in dict.fromkeys(strings("agent_inbox")) if _safe(a)
+    )
+    if routing.get("crew_inbox"):
+        reached.append("the crew inbox")
+    lines = [head + (f" to {', '.join(reached)}" if reached else "")]
+    raw_unresolved = strings("unresolved")
+    unresolved = ["@" + u for u in dict.fromkeys(raw_unresolved) if _safe(u)]
+    if raw_unresolved:
+        named = ", ".join(unresolved) if unresolved else f"{len(raw_unresolved)} @token(s)"
+        verb = "matches" if len(raw_unresolved) == 1 else "match"
+        lines.append(
+            f"NOT DELIVERED: {named} {verb} no live callsign, agent, zone or task in this crew "
+            "(kept in the message as text). crew_status shows who is here."
+        )
+    elif mentions and not reached:
+        lines.append(
+            f"REACHED NO ONE: {', '.join(mentions)} named no other live session (yourself, or an area nobody holds). "
+            "crew_status shows who is here."
+        )
+    return lines
 
 
 def render_notice(callsign: str, items: Sequence[Mapping[str, Any]]) -> str:
