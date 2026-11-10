@@ -42,10 +42,13 @@ import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 from remembra.relay.handoff import redact
+
+if TYPE_CHECKING:
+    from remembra.relay.config import RelayConfig
 
 MAX_ENTRIES = 50
 MAX_ENTRY_BYTES = 256 * 1024
@@ -248,7 +251,8 @@ class Entry:
             count = int(self.data.get("refusals") or 0)
         except (TypeError, ValueError):
             count = 0
-        return max(count, 1) if self.data.get("last_status") == 403 else max(count, 0)
+        refused = self.data.get("last_status") == 403 and not blocked_by_firewall(self)
+        return max(count, 1) if refused else max(count, 0)
 
     @property
     def last_try_ts(self) -> float | None:
@@ -266,6 +270,35 @@ class Entry:
             return self.queued_ts or None
 
 
+def firewall_block(text: str | None, headers: Mapping[str, str] | None = None) -> bool:
+    """Whether a 403 with this body and these headers was written by a firewall in front of the API, not by Remembra.
+
+    Remembra answers errors in JSON; an HTML page, or Cloudflare's ``cf-ray`` / ``server: cloudflare`` headers,
+    come from the proxy: the key was never checked. The same test as ``remembra.marshal.signals.is_firewall_block``
+    (kept here because this module runs inside hooks and imports nothing of the doctor).
+    """
+    lower = (text or "").lstrip()[:4000].lower()
+    hdrs = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    cloudflare = "cloudflare" in (hdrs.get("server") or "").lower() or bool(hdrs.get("cf-ray")) or "cloudflare" in lower
+    html = lower.startswith("<!doctype html") or lower.startswith("<html") or "<head" in lower[:600]
+    return cloudflare or html
+
+
+def blocked_by_firewall(entry: Entry) -> bool:
+    """Whether the entry's last answer was a 403 from a firewall (:func:`firewall_block`), not Remembra's refusal.
+
+    ``refused_by`` says so when this client recorded it; an entry without it (a 0.17.5 client wrote it) is
+    judged by the stored error text, which starts with the page the proxy sent.
+    """
+    if entry.data.get("last_status") != 403:
+        return False
+    by = entry.data.get("refused_by")
+    if by:
+        return bool(by == "firewall")
+    error = str(entry.data.get("last_error") or "")
+    return firewall_block(error.split(":", 1)[1] if error.startswith("HTTP 403:") else error)
+
+
 def refusal_hold(entry: Entry, now: float | None = None) -> tuple[str, str] | None:
     """Why a refused (403) entry is not sent right now: ``(kind, reason)``, or None when it may go.
 
@@ -273,9 +306,11 @@ def refusal_hold(entry: Entry, now: float | None = None) -> tuple[str, str] | No
     never send it, so it is never sent on its own again (``remembra-relay outbox send`` or ``drop`` decide).
     ``("backoff", ...)``: any other refusal (the key may not write to that project) waits
     ``REFUSAL_BACKOFF_SECONDS`` after each refusal instead of going out with every brief and close.
-    An entry with no time recorded at all is not held by the backoff.
+    An entry with no time recorded at all is not held by the backoff. A 403 from a firewall in front of the
+    API (:func:`blocked_by_firewall`) is no refusal: the key was never checked, so it is retried like an
+    unreachable server.
     """
-    if entry.data.get("last_status") != 403:
+    if entry.data.get("last_status") != 403 or blocked_by_firewall(entry):
         return None
     error = str(entry.data.get("last_error") or "")
     if AGENT_SCOPE_REFUSAL in error.lower():
@@ -343,6 +378,7 @@ def enqueue(
     http_status: int | None = None,
     api_key: str | None = None,
     extra: Mapping[str, Any] | None = None,
+    firewall: bool = False,
 ) -> Path | None:
     """Queue a close body that could not be delivered. Returns the entry path, or None when it was not kept.
 
@@ -350,12 +386,15 @@ def enqueue(
     (403), the entry keeps that key's :func:`key_mark` as ``refused_key_fp`` until it is delivered or dropped.
     ``extra`` adds fields of the queuing program to the entry (the MCP server's ``key_fp``, see
     :mod:`remembra.mcp.close_queue`); it never replaces a field written here.
+    ``firewall`` says the 403 came from a firewall in front of the API (:func:`firewall_block`): no key was
+    refused, so none is recorded and it does not count as a refusal.
     """
     agent_id = str(payload.get("agent_id") or "unknown-agent")
     session_id = str(payload.get("session_id") or "")
     if not session_id:
         log(home, f"outbox: not queued, no session id (agent {agent_id})")
         return None
+    refused = http_status == 403 and not firewall
     try:
         path = entry_path(home, agent_id, session_id)
         previous = read_entry(path)
@@ -369,12 +408,11 @@ def enqueue(
             "attempts": (previous.attempts if previous else 0) + 1,
             "url": clean_url(url),
             "config_source": config_source,
-            "refused_key_fp": key_mark(api_key)
-            if http_status == 403
-            else (previous.data.get("refused_key_fp") if previous else None),
+            "refused_key_fp": key_mark(api_key) if refused else (previous.data.get("refused_key_fp") if previous else None),
+            "refused_by": ("firewall" if firewall else "server") if http_status == 403 else None,
             "last_error": str(redact(error))[:300],
             "last_status": http_status,
-            "refusals": (previous.refusals if previous else 0) + (1 if http_status == 403 else 0),
+            "refusals": (previous.refusals if previous else 0) + (1 if refused else 0),
             "last_try_at": _now_iso(),
             "last_try_ts": time.time(),
             "payload": _redacted_payload(payload),
@@ -481,11 +519,13 @@ def finish(
     error: str | None = None,
     http_status: int | None = None,
     api_key: str | None = None,
+    firewall: bool = False,
 ) -> None:
     """After a send: delete the claim when delivered, else put it back (a newer queued close wins).
 
     A 403 records the :func:`key_mark` of ``api_key``, the key that was refused; a later failure of
-    another kind does not clear it.
+    another kind does not clear it. A 403 from a firewall (``firewall``) refused no key: it is recorded as
+    ``refused_by: firewall`` and neither the key mark nor the refusal count changes.
     """
     try:
         if sent or entry.path.exists():
@@ -496,7 +536,8 @@ def finish(
         if error:
             data["last_error"] = str(redact(error))[:300]
         data["last_status"] = http_status
-        if http_status == 403:
+        data["refused_by"] = ("firewall" if firewall else "server") if http_status == 403 else None
+        if http_status == 403 and not firewall:
             data["refused_key_fp"] = key_mark(api_key)
             data["refusals"] = entry.refusals + 1
         data["last_try_at"] = _now_iso()
@@ -517,24 +558,55 @@ def drop(home: Path, entry: Entry, why: str) -> bool:
     return True
 
 
-def clear_queued_failure(home: Path, agent_id: str) -> bool:
-    """Forget ``agent_id``'s recorded close failure once nothing of it is queued (status and doctor list it otherwise).
+def _queued_close_failure(event: Any, dropped: bool) -> bool:
+    """Whether a recorded failure is about a QUEUED close: a resend of the queue, or (``dropped``: its entry was
+    just removed) the close that queued it. A close the server rejected for good (422) was never queued."""
+    if not isinstance(event, dict):
+        return False
+    command = str(event.get("command") or "")
+    if command == "close (queued)":
+        return True
+    status = event.get("http_status")
+    return dropped and command == "close" and (status is None or (isinstance(status, int) and is_retryable_status(status)))
 
-    True when a record was removed. Never raises.
+
+def clear_queued_failure(home: Path, agent_id: str, *, dropped: bool = False) -> bool:
+    """Forget ``agent_id``'s recorded queued-close failures once nothing of it is queued (status and doctor list
+    them otherwise).
+
+    Only failures about a queued close go (:func:`_queued_close_failure`; ``dropped`` is for the caller that
+    just removed the agent's entry): from ``last_failure``, ``by_command`` and ``recent_failures`` alike. The
+    newest failure that is left becomes ``last_failure`` again; any other failure is never touched. True when
+    something was removed. Never raises.
     """
     try:
         if any(e.agent_id == agent_id for e in pending(home)):
             return False
-        data = read_status(home)
-        slot = (data.get("agents") or {}).get(agent_id)
-        if not isinstance(slot, dict):
-            return False
-        failure = slot.get("last_failure")
-        if not isinstance(failure, dict) or not str(failure.get("command") or "").startswith("close"):
-            return False
-        del slot["last_failure"]
-        atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
-        return True
+        with _status_lock(home):
+            data = read_status(home)
+            slot = (data.get("agents") or {}).get(agent_id)
+            if not isinstance(slot, dict):
+                return False
+            changed = False
+            recent = slot.get("recent_failures")
+            if isinstance(recent, list):
+                kept = [event for event in recent if not _queued_close_failure(event, dropped)]
+                changed = len(kept) != len(recent)
+                slot["recent_failures"] = kept
+            commands = slot.get("by_command")
+            for per_command in commands.values() if isinstance(commands, dict) else ():
+                if isinstance(per_command, dict) and _queued_close_failure(per_command.get("last_failure"), dropped):
+                    del per_command["last_failure"]
+                    changed = True
+            if _queued_close_failure(slot.get("last_failure"), dropped):
+                del slot["last_failure"]
+                changed = True
+                left = [event for event in slot.get("recent_failures") or [] if isinstance(event, dict)]
+                if left:
+                    slot["last_failure"] = left[-1]
+            if changed:
+                atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
+            return changed
     except Exception:
         return False
 
@@ -552,6 +624,66 @@ def discard(home: Path, agent_id: str, session_id: str) -> bool:
     return True
 
 
+def replay_config(
+    entry: Entry, environ: Mapping[str, str] | None = None, home: Path | None = None
+) -> tuple[RelayConfig | None, str | None]:
+    """The config a queued close may be sent with, or ``(None, why it is held)``.
+
+    The rules are described at ``remembra.relay.cli.replay_config``, which calls this with the process
+    environment; :func:`kick_drain` calls it with the environment its drain will run in.
+    """
+    from remembra.relay.config import load_config, load_config_from_source
+
+    recorded = entry.data.get("config_source")
+    agent = entry.agent_id or None
+    config: RelayConfig | None
+    if recorded and recorded not in ("none", MCP_SOURCE):
+        config = load_config_from_source(str(recorded), agent=agent, environ=environ)
+        if config is None or not config.api_key:
+            return None, f"its key source ({recorded}) has no key now"
+    elif recorded == MCP_SOURCE:
+        # queued by the MCP server with its own key: the relay may send it when it holds that same key
+        config = load_config(agent=agent, environ=environ, home=home)
+        queued_with = entry.data.get("key_fp")
+        if not queued_with or not config.api_key or key_mark(config.api_key) != queued_with:
+            return None, (
+                "the MCP server queued it with a key the relay does not have here; the MCP server sends it itself"
+                " once the server answers (delete the file to drop it)"
+            )
+    else:
+        config = load_config(agent=agent, environ=environ, home=home)
+        if not config.api_key:
+            return None, "no API key is configured yet"
+    if not entry.url:
+        return None, "it was queued without a server; it is only kept, never sent (delete the file to drop it)"
+    if clean_url(config.url) != entry.url:
+        return None, (
+            f"it is for {entry.url}, and the key now points at {clean_url(config.url)}; it is only sent to the"
+            " server it was queued for (delete the file to drop it)"
+        )
+    refused_for = entry.data.get("refused_key_fp")
+    if refused_for and key_mark(config.api_key) != refused_for:
+        return None, (
+            "the server refused it for the key it was sent with, and a different key is configured now; it is only"
+            " sent with the key that was refused (give that key access in the dashboard, or delete the file to drop it)"
+        )
+    if not refused_for and entry.data.get("last_status") == 403 and not blocked_by_firewall(entry):
+        return None, (
+            "the server refused it, and it was queued before this client recorded which key was refused; it is kept"
+            " and never sent on its own (delete the file to drop it)"
+        )
+    return config, None
+
+
+def sendable(entry: Entry, environ: Mapping[str, str] | None = None, home: Path | None = None) -> bool:
+    """Whether trying again may deliver a queued entry: its key was not rejected (401), :func:`replay_config`
+    does not hold it (another server, no key, another key than the refused one) and no refusal holds it
+    (:func:`refusal_hold`). What a drain is started for, and what it goes on for."""
+    if entry.data.get("last_status") == 401:
+        return False
+    return replay_config(entry, environ, home)[0] is not None and refusal_hold(entry) is None
+
+
 # ---------------------------------------------------------------------------
 # Drain: send the queue without waiting for the next brief or close
 # ---------------------------------------------------------------------------
@@ -561,6 +693,10 @@ DRAIN_ENV = "REMEMBRA_RELAY_DRAIN"  # "off", or the waits in seconds ("45,180")
 # minutes (Wi-Fi, DNS, a timeout); after that the next hook starts another drain.
 DRAIN_WAITS_SECONDS = (45.0, 180.0)
 DRAIN_MAX_SECONDS = 1800.0  # a drain never lives longer, however often it is asked to go again
+# A drain touches its lock every second it waits and before every pass (``remembra.relay.cli.DRAIN_PASS_SECONDS``
+# is the longest it goes without). A lock older than this has no drain behind it, whatever its pid says: after a
+# restart that pid may belong to another process.
+DRAIN_LOCK_STALE_SECONDS = 300.0
 
 
 def drain_waits(environ: Mapping[str, str] | None = None) -> tuple[float, ...] | None:
@@ -599,18 +735,32 @@ def _pid_alive(pid: int) -> bool:
 
 
 def drain_running(home: Path) -> bool:
-    """Whether a live drain holds the lock (its process exists and the lock is not older than a drain can live)."""
+    """Whether a live drain holds the lock: its process exists and it kept the lock fresh (:func:`touch_drain_lock`)."""
     path = drain_lock_path(home)
     try:
         age = time.time() - path.stat().st_mtime
         pid = int(path.read_text(encoding="utf-8").strip() or 0)
     except (OSError, ValueError):
         return False
-    return age < DRAIN_MAX_SECONDS + 120 and _pid_alive(pid)
+    return age < DRAIN_LOCK_STALE_SECONDS and _pid_alive(pid)
+
+
+def touch_drain_lock(home: Path) -> None:
+    """The running drain says it is still there (the lock's mtime). Only the lock's owner; never raises."""
+    path = drain_lock_path(home)
+    try:
+        if int(path.read_text(encoding="utf-8").strip() or 0) == os.getpid():
+            os.utime(path)
+    except (OSError, ValueError):
+        pass
 
 
 def acquire_drain_lock(home: Path) -> bool:
-    """Take the single drain slot of this HOME (a pid file). False when a live drain has it. Never raises."""
+    """Take the single drain slot of this HOME (a pid file). Never raises.
+
+    False when a live drain has it, and also when the lock cannot be written at all (a full or read-only
+    disk): :func:`drain_running` tells the two apart, and only the first is a reason to :func:`tell_drain`.
+    """
     path = drain_lock_path(home)
     try:
         _ensure_dir(path.parent)
@@ -649,10 +799,15 @@ def read_drain_kick(home: Path) -> tuple[float, float] | None:
         return None
 
 
-def _worth_a_drain(path: Path) -> bool:
-    """A queued entry that trying again may deliver: not one waiting for a new key (401) or held after a refusal."""
+def tell_drain(home: Path, not_before: float) -> None:
+    """Ask the running drain to go again, not before ``not_before`` (it reads the request within a second)."""
+    atomic_write_private(drain_kick_path(home), str(not_before))
+
+
+def _worth_a_drain(path: Path, environ: Mapping[str, str], home: Path) -> bool:
+    """A queued entry that trying again may deliver (:func:`sendable`, in the environment the drain would get)."""
     entry = read_entry(path)
-    return entry is not None and entry.data.get("last_status") != 401 and refusal_hold(entry) is None
+    return entry is not None and sendable(entry, environ, home)
 
 
 def kick_drain(home: Path, *, now: bool = False, environ: Mapping[str, str] | None = None) -> bool:
@@ -661,16 +816,18 @@ def kick_drain(home: Path, *, now: bool = False, environ: Mapping[str, str] | No
     ``now`` is for a caller that has no reason to think the server is unreachable (a session start or end
     finding older entries): the first try is immediate. Without it the first try waits (the caller's own
     request has just failed). Nothing happens when the drain is turned off (``REMEMBRA_RELAY_DRAIN=off``) or
-    nothing is queued. True when a drain is running or was started. Never raises, never blocks: the child
+    nothing is queued that a drain could send (:func:`sendable`). True when a drain is running or was started.
+    Never raises, never blocks: the child
     has its own session and no pipe of the caller's, so a hook returns at once.
     """
     env = os.environ if environ is None else environ
     try:
         waits = drain_waits(env)
-        if waits is None or not any(_worth_a_drain(path) for path in outbox_dir(home).glob("*.json")):
+        child_env = {**env, "HOME": str(home)}
+        if waits is None or not any(_worth_a_drain(path, child_env, home) for path in outbox_dir(home).glob("*.json")):
             return False
         if drain_running(home):
-            atomic_write_private(drain_kick_path(home), str(time.time() + (0.0 if now else waits[0])))
+            tell_drain(home, time.time() + (0.0 if now else waits[0]))
             return True
         argv = [sys.executable, "-m", "remembra.relay.cli", "drain", *(["--now"] if now else [])]
         kwargs: dict[str, Any] = {}
@@ -686,7 +843,7 @@ def kick_drain(home: Path, *, now: bool = False, environ: Mapping[str, str] | No
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
-            env={**env, "HOME": str(home)},
+            env=child_env,
             **kwargs,
         )
         return True

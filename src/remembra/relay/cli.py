@@ -524,6 +524,17 @@ def _json_body(response: httpx.Response) -> Any:
         return None
 
 
+def _firewall(response: httpx.Response | None) -> bool:
+    """A 403 written by a firewall in front of the API (an HTML page, Cloudflare), not by Remembra: no key was
+    checked, so it is a failure to retry, not a refusal (:func:`outbox.firewall_block`)."""
+    if response is None or response.status_code != 403:
+        return False
+    try:
+        return outbox.firewall_block(response.text, response.headers)
+    except Exception:
+        return False
+
+
 def _http_error(response: httpx.Response) -> str:
     try:
         detail = response.json().get("detail", response.text)
@@ -562,46 +573,10 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
     the server that was configured then (``REMEMBRA_URL``, else the local
     default) and goes only once a key for that same server is configured; it
     is never sent to a server set up later. An entry without a recorded server
-    (written before this rule) is held.
+    (written before this rule) is held. (The rules live in :func:`outbox.replay_config`,
+    which the drain's starter shares.)
     """
-    recorded = entry.data.get("config_source")
-    agent = entry.agent_id or None
-    if recorded and recorded not in ("none", outbox.MCP_SOURCE):
-        config = load_config_from_source(str(recorded), agent=agent)
-        if config is None or not config.api_key:
-            return None, f"its key source ({recorded}) has no key now"
-    elif recorded == outbox.MCP_SOURCE:
-        # queued by the MCP server with its own key: the relay may send it when it holds that same key
-        config = load_config(agent=agent)
-        queued_with = entry.data.get("key_fp")
-        if not queued_with or not config.api_key or outbox.key_mark(config.api_key) != queued_with:
-            return None, (
-                "the MCP server queued it with a key the relay does not have here; the MCP server sends it itself"
-                " once the server answers (delete the file to drop it)"
-            )
-    else:
-        config = load_config(agent=agent)
-        if not config.api_key:
-            return None, "no API key is configured yet"
-    if not entry.url:
-        return None, "it was queued without a server; it is only kept, never sent (delete the file to drop it)"
-    if outbox.clean_url(config.url) != entry.url:
-        return None, (
-            f"it is for {entry.url}, and the key now points at {outbox.clean_url(config.url)}; it is only sent to the"
-            " server it was queued for (delete the file to drop it)"
-        )
-    refused_for = entry.data.get("refused_key_fp")
-    if refused_for and outbox.key_mark(config.api_key) != refused_for:
-        return None, (
-            "the server refused it for the key it was sent with, and a different key is configured now; it is only"
-            " sent with the key that was refused (give that key access in the dashboard, or delete the file to drop it)"
-        )
-    if not refused_for and entry.data.get("last_status") == 403:
-        return None, (
-            "the server refused it, and it was queued before this client recorded which key was refused; it is kept"
-            " and never sent on its own (delete the file to drop it)"
-        )
-    return config, None
+    return outbox.replay_config(entry)
 
 
 def _failure(response: httpx.Response | None, error: BaseException | None) -> str:
@@ -623,7 +598,8 @@ def replay_outbox(
     server it was queued for (see :func:`replay_config`), and as the agent that
     wrote it. Stops at the first network failure (the server is
     still unreachable), 5xx, 429 or rejected key (401); a 4xx that resending
-    cannot fix drops the entry (logged). A refusal (403: the key may not write
+    cannot fix drops the entry (logged). A 403 from a firewall in front of the API
+    (:func:`_firewall`) counts as unreachable. A refusal (403: the key may not write
     as that agent or to that project) holds back only that entry and the
     entries with the same key, agent and project; it stays queued (shown by
     ``status``, dropped after ``MAX_AGE_SECONDS``) and goes after the others
@@ -642,7 +618,7 @@ def replay_outbox(
         outbox.log(ctx.home, f"outbox: could not read the queue ({e.__class__.__name__})")
         return report
     # Entries the server refused before go last (stable sort: oldest first within each group).
-    entries.sort(key=lambda e: e.data.get("last_status") == 403)
+    entries.sort(key=lambda e: e.data.get("last_status") == 403 and not outbox.blocked_by_firewall(e))
     attempted = 0
     stop = False
     refused_scopes: set[tuple[str | None, str, str]] = set()
@@ -707,9 +683,10 @@ def replay_outbox(
             outbox.finish(entry, claimed, sent=True)  # resending the same body cannot succeed
             outbox.log(ctx.home, f"outbox: dropped {entry.agent_id} session {entry.session_id[:40]}: {detail}")
             continue
-        outbox.finish(entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key)
+        blocked = _firewall(response)
+        outbox.finish(entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key, firewall=blocked)
         report.remaining.append(entry)
-        if status == 403:
+        if status == 403 and not blocked:
             # Refused for this agent or project only: the rest of the queue may use it.
             report.refused.append(detail)
             refused_scopes.add(scope)
@@ -718,7 +695,7 @@ def replay_outbox(
         if status == 401:
             report.key_rejected.append(config.source)
         outbox.log(ctx.home, f"outbox: resend failed for {entry.agent_id} session {entry.session_id[:40]} (kept): {detail}")
-        stop = True  # unreachable, rate-limited or a rejected key: try again next time
+        stop = True  # unreachable, blocked by a firewall, rate-limited or a rejected key: try again next time
     return report
 
 
@@ -1333,8 +1310,14 @@ def health_summary(health: Any) -> str | None:
     return f"Handoff: {health['label']}" + (f" - {'; '.join(missing)}" if missing else "")
 
 
-def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status: int | None = None) -> None:
-    """Keep an undelivered close for the next brief/close, and say so on stderr."""
+def _queue_close(
+    ctx: Context, payload: dict[str, Any], error: str, http_status: int | None = None, firewall: bool = False
+) -> None:
+    """Keep an undelivered close for the next brief/close, and say so on stderr.
+
+    ``firewall``: the 403 came from a firewall in front of the API (:func:`_firewall`), so it is queued as a
+    failure that waiting can fix, not as a refusal.
+    """
     # Always the server this close was for: without a key that is REMEMBRA_URL (or the local default),
     # and the entry is only ever sent there (replay_config).
     path = outbox.enqueue(
@@ -1345,6 +1328,7 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
         error=error,
         http_status=http_status,
         api_key=ctx.config.api_key,
+        firewall=firewall,
     )
     if path is not None:  # the session has a handoff on its way: a later empty close must retire it
         # queued, not delivered: no fingerprint, so the same close run again is not skipped and replays it
@@ -1358,14 +1342,14 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
         error=error,
         http_status=http_status,
     )
-    if path is not None and http_status == 403:
+    if path is not None and http_status == 403 and not firewall:
         _err(
             f"the server refused the handoff (HTTP 403); it is queued in {path.parent} and held, not re-sent by every"
             " brief or close. `remembra-relay outbox list` says when or whether it goes again;"
             " `remembra-relay outbox drop <agent> <session>` removes it."
         )
     elif path is not None and http_status != 401 and ctx.config.api_key and outbox.kick_drain(ctx.home):
-        # a failure that waiting can fix (unreachable, timeout, 5xx, 429): do not wait for the next hook
+        # a failure that waiting can fix (unreachable, timeout, a firewall's 403, 5xx, 429): do not wait for the next hook
         _err(
             f"the handoff is queued in {path.parent}; it is retried in the background over the next minutes,"
             " and sent by the next brief or close at the latest"
@@ -1531,7 +1515,7 @@ def cmd_close(args: argparse.Namespace) -> int:
             detail = _http_error(response)
             _err(f"close failed: {detail}")
             if outbox.is_retryable_response(response.status_code, _json_body(response)):
-                _queue_close(ctx, payload, detail, response.status_code)
+                _queue_close(ctx, payload, detail, response.status_code, firewall=_firewall(response))
             else:
                 outbox.record(
                     ctx.home,
@@ -2078,7 +2062,10 @@ def _sendable(home: Path) -> list[outbox.Entry]:
         entries = outbox.pending(home)
     except Exception:
         return []
-    return [e for e in entries if e.data.get("last_status") != 401 and _held(e) is None]
+    try:
+        return [e for e in entries if outbox.sendable(e)]
+    except Exception:
+        return []
 
 
 def cmd_drain(args: argparse.Namespace) -> int:
@@ -2094,8 +2081,17 @@ def cmd_drain(args: argparse.Namespace) -> int:
     if waits is None or not _sendable(home):
         return 0
     if not outbox.acquire_drain_lock(home):
-        outbox.log(home, "drain: another drain is running; it was told to go again")
-        outbox.kick_drain(home, now=bool(args.now))
+        # Never start a process from here: a lock that cannot be taken would make each drain start the next.
+        if outbox.drain_running(home):
+            with contextlib.suppress(Exception):
+                outbox.tell_drain(home, time.time() + (0.0 if args.now else waits[0]))
+            outbox.log(home, "drain: another drain is running; it was told to go again")
+        else:
+            outbox.log(
+                home,
+                f"drain: could not take the drain lock ({outbox.drain_lock_path(home).name}); nothing is sent in the"
+                " background, the next brief or close sends the queue",
+            )
         return 0
     started = time.monotonic()
     sent = 0
@@ -2108,6 +2104,7 @@ def cmd_drain(args: argparse.Namespace) -> int:
         while time.monotonic() - started < outbox.DRAIN_MAX_SECONDS:
             while time.time() < next_at and time.monotonic() - started < outbox.DRAIN_MAX_SECONDS:
                 time.sleep(min(1.0, max(0.05, next_at - time.time())))
+                outbox.touch_drain_lock(home)  # still here: the lock is only trusted while it is fresh
                 kick = outbox.read_drain_kick(home)
                 if kick is not None and kick[0] > seen:  # asked to go again: a newer queued close, a session start
                     seen = kick[0]
@@ -2115,6 +2112,7 @@ def cmd_drain(args: argparse.Namespace) -> int:
                     step = 0
             if not _sendable(home):
                 break
+            outbox.touch_drain_lock(home)
             ns = argparse.Namespace(hook=None, agent=None, cwd=str(home), project=None, session_id=None)
             ctx = Context(ns, payload={})
             ctx.deadline = factlib.Deadline(DRAIN_PASS_SECONDS)
@@ -2213,6 +2211,7 @@ def cmd_outbox(args: argparse.Namespace) -> int:
         found = _queued_matching(home, args.agent_id, args.session)
         if not found and outbox.clear_queued_failure(home, args.agent_id):
             # the file was removed by hand before this command existed; status and doctor still listed the failure
+            # (only a 'close (queued)' failure: a session id that matches nothing must not erase anything else)
             print(strip_controls(f"nothing is queued for {args.agent_id}; cleared its recorded queued-close failure"))
             return 0
         entry = _one_queued(home, args.agent_id, args.session)
@@ -2221,7 +2220,7 @@ def cmd_outbox(args: argparse.Namespace) -> int:
         if not outbox.drop(home, entry, "by hand (remembra-relay outbox drop)"):
             _err(f"could not remove {entry.path}")
             return 1
-        outbox.clear_queued_failure(home, entry.agent_id)
+        outbox.clear_queued_failure(home, entry.agent_id, dropped=True)
         print(strip_controls(f"dropped the queued handoff of {entry.agent_id} session {entry.session_id}; it was not sent"))
         return 0
     entry = _one_queued(home, args.agent_id, args.session)
@@ -2276,7 +2275,9 @@ def _send_queued(home: Path, entry: outbox.Entry, source: str | None) -> int:
         )
         print(strip_controls(f"sent the queued handoff of {entry.agent_id} session {entry.session_id}"))
         return 0
-    outbox.finish(entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key)
+    outbox.finish(
+        entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key, firewall=_firewall(response)
+    )
     outbox.record(
         home,
         agent_id=entry.agent_id,

@@ -285,12 +285,13 @@ turns it off, `REMEMBRA_RELAY_DRAIN=30,120` sets the waits in seconds.
 A handoff the server refuses (HTTP 403) is held instead of being sent again by every `brief` and `close`.
 When the key is scoped to another agent than the one the handoff is from, it is never sent on its own
 again; any other refusal (the key may not write to that project) is tried again after 1 hour, 6 hours,
-then once a day. The brief then says a queued handoff was refused, not that your key was. To see, drop or
-send what is queued:
+then once a day. The brief then says a queued handoff was refused, not that your key was. A 403 written by
+a firewall in front of the API (an HTML page, not Remembra's answer) is not a refusal: that handoff is
+retried like one the server could not be reached for. To see, drop or send what is queued:
 
 ```bash
 remembra-relay outbox list                       # every queued handoff, its last error, why it is held
-remembra-relay outbox drop <agent> <session>     # remove one without sending it
+remembra-relay outbox drop <agent> <session>     # delete one queued handoff without sending it
 remembra-relay outbox send <agent> <session>     # send one now (--source <key source> to use another key)
 ```
 
