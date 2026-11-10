@@ -582,7 +582,7 @@ Agents with crew hooks get the same checks from the hooks; for MCP-only agents t
 
 | Tool | Purpose |
 |------|---------|
-| `crew_status(project_id?, git_remote?, root_path?, verbose=false, join=true)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. `join=false` only looks: the crew block, with no seat taken, no presence and nothing marked as read. |
+| `crew_status(project_id?, git_remote?, root_path?, verbose=false, join=true, message?)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention, with the text of each message that mentions you. `join=false` only looks: the crew block, with no seat taken, no presence and nothing marked as read. `message="msg_…"` reads one crew message in full with its thread. |
 | `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0, project_id?, root_path?)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
 | `crew_guard(paths, command?, mcp_tool?, project_id?, root_path?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
 | `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?, project_id?, root_path?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |

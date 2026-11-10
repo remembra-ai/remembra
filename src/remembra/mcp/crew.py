@@ -77,6 +77,13 @@ MCP_FOOTER: Final = (
     '(crew_claim or crew_task action="start"); call crew_checkpoint after commits and test runs.'
 )
 CORRECTIVE: Final = "Do not modify these files further. Tell @{who} or @mani with crew_say."
+# Message bodies as an agent reads them (inside the data block, under the trust policy): a listed
+# message or a mention's message up to MESSAGE_CLIP, the one asked for by id up to the event limit.
+MESSAGE_CLIP: Final = 1000
+MESSAGE_FULL_CLIP: Final = S.MAX_MESSAGE_BODY_IN_EVENT
+MESSAGE_PREFIX_ROOM: Final = 200
+THREAD_CONTEXT_MAX: Final = 12
+VERBOSE_MESSAGES: Final = 5
 
 _SAFE_TEXT_RE: Final = re.compile(r"[A-Za-z0-9._/@+:=-]{1,200}")
 # A repo path or path glob: one token without whitespace, with the characters framework routes are named with.
@@ -572,10 +579,41 @@ def agent_text(value: Any) -> str:
     return police_item(str(value or ""))
 
 
+class WideItem(str):
+    """A data-block item that carries its own line limit (a message body), instead of the default
+    :data:`remembra.crew.schemas.DATA_ITEM_CLIP` that fits ids, titles and paths."""
+
+    limit: int = S.DATA_ITEM_CLIP
+
+    def __new__(cls, text: str, limit: int) -> WideItem:
+        item = super().__new__(cls, text)
+        item.limit = max(int(limit), S.DATA_ITEM_CLIP)
+        return item
+
+
+def message_item(message: Mapping[str, Any], clip: int = MESSAGE_CLIP) -> WideItem:
+    """One crew message as a data-block item: a server-template prefix (id, kind, author) and the body
+    under the brief's trust policy with the server's stored score (as a ``crew_say`` reply is shown):
+    low-trust text becomes the fixed withheld note, commands are flagged, the body is clipped to ``clip``."""
+    who = message.get("author_callsign") or message.get("author_label") or "someone"
+    prefix = f"message {_safe(message.get('id')) or '(no id)'} ({_safe(message.get('kind')) or 'chat'}) from "
+    prefix += f"{S.clip_item(str(who), 60)}: "
+    if message.get("redacted"):
+        body = "(a human removed this message)"
+    else:
+        body = police_item(
+            str(message.get("body") or ""),
+            stored_trust=message.get("trust_score"),
+            clip_body=lambda text: S.clip_item(text, clip),
+        )
+    return WideItem(prefix + body, clip + MESSAGE_PREFIX_ROOM)
+
+
 def data_block(items: Sequence[str]) -> str:
     """Items inside the one data block (relay wrapper, §11): one line each, clipped, with the trust
-    policy's notes kept at the end (the agent-authored parts went through :func:`agent_text`)."""
-    lines = [data_line(i, S.DATA_ITEM_CLIP) for i in items if str(i or "").strip()]
+    policy's notes kept at the end (the agent-authored parts went through :func:`agent_text`). A
+    :class:`WideItem` (a message body) is clipped to its own limit."""
+    lines = [data_line(i, getattr(i, "limit", S.DATA_ITEM_CLIP)) for i in items if str(i or "").strip()]
     if not lines:
         return ""
     return "\n".join([S.DATA_OPEN, DATA_PREAMBLE, *lines, S.DATA_CLOSE])
@@ -1293,11 +1331,18 @@ class CrewBridge:
         checkout: Mapping[str, Any] | None,
         verbose: bool,
         join: bool = True,
+        message: str | None = None,
     ) -> str:
         if not join:
+            if message is not None and message.strip():
+                # a message is read with a crew seat's token; look-only takes none
+                raise CrewUsageError('crew_status(message="msg_...") reads with your crew seat: call it without join=False.')
             return self._look(caller, project_id)
         seat, joined = self.seat(caller, project_id, checkout)
         http = self._http(caller, seat)
+        if message is not None and message.strip():
+            # a read: no queue item is resolved and no cursor moves, so nothing is lost by looking
+            return self._read_message(http, seat, message.strip())
         rejoin = dict(joined or self.touch(caller, seat, force=True) or {})
         with seat.lock:  # taken over from an earlier process by a crew write: this status still has to say so
             if seat.resumed_status:
@@ -1319,9 +1364,26 @@ class CrewBridge:
         if note:
             lines.append(note)
         items = self._queue_items(http, seat)
+        shown: list[dict[str, Any]] = []
         if items:
             lines.append("FOR YOU (session queue):")
-            lines.extend(f"- {S.clip_item(str(i.get('title') or ''), 200)}" for i in items[:8])
+            for item in items[:8]:
+                title = f"- {S.clip_item(str(item.get('title') or ''), 200)}"
+                ref = _safe(item.get("ref_id")) if item.get("ref_type") == "message" else None
+                if ref is None:
+                    lines.append(title)
+                    shown.append(item)
+                    continue
+                try:
+                    msg = self._message(http, seat, ref)
+                except CrewApiError:
+                    # the body could not be fetched: the item stays in the queue, so it is shown again
+                    lines.append(f'{title} · body unavailable right now: crew_status(message="{ref}") reads it')
+                    continue
+                lines.append(title)
+                if msg is not None:
+                    data.append(message_item(msg))
+                shown.append(item)
         deltas = self._deltas(http, seat)
         lines.extend(deltas)
         if verbose:
@@ -1329,7 +1391,7 @@ class CrewBridge:
             lines.extend(v_lines)
             data.extend(v_data)
         lines.append(shadow.footer if shadow is not None and shadow.here else MCP_FOOTER)
-        self._resolve_items(http, seat, items)
+        self._resolve_items(http, seat, shown)
         with seat.lock:
             seat.pending.clear()
             seat.notice_cursor = max(seat.notice_cursor, seat.status_cursor)
@@ -1366,6 +1428,51 @@ class CrewBridge:
                 "you here. Call crew_status without join=False to join."
             )
         return join_text(lines)
+    def _message(self, http: CrewHttp, seat: Seat, message_id: str) -> dict[str, Any] | None:
+        """One message of this crew by id, or None when the crew has no such message. ``thread=<id>``
+        selects ``id = ? OR thread_root_id = ?`` in seq order, so the first row is the message itself
+        whether it is a root or a reply."""
+        _, body, _ = http.call(
+            "GET", f"/crews/{seat.crew_id}/messages", token=seat.token, params={"thread": message_id, "limit": 1}
+        )
+        for m in (body or {}).get("items") or [] if isinstance(body, dict) else []:
+            if isinstance(m, dict) and m.get("id") == message_id:
+                return m
+        return None
+
+    def _read_message(self, http: CrewHttp, seat: Seat, message_id: str) -> str:
+        """``crew_status(message="msg_…")``: that message in full and the rest of its thread, as data."""
+        if not S.is_id("message", message_id):
+            raise CrewUsageError('message must be a crew message id like "msg_01M6Q6H7CWHGG9S748N7WWXSM5".')
+        msg = self._message(http, seat, message_id)
+        if msg is None:
+            raise CrewUsageError(
+                f"No message {message_id} in this crew ({_safe(seat.project_id) or 'this project'}). "
+                "crew_status(verbose=True) lists the latest messages."
+            )
+        root = _safe(msg.get("thread_root_id")) or message_id
+        _, body, _ = http.call("GET", f"/crews/{seat.crew_id}/messages", token=seat.token, params={"thread": root, "limit": 200})
+        thread = [m for m in ((body or {}).get("items") or [] if isinstance(body, dict) else []) if isinstance(m, dict)]
+        others = [m for m in thread if m.get("id") != message_id]
+        who = msg.get("author_callsign") or msg.get("author_label") or "someone"
+        head = f"MESSAGE {message_id} ({_safe(msg.get('kind')) or 'chat'}) from {_safe(who) or 'someone'}"
+        if msg.get("seq") is not None:
+            head += f" · seq {msg.get('seq')}"
+        if root != message_id:
+            head += f" · reply in thread {root}"
+        lines = [head]
+        data: list[str] = [message_item(msg, MESSAGE_FULL_CLIP)]
+        if others:
+            kept = others[-THREAD_CONTEXT_MAX:]
+            if root != message_id and all(m.get("id") != root for m in kept):
+                kept = [*[m for m in others if m.get("id") == root], *kept[1:]]  # a reply is read with its root
+            note = f" (the latest {len(kept)} of {len(others)})" if len(kept) < len(others) else ""
+            lines.append(f"THREAD {root}: {len(others)} other message(s){note}, oldest first, below it in the data.")
+            data.extend(message_item(m) for m in kept)
+        else:
+            lines.append("No other message in its thread yet.")
+        lines.append(f'Answer in the thread with crew_say(thread="{root}", kind="answer", body=…).')
+        return join_text(lines, data)
 
     def _crew_block(self, http: CrewHttp, caller: CallerInfo, seat: Seat) -> str:
         params = {
@@ -1453,7 +1560,8 @@ class CrewBridge:
         return sorted(items, key=lambda i: (int(i.get("priority") or 2), str(i.get("id"))))
 
     def _resolve_items(self, http: CrewHttp, seat: Seat, items: Sequence[Mapping[str, Any]]) -> None:
-        """Items shown to the agent are acknowledged (resolved) so FOR YOU only counts new ones."""
+        """Items shown to the agent are acknowledged (resolved) so FOR YOU only counts new ones. A
+        mention whose message could not be fetched is not passed here: it stays until its body was shown."""
         for item in items[:8]:
             try:
                 http.call("POST", f"/inbox/items/{item['id']}/resolve", token=seat.token)
@@ -1543,13 +1651,23 @@ class CrewBridge:
             lines.append("OPEN TASKS: " + " · ".join(self._task_line(http, seat, t) for t in tasks[:12]))
             data.extend(f"{task_ref(t)} title: {agent_text(t.get('title'))}" for t in tasks[:12])
         try:
-            _, body, _ = http.call("GET", f"/crews/{seat.crew_id}/messages", token=seat.token, params={"limit": 5})
+            # ``before`` makes the server take the newest rows (returned oldest first); without it the
+            # list starts at the channel's first message.
+            _, body, _ = http.call(
+                "GET",
+                f"/crews/{seat.crew_id}/messages",
+                token=seat.token,
+                params={"limit": VERBOSE_MESSAGES, "before": S.SEQ_MAX},
+            )
             msgs = [m for m in (body or {}).get("items") or [] if isinstance(m, dict)]
         except CrewApiError:
             msgs = []
-        for m in msgs[-5:]:
-            who = m.get("author_callsign") or m.get("author_label") or "someone"
-            data.append(f"message {m.get('id')} ({m.get('kind')}) from {who}: {agent_text(m.get('body'))}")
+        if msgs:
+            lines.append(
+                f"LATEST MESSAGES ({len(msgs)}, oldest first, in the data below): "
+                'crew_status(message="msg_…") reads one in full with its thread.'
+            )
+        data.extend(message_item(m) for m in msgs[-VERBOSE_MESSAGES:])
         return lines, data
 
     def _task_line(self, http: CrewHttp, seat: Seat, task: Mapping[str, Any]) -> str:
@@ -2784,9 +2902,10 @@ def mention_list(message: Mapping[str, Any]) -> str:
 
 
 def render_notice(callsign: str, items: Sequence[Mapping[str, Any]]) -> str:
-    """One ``crew_notice`` line (≤300 chars): server-set item titles only, most urgent first."""
+    """One ``crew_notice`` line (≤300 chars): server-set item titles only, most urgent first. The
+    bodies are never in a notice; ``crew_status`` shows each mention's message as data."""
     head = f"CREW ({callsign}): "
-    tail = " · crew_status for details"
+    tail = " · crew_status shows the messages"
     parts: list[str] = []
     for item in items:
         title = S.clip_item(str(item.get("title") or item.get("kind") or ""), 140)

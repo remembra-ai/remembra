@@ -110,6 +110,12 @@ STOPWORDS = frozenset(
 )
 # Facts the pack's pages don't state in one place, answered from the code (never from a model).
 FACT_TOPICS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\bmsg_|\b(?:read|open|see|show|view)\b.*\b(?:crew|channel)\b.*\b(?:messages?|mentions?|repl(?:y|ies))\b", re.I
+        ),
+        "crew_messages",
+    ),
     (re.compile(r"\bcrew\b", re.I), "crew"),
     (re.compile(r"\bwindows\b", re.I), "windows"),
 )
@@ -353,6 +359,12 @@ def facts() -> dict[str, Any]:
         "crew": (
             f"Crew mode ships in remembra {__version__} and is off by default: a server turns it on with "
             "REMEMBRA_CREW_MODE=true. Guide: https://docs.remembra.dev/relay/crew/"
+        ),
+        "crew_messages": (
+            'Read a crew message with the MCP tool crew_status: crew_status(message="msg_…") returns that message in '
+            "full with its thread and changes nothing; plain crew_status shows the text of each message that mentions "
+            "you; crew_status(verbose=True) lists the latest channel messages. get_inbox is a different store (the agent "
+            "inbox, send_to_inbox) and does not list crew messages."
         ),
         "windows": "Windows setup is not tested.",
         "pricing_page": READ_PAGES["pricing"],

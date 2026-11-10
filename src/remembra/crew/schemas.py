@@ -2444,8 +2444,10 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
             McpParam("root_path", "str"),
             McpParam("verbose", "bool", default=False),
             McpParam("join", "bool", default=True),
+            McpParam("message", "str"),
         ),
-        "Joins implicitly (join=false: look only, no seat). Crew block, deltas since cursor, and the YOU self-view.",
+        "Joins implicitly (join=false: look only, no seat). Crew block, deltas since cursor, and the YOU self-view. "
+        "With message, that message and its thread.",
     ),
     McpToolSpec(
         "crew_claim",

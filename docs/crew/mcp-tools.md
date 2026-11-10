@@ -6,7 +6,7 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 
 | Tool | Parameters (default) | Returns |
 |---|---|---|
-| `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false`, `join=true` | joins implicitly (`join=false`: look only, no seat); crew block, deltas since cursor, the YOU self-view |
+| `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false`, `join=true`, `message?` | joins implicitly (`join=false`: look only, no seat); crew block, deltas since cursor, the YOU self-view, each mention with its message (as data); `verbose` adds the latest five channel messages; `message="msg_…"` returns that message in full with its thread and changes nothing |
 | `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300), `project_id?`, `root_path?` | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
 | `crew_guard` | `paths: [str]` (required), `command?`, `mcp_tool?`, `project_id?`, `root_path?` | `ALLOW` / `DENY <reason>` |
 | `crew_task` | `action="list"` (`list create start update block release`), `task?`, `title?`, `status?`, `zones?: [str]`, `acceptance?: [Criterion]`, `phase?`, `note?`, `project_id?`, `root_path?` | `start` claims the task's zones atomically |
