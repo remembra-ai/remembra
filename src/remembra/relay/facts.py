@@ -666,6 +666,8 @@ class TranscriptFacts:
     automated: bool = False
     # The agent stored its own handoff through the Remembra MCP ``close_session`` tool.
     agent_handoff: bool = False
+    # Tool calls counted in ``tool_calls`` that came after the last such handoff (work it does not cover).
+    calls_after_handoff: int = 0
 
 
 def _result_text(content: Any) -> str:
@@ -906,6 +908,13 @@ def _count_tool(facts: TranscriptFacts, name: str) -> None:
     counted = _counted_tool(name)
     if counted:
         facts.tool_calls[counted] = facts.tool_calls.get(counted, 0) + 1
+        facts.calls_after_handoff += 1
+
+
+def _note_agent_handoff(facts: TranscriptFacts) -> None:
+    """The agent's ``close_session`` succeeded: what was counted so far is covered by its handoff."""
+    facts.agent_handoff = True
+    facts.calls_after_handoff = 0
 
 
 def _stamp(facts: TranscriptFacts, value: Any) -> None:
@@ -933,9 +942,13 @@ def activity_note(transcript: TranscriptFacts | None) -> str | None:
     tool calls (the most used tool names with their counts) and how long the session ran. It never
     quotes a prompt, an answer, a tool's input or its output. None for a session that did less than
     ``ACTIVITY_MIN_PROMPTS`` / ``ACTIVITY_MIN_TOOL_CALLS``, for a scheduled task's run, and for a
-    session whose agent stored its own handoff (``close_session``): that one says more than this.
+    session whose agent stored its own handoff (``close_session``) and did less than
+    ``ACTIVITY_MIN_TOOL_CALLS`` after it: that handoff says more than this. Work that followed the
+    agent's handoff gets the line, which then says so.
     """
-    if transcript is None or transcript.automated or transcript.agent_handoff:
+    if transcript is None or transcript.automated:
+        return None
+    if transcript.agent_handoff and transcript.calls_after_handoff < ACTIVITY_MIN_TOOL_CALLS:
         return None
     calls = sum(transcript.tool_calls.values())
     if transcript.prompts < ACTIVITY_MIN_PROMPTS or calls < ACTIVITY_MIN_TOOL_CALLS:
@@ -953,8 +966,14 @@ def activity_note(transcript: TranscriptFacts | None) -> str | None:
         if minutes >= 1:
             duration = f" over {minutes} min"
     prompts = f"{transcript.prompts} prompt{'s' if transcript.prompts != 1 else ''}"
+    own = ""
+    if transcript.agent_handoff:
+        own = (
+            "The agent stored its own handoff during the session (close_session); "
+            f"{transcript.calls_after_handoff} of these tool calls came after it. "
+        )
     return (
-        f"{ACTIVITY_NOTE_PREFIX}{prompts}, {calls} tool calls{duration} ({named}). "
+        f"{ACTIVITY_NOTE_PREFIX}{prompts}, {calls} tool calls{duration} ({named}). {own}"
         "It left no commit, file change, failed command or open todo to report; what was asked and answered is not sent."
     )
 
@@ -975,10 +994,11 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
     printed by ``git commit`` inside the repository are commit evidence.
 
     Activity (:func:`activity_note`) is counted from the session's own lines
-    only: ``user`` lines that are a prompt, and each ``tool_use`` id once on an
-    ``assistant`` line. The desktop app repeats every message in
-    ``api-request-blob`` records, and a sub-agent's lines are marked
-    ``isSidechain``; neither is counted.
+    only: ``user`` lines that are a prompt, and each ``tool_use`` id once,
+    whichever record carries it. The desktop app repeats messages in
+    ``api-request-blob`` records (counted once by id), and for a session it
+    moved or resumed those records can be the only place an earlier call is
+    kept. A sub-agent's lines are marked ``isSidechain`` and are not counted.
     """
     facts = TranscriptFacts()
     uses: dict[str, tuple[str, dict[str, Any], str | None]] = {}
@@ -1025,7 +1045,7 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 line_cwd = entry.get("cwd")
                 use_key = str(block.get("id"))
                 uses[use_key] = (name, tool_input, line_cwd if isinstance(line_cwd, str) else None)
-                if entry.get("type") == "assistant" and own_line and use_key not in counted:
+                if own_line and use_key not in counted:
                     counted.add(use_key)
                     _count_tool(facts, name)
                 if name == "TodoWrite" and isinstance(tool_input.get("todos"), list):
@@ -1046,7 +1066,7 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 is_error = bool(block.get("is_error"))
                 text = _result_text(block.get("content"))
                 if not is_error and _is_agent_handoff(name):
-                    facts.agent_handoff = True
+                    _note_agent_handoff(facts)
                 if name == "Bash":
                     command = str(tool_input.get("command") or "").strip()
                     if not command or tool_input.get("run_in_background"):
@@ -1297,7 +1317,8 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
         elif ptype in ("function_call_output", "custom_tool_call_output"):
             call_id = str(payload.get("call_id") or "")
             if call_id in handoff_calls:
-                facts.agent_handoff = True
+                handoff_calls.discard(call_id)
+                _note_agent_handoff(facts)
             if call_id in calls and call_id not in from_event:
                 command, workdir = calls[call_id]
                 text, code = _codex_output_exit(payload.get("output"))

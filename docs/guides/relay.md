@@ -470,7 +470,9 @@ the most used tool names, and how long it ran (`2 prompts, 56 tool calls over 73
 WebSearch 8, send_to_inbox 1)`). What was asked and answered, and what a tool was given or returned,
 is never sent. The note is written only for a session with at least one prompt and three tool calls
 (looking up tools, the agent's own todo list and Remembra's own session reads are not counted), never
-for a scheduled task's run, and never when the agent stored its own handoff with `close_session`.
+for a scheduled task's run, and not when the agent stored its own handoff with `close_session` and made
+fewer than three tool calls after it. Work that followed the agent's handoff gets the note, which says
+that the agent stored one and how many of the calls came after it.
 
 **Empty sessions leave no handoff.** When a session recorded nothing (no summary or notes, no commits,
 no changed or uncommitted files, no tests, errors or failed commands, no todos and no next step, and
