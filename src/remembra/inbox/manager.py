@@ -60,7 +60,7 @@ TERMINAL_STATUSES: set[str] = {"done", "blocked", "rejected"}
 OPEN_STATUSES: tuple[str, ...] = ("unread", "read", "accepted")
 # What an ack may set: a terminal status, or "accepted". No result is a plain "read".
 ACK_RESULTS: frozenset[str] = frozenset({*TERMINAL_STATUSES, "accepted"})
-_OPEN_SQL = "status IN ('unread', 'read', 'accepted')"
+_OPEN_SQL = "status IN (" + ", ".join(f"'{s}'" for s in OPEN_STATUSES) + ")"
 # An inbox id as this module makes them (``inbox_`` + hex), for a reply link.
 INBOX_ID_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
 SCOPES: frozenset[str] = frozenset({"all", "project", "unscoped"})
@@ -725,7 +725,8 @@ class InboxManager:
             owner_user_id: Tenant scope.
             inbox_id: The inbox row to ack.
             result: "accepted" (taken on, not finished: the row stays open) or a
-                    terminal status: "done", "blocked", or "rejected".
+                    terminal status: "done", "blocked", or "rejected". "accepted"
+                    on a finished row leaves it finished (only the note is taken).
                     If omitted, an unread row becomes "read"; a row that is
                     already accepted or finished keeps its status (a plain ack
                     never reopens or downgrades it) and only takes the note.
@@ -746,8 +747,10 @@ class InboxManager:
             raise ValueError(f"Inbox item '{inbox_id}' not found")
 
         now_iso = datetime.now(UTC).isoformat()
-        if result is None and existing.get("status") in ACK_RESULTS:
-            # "Mark read" on a row that is already accepted or finished: its status and result stand.
+        current = existing.get("status")
+        if (result is None and current in ACK_RESULTS) or (result == "accepted" and current in TERMINAL_STATUSES):
+            # "Mark read" on a row that is already accepted or finished, or "accepted" on a finished
+            # row: its status and result stand (a finished row is never reopened), the note is taken.
             new_status = str(existing["status"])
             if note is not None:
                 await self._db.conn.execute(
