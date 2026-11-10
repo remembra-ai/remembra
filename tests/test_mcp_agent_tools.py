@@ -99,6 +99,7 @@ def test_stdio_startup_warns_without_agent_id(monkeypatch, capsys):
     monkeypatch.setattr(server, "REMEMBRA_MCP_TRANSPORT", "stdio")
     monkeypatch.setattr(server, "REMEMBRA_AGENT_ID", "")
     monkeypatch.setattr(server.mcp, "run", lambda transport: None)
+    monkeypatch.setattr(server, "_STDIO_SERVER", False)  # main() sets it: restored for the tests that follow
     server.main()
     assert "REMEMBRA_AGENT_ID is not set" in capsys.readouterr().err
 

@@ -311,6 +311,16 @@ class ProjectRegistry:
         if not fingerprints:
             if not hint:
                 raise ValueError("Provide git_remote, root_commit or root_path (or a project id).")
+            # The caller named a repository (a remote or root commit that could not be read, or
+            # git_repo) and nothing identifies it. A 0.16.1+ client's configured project names only
+            # folders, so it must not take this repository's work: say what to send instead. A
+            # project-restricted key that may use the hint keeps it (nothing is recorded).
+            names_repository = bool((locator.git_remote or "").strip() or (locator.root_commit or "").strip()) or git_repo is True
+            if hint_scope == HINT_SCOPE_FOLDERS and names_repository and not (restricted and hint in (allowed_projects or [])):
+                raise ValueError(
+                    "git_remote or root_commit not understood: send the remote as a URL "
+                    "(https://host/owner/repo or git@host:owner/repo), the full root commit id, or root_path."
+                )
             self._check_allowed(hint, allowed_projects)
             return {
                 "project_id": hint,

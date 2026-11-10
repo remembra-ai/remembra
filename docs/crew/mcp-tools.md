@@ -7,12 +7,21 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 | Tool | Parameters (default) | Returns |
 |---|---|---|
 | `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false` | joins implicitly; crew block, deltas since cursor, the YOU self-view |
-| `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300) | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
-| `crew_guard` | `paths: [str]` (required), `command?`, `mcp_tool?` | `ALLOW` / `DENY <reason>` |
-| `crew_task` | `action="list"` (`list create start update block release`), `task?`, `title?`, `status?`, `zones?: [str]`, `acceptance?: [Criterion]`, `phase?`, `note?` | `start` claims the task's zones atomically |
-| `crew_say` | `body` (required), `kind="chat"` (`chat question answer note request_release decision`), `to="crew"`, `thread?`, `wait_s=0` (≤120) | message id and seq; with `wait_s`, the first reply (as data) or "no reply yet" |
-| `crew_checkpoint` | `files_changed: [str]` (required), `summary?`, `commits?: [str]`, `tests?: [{command, passed, failed}]`, `next_step?`, `task?` | collision check plus crew delta |
-| `crew_report` | `task` (required), `sections` (required: `done not_done failing next follow_ups`), `criteria_evidence?`, `commits?`, `tests?`, `summary?`, `release=true` | verdict, `accepted`/`review`, unmet criteria (MCP evidence is `agent-declared`) |
+| `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300), `project_id?`, `root_path?` | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
+| `crew_guard` | `paths: [str]` (required), `command?`, `mcp_tool?`, `project_id?`, `root_path?` | `ALLOW` / `DENY <reason>` |
+| `crew_task` | `action="list"` (`list create start update block release`), `task?`, `title?`, `status?`, `zones?: [str]`, `acceptance?: [Criterion]`, `phase?`, `note?`, `project_id?`, `root_path?` | `start` claims the task's zones atomically |
+| `crew_say` | `body` (required), `kind="chat"` (`chat question answer note request_release decision`), `to="crew"`, `thread?`, `wait_s=0` (≤120), `project_id?`, `root_path?` | message id and seq; with `wait_s`, the first reply (as data) or "no reply yet" |
+| `crew_checkpoint` | `files_changed: [str]` (required), `summary?`, `commits?: [str]`, `tests?: [{command, passed, failed}]`, `next_step?`, `task?`, `project_id?`, `root_path?` | collision check plus crew delta |
+| `crew_report` | `task` (required), `sections` (required: `done not_done failing next follow_ups`), `criteria_evidence?`, `commits?`, `tests?`, `summary?`, `release=true`, `project_id?`, `root_path?` | verdict, `accepted`/`review`, unmet criteria (MCP evidence is `agent-declared`) |
+
+**Which project a call acts in.** `project_id` (or `root_path`, the repository checkout, resolved
+read-only like `session_brief`) on any tool names the project for that call and becomes this MCP
+session's choice; without it the call follows the latest choice (`session_brief`, `crew_status` or
+an earlier call), else the agent's crew-hook session. A local stdio server never falls back to the
+configured `REMEMBRA_PROJECT` on its own (only `REMEMBRA_RELAY_PROJECT`, the one-namespace opt-in,
+is a default): with no project chosen the tool answers `CREW: No project yet …`. On a stdio server
+every result but `crew_status`'s ends with `(project <id>)`, the project the call used. An argument
+a tool does not have is refused with the list of the ones it takes.
 
 Parameter order in the Python signature is free (required parameters first); names, types,
 defaults, enums and caps are the contract.

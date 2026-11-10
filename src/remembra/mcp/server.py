@@ -32,6 +32,8 @@ crew_notice when that session's crew queue changed.
 from __future__ import annotations
 
 import contextvars
+import dataclasses
+import difflib
 import functools
 import hashlib
 import json
@@ -45,6 +47,7 @@ from typing import Any, Literal, cast
 import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import create_model, model_validator
 
 from remembra import __version__
 from remembra.client.memory import Memory, MemoryError
@@ -61,6 +64,7 @@ from remembra.mcp.crew import (
     hook_adapter_of,
 )
 from remembra.mcp.crew import error_text as crew_error_text
+from remembra.relay.identity import canonical_git_remote
 from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
 from remembra.security.untrusted import dump_untrusted
 
@@ -407,6 +411,7 @@ def store_memory(
     metadata: dict[str, Any] | None = None,
     ttl: str | None = None,
     memory_type: str | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Store information in persistent memory.
 
@@ -426,10 +431,12 @@ def store_memory(
             also "fact", "observation", "inference", "task".
             For a current-state value (deploy status, active sprint) use
             store_status instead — it replaces the previous value.
+        project_id: Project to store in. Default: the project your
+            session_brief or crew_status resolved, else the configured one.
 
     Returns:
-        JSON with status "stored" (id, extracted_facts) or "duplicate"
-        (nothing new stored; duplicate_of = the existing memory id).
+        JSON with status "stored" (id, project_id, extracted_facts) or
+        "duplicate" (nothing new stored; duplicate_of = the existing memory id).
     """
     try:
         effective_type = memory_type
@@ -443,13 +450,16 @@ def store_memory(
             return json.dumps({"status": "error", "error": f"memory_type must be one of {list(_STORE_TYPES)}"})
 
         client = _get_client()
-        # Default to the project this session's session_brief resolved (by location).
+        # This call's project, else the one this session's session_brief / crew_status resolved.
+        target = project_id.strip() if isinstance(project_id, str) and project_id.strip() else None
+        target = target or _session_project().get("project_id")
+        stored_in = client._project(target)
         result = client.store(
             content=content,
             metadata=metadata,
             ttl=ttl,
             memory_type=effective_type,
-            project_id=_session_project().get("project_id"),
+            project_id=target,
         )
 
         if result.duplicate_of or not result.id:
@@ -458,6 +468,7 @@ def store_memory(
                     "status": "duplicate",
                     "stored": False,
                     "duplicate_of": result.duplicate_of or None,
+                    "project_id": stored_in,
                     "message": "Nothing new stored: every extracted fact already exists in memory.",
                 }
             )
@@ -465,6 +476,7 @@ def store_memory(
             "status": "stored",
             "stored": True,
             "id": result.id,
+            "project_id": stored_in,
             "memory_type": effective_type,
             "extracted_facts": result.extracted_facts,
             "expires_at": result.expires_at,
@@ -926,6 +938,9 @@ def _locator(
     """
     if not (git_remote or root_path or root_commit):
         return None, None
+    # github.com/owner/repo (how the server prints a remote) is sent as a URL: older servers read the
+    # scheme-less form as a relative path and answer with the configured project.
+    git_remote = canonical_git_remote(git_remote)
     locator: dict[str, Any] = {"git_remote": git_remote, "root_path": root_path, "root_commit": root_commit}
     checkout: dict[str, Any] | None = None
     git_repo: bool | None = True if (git_remote or root_commit) else None
@@ -1005,15 +1020,19 @@ def close_session(
             diff_stat, commands [{cmd, exit_code}], tests [{cmd, passed, summary}],
             unpushed_commits, upstream, notes.
         end_reason: Why the session ends (e.g. "done", "blocked", "context full").
-        project_id: Project. Default: the project your session_brief resolved,
-            else the configured REMEMBRA_PROJECT.
+        project_id: Project. Default: the project your session_brief or
+            crew_status resolved, else your crew session's. A local (stdio)
+            server with none of these asks for root_path or project_id
+            instead of filing under the configured REMEMBRA_PROJECT.
         git_remote: Resolve the project from your repo's remote instead (pass
             the same value you gave session_brief).
         root_path: Resolve the project from your working directory instead.
         session_id: Defaults to this MCP session's id.
 
     Returns:
-        JSON with handoff_id, project_id, headline, the rendered handoff and grounding verdict.
+        JSON with handoff_id, project_id (where the handoff was filed), project_source
+        (how a location was resolved: known, derived, adopted, hint = the configured
+        project), headline, the rendered handoff and grounding verdict.
     """
     try:
         client = _get_client()
@@ -1033,6 +1052,15 @@ def close_session(
                 locator = remembered.get("locator")
                 project_id = None if locator else remembered.get("project_id")
         seat = _crew_seat_for_close()
+        if not project_id and locator is None:
+            # Nothing names a project: the handoff belongs with this session's crew seat. Without one
+            # a stdio server does not guess (REMEMBRA_PROJECT took other repositories' handoffs).
+            if seat is not None:
+                project_id = seat.project_id
+            elif _STDIO_SERVER:
+                project_id = _single_namespace()  # REMEMBRA_RELAY_PROJECT: one namespace, by choice
+                if not project_id:
+                    return json.dumps({"status": "error", "error": _no_project_text("close_session", client)})
         if seat is None:
             result = client.close_session(
                 facts=merged,
@@ -1058,6 +1086,7 @@ def close_session(
             "status": "ok",
             "handoff_id": result.get("handoff_id"),
             "project_id": result.get("project_id"),
+            "project_source": (result.get("resolution") or {}).get("source") if locator else "named",
             "changed": result.get("changed"),
             "headline": result.get("headline"),
             "grounding": result.get("grounding"),
@@ -1076,6 +1105,19 @@ def close_session(
         return _dump(out)
     except Exception as e:
         return _error(e)
+
+
+def _no_project_text(tool: str, client: Memory) -> str:
+    """What a stdio server answers when a writing call names no project and none was chosen in this process."""
+    configured = client.project if client.project and client.project != "default" else None
+    text = (
+        f"No project selected for {tool}: pass root_path=<your repository checkout> (or git_remote / project_id), "
+        "or call session_brief with your location first. This MCP server has no project from an earlier call "
+        "(it may have restarted)."
+    )
+    if configured:
+        text += f" The configured project '{configured}' is not used on its own: pass project_id='{configured}' to file there."
+    return text
 
 
 def _crew_seat_for_close() -> Any:
@@ -1166,7 +1208,7 @@ def resolve_project(
     try:
         client = _get_client()
         result = client.resolve_project(
-            git_remote=git_remote,
+            git_remote=canonical_git_remote(git_remote),
             root_path=root_path,
             root_commit=root_commit,
             repo_name=repo_name,
@@ -1751,6 +1793,7 @@ def send_to_inbox(
     metadata: dict[str, Any] | None = None,
     from_agent: str | None = None,
     expires_in: str | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Send a targeted message to another agent's inbox.
 
@@ -1766,9 +1809,12 @@ def send_to_inbox(
             reply (in_reply_to=<inbox id> of a message to this agent), else to this client's project.
         from_agent: Sender id; defaults to REMEMBRA_AGENT_ID. A key scoped to one agent may only send as that agent.
         expires_in: Optional expiry ("12h", "7d", "2w"); expired rows are hidden.
+        project_id: Project the message is about (same as metadata.project_id). Default: a reply's
+            original project, else the project your session_brief or crew_status resolved, else the
+            configured one.
 
     Returns:
-        JSON with inbox_id, status, created_at and any warnings.
+        JSON with inbox_id, project_id (the project it is tagged with), status, created_at and any warnings.
     """
     try:
         expires_at = _expires_at_from(expires_in)
@@ -1794,11 +1840,14 @@ def send_to_inbox(
         # tag the message with this client's project so project-restricted readers (e.g. the
         # Claude/ChatGPT connector) can see it.
         tagged = dict(metadata or {})
+        if isinstance(project_id, str) and project_id.strip() and not tagged.get("project_id"):
+            tagged["project_id"] = normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
         if not tagged.get("project_id"):
             replied_project = _reply_project(client, sender, tagged.get("in_reply_to"))
             if replied_project:
                 tagged["project_id"] = replied_project
-        project = getattr(client, "project", None)
+        # the project this session works in (session_brief / crew_status), before the configured one
+        project = _session_project().get("project_id") or getattr(client, "project", None)
         if project and not tagged.get("project_id"):
             tagged["project_id"] = project
         result = client.send_to_inbox(
@@ -1813,6 +1862,7 @@ def send_to_inbox(
             {
                 "ok": True,
                 "inbox_id": result.get("inbox_id"),
+                "project_id": tagged.get("project_id"),
                 "delivery_status": "sent",
                 "row_status": result.get("status"),
                 "created_at": result.get("created_at"),
@@ -2057,6 +2107,11 @@ def _crew_client_session_id(client: Memory) -> str:
 # Set by main() for a stdio server: it runs in the agent's process tree on the agent's machine, so the
 # agent's crew-hook session (crewd) may act for crew_claim. Never set in-process (tests, remote transports).
 _LOCAL_CREW = False
+# Set by main() for a stdio server: the process an agent host starts on the user's machine. There the
+# configured project (REMEMBRA_PROJECT) is not a default for crew tools or a locator-less close_session:
+# after a restart it took every repository's claims, notes and handoffs. A remote transport keeps the
+# project its caller selected per request.
+_STDIO_SERVER = False
 
 
 def _crew_caller() -> CallerInfo:
@@ -2064,14 +2119,17 @@ def _crew_caller() -> CallerInfo:
     client = _get_client()
     remembered = _session_project().get("project_id")
     configured = client.project if client.project and client.project != "default" else None
+    # stdio: only what the agent chose, or the REMEMBRA_RELAY_PROJECT opt-in to one namespace
+    default = remembered or (_single_namespace() if _STDIO_SERVER else configured)
     return CallerInfo(
         client=client,
         fingerprint=_key_fingerprint(client.api_key),
         client_session_id=_crew_client_session_id(client),
         agent_id=(client.agent_id or _default_agent_id() or None),
-        default_project=remembered or configured,
+        default_project=default,
         chosen_project=remembered,
         local=_LOCAL_CREW,
+        configured_project=configured if _STDIO_SERVER and configured != default else None,
     )
 
 
@@ -2089,15 +2147,56 @@ async def _run_crew(
     fn: Any,
     caller: CallerInfo | None = None,
 ) -> str:
-    """Validate against the §7 contract, then run ``fn(caller)`` in a worker thread."""
+    """Validate against the §7 contract, then run ``fn(caller)`` in a worker thread.
+
+    A call that names its project (``project_id`` or ``root_path`` in ``args``) runs in that project,
+    whatever this MCP session used before, and that project becomes the session's choice. On a stdio
+    server, where one process may serve several conversations, every result but crew_status's (its
+    header names the crew) ends with ``(project <id>)``: where the call wrote.
+    """
     errors = crew_schemas.validate_mcp_call(tool, {k: v for k, v in args.items() if v is not None})
     if errors:
         return "INVALID ARGUMENTS: " + "; ".join(errors[:5])
+    project_arg = str(args.get("project_id") or "").strip()
+    path_arg = str(args.get("root_path") or "").strip()
+    named = tool != "crew_status" and bool(project_arg or path_arg)
+
+    def work(who: CallerInfo) -> tuple[str, str | None, dict[str, Any] | None]:
+        chosen: str | None = None
+        locator: dict[str, Any] | None = None
+        _crew.begin_call()
+        try:
+            if named:
+                chosen, locator = _call_project(who.client, project_arg, path_arg)
+                who = dataclasses.replace(who, call_project=chosen)
+            out = str(fn(who))
+        except Exception as e:  # every failure is answered as text; the agent keeps working
+            out = _crew_error(e)
+        used = _crew.used_project()
+        if used and _STDIO_SERVER and tool != "crew_status":
+            out = f"{out}\n(project {used})"
+        return out, chosen, locator
+
     try:
         who = caller or _crew_caller()
-        return str(await anyio.to_thread.run_sync(functools.partial(fn, who)))
-    except Exception as e:  # every failure is answered as text; the agent keeps working
+        out, chosen, locator = await anyio.to_thread.run_sync(functools.partial(work, who))
+        if chosen:
+            _remember_session_project(chosen, locator)
+        return out
+    except Exception as e:
         return _crew_error(e)
+
+
+def _call_project(client: Memory, project_id: str, root_path: str) -> tuple[str, dict[str, Any] | None]:
+    """The project one crew call named: its ``project_id``, else ``root_path`` resolved read-only (as the brief does)."""
+    if project_id:
+        return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES), None
+    locator, _ = _locator(git_remote=None, root_path=root_path)
+    brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
+    resolved = brief.get("project_id")
+    if not resolved:
+        raise CrewUsageError("root_path did not resolve to a project: pass project_id instead.")
+    return str(resolved), locator
 
 
 def _crew_project(
@@ -2107,7 +2206,10 @@ def _crew_project(
     client = _get_client()
     locator, checkout = _locator(git_remote=git_remote, root_path=root_path)
     if project_id:
-        return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES), checkout, client
+        chosen = normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
+        # close_session, store_memory and send_to_inbox follow this choice too, not only the crew tools
+        _remember_session_project(chosen, None)
+        return chosen, checkout, client
     if locator:
         brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
         resolved = brief.get("project_id")
@@ -2174,6 +2276,8 @@ async def crew_claim(
     baton: bool | None = None,
     reason: str | None = None,
     wait_s: int = 0,
+    project_id: str | None = None,
+    root_path: str | None = None,
 ) -> str:
     """Claim an area before you edit it, or release, adopt, hand over, accept or decline one.
 
@@ -2203,6 +2307,8 @@ async def crew_claim(
         baton: For release: keep the area reserved for the next agent.
         reason: Short note shown to the crew.
         wait_s: Seconds to wait for a grant (0–300).
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
         "action": action,
@@ -2214,6 +2320,8 @@ async def crew_claim(
         "baton": baton,
         "reason": reason,
         "wait_s": wait_s,
+        "project_id": project_id,
+        "root_path": root_path,
     }
     return await _run_crew(
         "crew_claim",
@@ -2238,7 +2346,13 @@ async def crew_claim(
         title="Crew Guard", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
     )
 )
-async def crew_guard(paths: list[str], command: str | None = None, mcp_tool: str | None = None) -> str:
+async def crew_guard(
+    paths: list[str],
+    command: str | None = None,
+    mcp_tool: str | None = None,
+    project_id: str | None = None,
+    root_path: str | None = None,
+) -> str:
     """Ask before you edit (advisory check for agents without crew hooks): ALLOW or DENY <reason>.
 
     Pass the repo-relative paths you are about to write, or the shell command, or the MCP tool
@@ -2249,8 +2363,10 @@ async def crew_guard(paths: list[str], command: str | None = None, mcp_tool: str
         paths: Repo-relative paths you are about to write (can be empty with command/mcp_tool).
         command: A shell command you are about to run.
         mcp_tool: The name of an MCP tool you are about to call.
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
-    args = {"paths": paths, "command": command, "mcp_tool": mcp_tool}
+    args = {"paths": paths, "command": command, "mcp_tool": mcp_tool, "project_id": project_id, "root_path": root_path}
     return await _run_crew("crew_guard", args, lambda who: _crew.guard(who, paths=paths, command=command, mcp_tool=mcp_tool))
 
 
@@ -2269,6 +2385,8 @@ async def crew_task(
     acceptance: list[dict[str, Any]] | None = None,
     phase: str | None = None,
     note: str | None = None,
+    project_id: str | None = None,
+    root_path: str | None = None,
 ) -> str:
     """The crew task board: list, create, start, update, block or release a task.
 
@@ -2284,6 +2402,8 @@ async def crew_task(
         acceptance: Criteria [{id, text, kind: test|command|file|commit|deploy|manual, match?, url?, required}].
         phase: Optional phase label.
         note: Body for create/update, or the reason for block.
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
         "action": action,
@@ -2294,6 +2414,8 @@ async def crew_task(
         "acceptance": acceptance,
         "phase": phase,
         "note": note,
+        "project_id": project_id,
+        "root_path": root_path,
     }
     return await _run_crew(
         "crew_task",
@@ -2323,6 +2445,8 @@ async def crew_say(
     to: str = "crew",
     thread: str | None = None,
     wait_s: int = 0,
+    project_id: str | None = None,
+    root_path: str | None = None,
 ) -> str:
     """Talk to the crew: a message, question, answer, release request or proposed decision.
 
@@ -2336,8 +2460,18 @@ async def crew_say(
         to: crew, or @callsign / @agent / @crew / @mani.
         thread: Message id to reply in (msg_…).
         wait_s: Seconds to wait for a reply (0–120).
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
-    args = {"body": body, "kind": kind, "to": to, "thread": thread, "wait_s": wait_s}
+    args = {
+        "body": body,
+        "kind": kind,
+        "to": to,
+        "thread": thread,
+        "wait_s": wait_s,
+        "project_id": project_id,
+        "root_path": root_path,
+    }
     return await _run_crew(
         "crew_say", args, lambda who: _crew.say(who, body=body, kind=kind, to=to, thread=thread, wait_s=wait_s)
     )
@@ -2355,6 +2489,8 @@ async def crew_checkpoint(
     tests: list[dict[str, Any]] | None = None,
     next_step: str | None = None,
     task: str | None = None,
+    project_id: str | None = None,
+    root_path: str | None = None,
 ) -> str:
     """Record progress after every commit or test run: the crew sees it and checks for overlaps.
 
@@ -2368,6 +2504,8 @@ async def crew_checkpoint(
         tests: Test runs [{command, passed, failed}] (counts).
         next_step: What you do next.
         task: Task ref (default: none).
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
         "files_changed": files_changed,
@@ -2376,6 +2514,8 @@ async def crew_checkpoint(
         "tests": tests,
         "next_step": next_step,
         "task": task,
+        "project_id": project_id,
+        "root_path": root_path,
     }
     return await _run_crew(
         "crew_checkpoint",
@@ -2405,6 +2545,8 @@ async def crew_report(
     tests: list[dict[str, Any]] | None = None,
     summary: str | None = None,
     release: bool = True,
+    project_id: str | None = None,
+    root_path: str | None = None,
 ) -> str:
     """Report a task you own as finished (or partly done): the server's gate decides the verdict.
 
@@ -2419,6 +2561,8 @@ async def crew_report(
         tests: Test runs [{command, passed, failed}].
         summary: Optional short summary (checked against the facts).
         release: Release the task's claims when it is done (default true).
+        project_id: Project to act in (default: the one this session chose with session_brief / crew_status).
+        root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
     args = {
         "task": task,
@@ -2428,6 +2572,8 @@ async def crew_report(
         "tests": tests,
         "summary": summary,
         "release": release,
+        "project_id": project_id,
+        "root_path": root_path,
     }
     return await _run_crew(
         "crew_report",
@@ -2629,6 +2775,55 @@ def memory_status() -> str:
 _install_crew_notice()
 
 
+def _unknown_arguments_text(tool: str, unknown: list[str], known: list[str]) -> str:
+    parts = []
+    for name in unknown:
+        close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+        parts.append(f"'{name}'" + (f" (did you mean '{close[0]}'?)" if close else ""))
+    takes = ", ".join(known) if known else "no arguments"
+    return (
+        f"Unknown argument{'s' if len(unknown) > 1 else ''} {', '.join(parts)} for {tool}: nothing was done. "
+        f"{tool} takes: {takes}."
+    )
+
+
+def _close_tool_arguments() -> None:
+    """Refuse an argument a tool does not have, naming the ones it does.
+
+    The MCP SDK drops unknown arguments, so ``crew_status(project="x")`` ran as ``crew_status()`` and
+    ``close_session(open_work=[...])`` filed a handoff without the open work. Each tool's argument
+    model gets a check that fails the call before the tool runs, and its published schema says
+    ``additionalProperties: false`` so a host can refuse the call itself.
+    """
+    for name, tool in mcp._tool_manager._tools.items():
+        model = tool.fn_metadata.arg_model
+        if getattr(model, "__remembra_closed__", False):
+            continue
+        known = sorted(field.alias or field_name for field_name, field in model.model_fields.items())
+
+        def reject(data: Any, *, __tool: str = name, __known: list[str] = known) -> Any:
+            if isinstance(data, dict):
+                unknown = sorted(str(k) for k in data if k not in __known)
+                if unknown:
+                    raise ValueError(_unknown_arguments_text(__tool, unknown, __known))
+            return data
+
+        closed = cast(
+            Any,
+            create_model(
+                model.__name__,
+                __base__=model,
+                __validators__={"_reject_unknown_arguments": cast(Any, model_validator(mode="before")(reject))},
+            ),
+        )
+        closed.__remembra_closed__ = True
+        tool.fn_metadata.arg_model = closed
+        tool.parameters = {**tool.parameters, "additionalProperties": False}
+
+
+_close_tool_arguments()
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -2737,7 +2932,8 @@ def main() -> None:
         uvicorn.run(_build_remote_app(transport), host=host, port=port, log_level="info")
         return
 
-    global _LOCAL_CREW
+    global _LOCAL_CREW, _STDIO_SERVER
+    _STDIO_SERVER = transport == "stdio"
     _LOCAL_CREW = transport == "stdio" and os.environ.get("REMEMBRA_MCP_LOCAL_CREW", "1") != "0"
     mcp.run(transport=transport)  # type: ignore[arg-type]
 

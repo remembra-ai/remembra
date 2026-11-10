@@ -36,6 +36,13 @@ HINT_SCOPES = (HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS)
 _SCP_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[A-Za-z0-9.\-]+):(?!//)(?P<path>.+)$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SLUG_BAD = re.compile(r"[^a-z0-9._-]+")
+# ``host.tld/owner/repo``: a remote written without a scheme (how the server prints a git fingerprint, so
+# agents paste it back). The first segment must read as a host name with a top-level domain, which a
+# relative path (``../upstream``, ``vendor/a/b``, ``backup.git/a/b``) does not.
+_BARE_HOST_RE = re.compile(
+    r"^(?P<host>[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,})"
+    r"/(?P<path>[^/\s]+/\S+)$"
+)
 _HOST_ALIASES = {"www.github.com": "github.com", "ssh.github.com": "github.com", "altssh.gitlab.com": "gitlab.com"}
 MAX_PROJECT_ID_LEN = 64
 
@@ -50,19 +57,49 @@ def _clean_repo_path(path: str) -> str:
     return path
 
 
+def _bare_host_remote(raw: str) -> tuple[str, str] | None:
+    """``(host, path)`` of a scheme-less ``host.tld/owner/repo`` remote, with or without the ``git:`` of a
+    printed fingerprint key; None for anything else (a URL, an scp-style remote, a local path)."""
+    value = raw.strip()
+    if value[:4].lower() == "git:":
+        value = value[4:]
+    match = _BARE_HOST_RE.match(value)
+    if match is None or match.group("host").lower().endswith(".git"):
+        return None
+    return match.group("host").lower(), match.group("path")
+
+
+def canonical_git_remote(url: str | None) -> str | None:
+    """``url`` as every server version reads it: a scheme-less ``host/owner/repo`` (or the ``git:host/owner/repo``
+    key the server prints) becomes ``https://host/owner/repo``; any other value is returned unchanged.
+
+    Servers before 0.17.7 read the scheme-less form as a relative path and fall back to the configured
+    project, so clients send this form.
+    """
+    if not url or _bare_host_remote(url) is None:
+        return url
+    normalized = normalize_git_remote(url)
+    return f"https://{normalized}" if normalized else url
+
+
 def normalize_git_remote(url: str | None) -> str | None:
     """Collapse a git remote URL to ``host/owner/repo`` (lower-case).
 
     ``https://github.com/Owner/Repo.git``, ``git@github.com:owner/repo``,
     ``ssh://git@github.com:22/owner/repo.git`` and
     ``https://user:token@github.com/owner/repo/`` all give
-    ``github.com/owner/repo``. Absolute local-path remotes give
-    ``local:<path>``. Returns None for empty or unparseable input and for a
-    relative local path (the client makes those absolute before sending).
+    ``github.com/owner/repo``, and so do the scheme-less ``github.com/Owner/Repo``
+    and the fingerprint key the server prints, ``git:github.com/owner/repo``.
+    Absolute local-path remotes give ``local:<path>``. Returns None for empty or
+    unparseable input and for a relative local path (the client makes those
+    absolute before sending).
     """
     raw = (url or "").strip()
     if not raw:
         return None
+    bare = _bare_host_remote(raw)
+    if bare is not None:
+        raw = f"https://{bare[0]}/{bare[1]}"
     for prefix in ("git+ssh://", "ssh+git://", "git+https://", "git+http://"):
         if raw.lower().startswith(prefix):
             raw = raw.split("+", 1)[1]

@@ -383,6 +383,10 @@ class CallerInfo:
     chosen_project: str | None = None
     # stdio MCP server on the agent's machine: its crew hooks' session may act for it (see LocalCrew)
     local: bool = False
+    # the project this one call named (project_id / root_path on the tool): it wins over everything remembered
+    call_project: str | None = None
+    # REMEMBRA_PROJECT when it is not a default for this caller (a stdio server): named in the "no project" answer
+    configured_project: str | None = None
 
 
 @dataclass
@@ -623,6 +627,7 @@ class CrewBridge:
         self._lock = threading.RLock()
         self._seats: dict[tuple[str, str], dict[str, Seat]] = {}
         self._current: dict[tuple[str, str], str] = {}
+        self._used = threading.local()
 
     # -- seat registry ------------------------------------------------------------
 
@@ -750,7 +755,27 @@ class CrewBridge:
         """How this seat reaches the server: crewd as the hook session, or the MCP seat's own token."""
         return seat.local.http(caller.client) if seat.local is not None else CrewHttp(caller.client)
 
+    def begin_call(self) -> None:
+        """Forget the project of the previous tool call run on this thread (see :meth:`used_project`)."""
+        self._used.project = None
+
+    def used_project(self) -> str | None:
+        """The project of the seat the tool call running on this thread used, so its result can say where it wrote."""
+        project = getattr(self._used, "project", None)
+        return str(project) if project else None
+
     def seat(
+        self,
+        caller: CallerInfo,
+        project_id: str | None = None,
+        checkout: Mapping[str, Any] | None = None,
+    ) -> tuple[Seat, dict[str, Any] | None]:
+        """:meth:`_seat`, remembering the seat's project for :meth:`used_project`."""
+        seat, joined = self._seat(caller, project_id or caller.call_project, checkout)
+        self._used.project = seat.project_id
+        return seat, joined
+
+    def _seat(
         self,
         caller: CallerInfo,
         project_id: str | None = None,
@@ -774,9 +799,17 @@ class CrewBridge:
             project = project_id or self._current.get(scope) or caller.default_project
             existing = self._seats.get(scope, {}).get(project) if project else None
         if not project:
+            configured = caller.configured_project
             raise CrewUsageError(
-                "No project yet: call crew_status(project_id=...) or crew_status(git_remote=... / root_path=...) "
-                "first, or call session_brief with your location."
+                "No project yet: pass root_path=<your repository checkout> or project_id=... on this call, or call "
+                "crew_status(project_id=...) or crew_status(git_remote=... / root_path=...) first, or call "
+                "session_brief with your location."
+                + (
+                    f" The configured project {S.clip_item(configured, 64)!r} is not used on its own: "
+                    f"pass project_id={S.clip_item(configured, 64)!r} to work there."
+                    if configured
+                    else ""
+                )
             )
         if existing is not None and not existing.left:
             with self._lock:
