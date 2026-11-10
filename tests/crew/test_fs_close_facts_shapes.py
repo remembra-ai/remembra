@@ -198,13 +198,13 @@ def test_the_close_session_tool_publishes_the_facts_shape():
 def test_a_422_reads_as_loc_and_message_not_a_python_list(live, clock):
     client = agent(live, "codex", "f16-422", project_name("f16err"))
     with pytest.raises(ClientError) as err:
-        client.close_session(facts={"no_upstream": "perhaps"})
+        client.close_session(facts={"branch": "feat/a..b"})
     text = str(err.value)
     assert err.value.status_code == 422
     assert "[{" not in text and "'loc'" not in text, text
-    assert text.startswith("Request failed: facts.no_upstream: "), text
+    assert text.startswith("Request failed: facts.branch: "), text
     # the MCP tool adds the expected shape to a refused close
     use(client)
-    out = json.loads(call("close_session", facts={"no_upstream": "perhaps"}))
+    out = json.loads(call("close_session", facts={"notes": "n"}, session_id="s" * 300))
     assert out["status"] == "error" and out["code"] == 422
-    assert "facts.no_upstream" in out["error"] and '"cmd"' in out["expected_facts"], out
+    assert out["error"].startswith("Request failed: session_id: ") and '"cmd"' in out["expected_facts"], out

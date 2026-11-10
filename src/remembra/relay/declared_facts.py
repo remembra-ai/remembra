@@ -21,6 +21,7 @@ before validation (which covers clients that predate it).
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -40,6 +41,9 @@ _FALSE_WORDS = frozenset({"false", "f", "no", "n", "off", "fail", "failed", "fai
 _EMPTY_WORDS = frozenset({"", "none", "n/a", "na", "nil", "null", "nothing", "-"})
 
 _STRING_LISTS = ("files_changed", "uncommitted_files", "errors", "todos_open", "done")
+# Prose lists, where "none" / "n/a" is a way to say the list is empty. The two file lists are not:
+# they hold paths (the relay CLI reads them from git), and a file may be called NA or null.
+_PROSE_LISTS = frozenset({"errors", "todos_open", "done"})
 # The names agents use for a field, most of them the server's own output names (the stored handoff
 # says done / not_done / failing / next) or the wording of a handoff protocol ("open work").
 _LIST_ALIASES: dict[str, tuple[str, ...]] = {
@@ -95,7 +99,8 @@ def _count(value: Any) -> int | None:
     if isinstance(value, int):
         return value if value >= 0 else None
     if isinstance(value, float):
-        return int(value) if value >= 0 and value == int(value) else None
+        # inf and nan are floats too (JSON 1e999 parses to inf); int() raises on them
+        return int(value) if math.isfinite(value) and value >= 0 and value == int(value) else None
     if isinstance(value, str) and _INT_RE.fullmatch(value.strip()):
         return int(value.strip())
     return None
@@ -291,12 +296,14 @@ def _close_commands(value: Any, changes: _Changes) -> list[dict[str, Any]]:
 def _string_list(name: str, value: Any, changes: _Changes) -> list[str]:
     items = _as_list(value)
     out: list[str] = []
+    prose = name in _PROSE_LISTS
     for item in items:
-        # A string is kept exactly as written (only a placeholder for "nothing" is dropped).
+        # A string is kept exactly as written. Blank text is dropped, and in a prose list so is a
+        # placeholder for "nothing"; in a file list every other string is a path.
         text = item if isinstance(item, str) else _text(item)
         if text is None and isinstance(item, (Mapping, list, tuple)) and item:
             text = _short(item, 300)
-        if text is not None and text.strip().lower() not in _EMPTY_WORDS:
+        if text is not None and text.strip() and not (prose and text.strip().lower() in _EMPTY_WORDS):
             out.append(text)
     if not isinstance(value, list):
         changes.add(f"{name}: {type(value).__name__} read as a list of {len(out)} item(s)")
@@ -335,6 +342,26 @@ def _unpushed(value: Any, changes: _Changes) -> int | None:
         return len(value)
     changes.add(f"unpushed_commits: {_short(value, 30)} is not a count, push state left unrecorded")
     return None
+
+
+def _flag(name: str, value: Any, changes: _Changes) -> bool | None:
+    """A boolean from true/false, a yes/no word or 0/1; None (with a note) for anything that says neither."""
+    if isinstance(value, bool):
+        return value
+    flag: bool | None = None
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _TRUE_WORDS or word == "1":
+            flag = True
+        elif word in _FALSE_WORDS or word == "0":
+            flag = False
+    elif isinstance(value, int) and value in (0, 1):
+        flag = value == 1
+    if flag is None:
+        changes.add(f"{name}: {_short(value, 30)} is neither true nor false, left unrecorded")
+    else:
+        changes.add(f"{name}: {_short(value, 20)} read as {str(flag).lower()}")
+    return flag
 
 
 def _read_aliases(out: dict[str, Any], changes: _Changes) -> None:
@@ -398,7 +425,10 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
 
     Accepts the crew vocabulary and the common near-misses: ``tests`` entries with ``command`` and
     pass/fail counts, commits as bare shas, ``unpushed_commits`` as a list of shas, one string where a
-    list is expected, a list where ``notes`` is expected. Entries that cannot be read as what the key
+    list is expected, a list where ``notes`` is expected, a yes/no word for ``no_upstream``. In
+    ``errors``, ``todos_open`` and ``done`` a placeholder (``none``, ``n/a``) means an empty list;
+    ``files_changed`` and ``uncommitted_files`` keep every non-blank string, since those are paths.
+    Entries that cannot be read as what the key
     means (a test with no result, a commit with no id) are appended to ``notes`` as the agent wrote
     them, so they still reach the next agent.
 
@@ -446,6 +476,13 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
         value = out["unpushed_commits"]
         if not (isinstance(value, int) and not isinstance(value, bool) and value >= 0):
             out["unpushed_commits"] = _unpushed(value, changes)
+    if "no_upstream" in out:
+        # The API's field is a plain boolean with a default: a value that says neither is "not given".
+        flag = None if out["no_upstream"] is None else _flag("no_upstream", out["no_upstream"], changes)
+        if flag is None:
+            del out["no_upstream"]
+        else:
+            out["no_upstream"] = flag
     if "branch" in out and out["branch"] is not None:
         branch = out["branch"]
         if not isinstance(branch, str):
@@ -471,10 +508,21 @@ def normalize_close_facts(facts: Any, *, lenient_branch: bool = False) -> tuple[
     return out, changes.result()
 
 
+def _is_ref(text: str) -> bool:
+    """One word that is not a placeholder: ``HEAD``, a tag, a branch, a 3-character sha.
+
+    The crew contract takes any string as a commit, so a ref the agent gave stays a commit; only
+    text with spaces in it (a sentence, not an id) goes to the notes.
+    """
+    word = text.strip()
+    return bool(word) and not any(ch.isspace() for ch in word) and word.lower() not in _EMPTY_WORDS
+
+
 def normalize_crew_evidence(commits: Any, tests: Any) -> tuple[list[str] | None, list[dict[str, Any]] | None, list[str]]:
     """``(commits, tests, notes)`` in the shape ``crew_checkpoint`` / ``crew_report`` validate.
 
-    ``commits`` become sha strings (from ``{sha, subject}`` objects too) and ``tests`` become
+    ``commits`` become sha strings (from ``{sha, subject}`` objects and ``"<sha> <subject>"`` text;
+    a one-word ref such as ``HEAD`` or a tag is kept as given) and ``tests`` become
     ``{command (at most 256 chars), passed: int, failed: int}`` (from ``cmd``, a boolean ``passed``,
     a missing ``failed``). ``notes`` carries what the closed shape has no place for: a test's
     ``summary`` text, and entries with no result or no commit id, as the agent wrote them. None in
@@ -488,6 +536,8 @@ def normalize_crew_evidence(commits: Any, tests: Any) -> tuple[list[str] | None,
             entry = _commit_of(item)
             if entry is not None:
                 out_commits.append(entry["sha"])
+            elif isinstance(item, str) and _is_ref(item):
+                out_commits.append(item.strip())
             elif item not in (None, "", {}):
                 notes.append(f"commit as declared (no commit id): {_short(item, 160)}")
     out_tests: list[dict[str, Any]] | None = None

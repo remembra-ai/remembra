@@ -42,6 +42,7 @@ import re
 import socket
 import sys
 import uuid
+import weakref
 from typing import Annotated, Any, Literal, cast
 
 import anyio
@@ -1117,8 +1118,12 @@ CREW_TESTS_SCHEMA: dict[str, Any] = {
         "required": ["command", "passed", "failed"],
     },
 }
-CrewCommits = Annotated[list[str | dict[str, Any]] | None, WithJsonSchema(CREW_COMMITS_SCHEMA)]
-CrewTests = Annotated[list[dict[str, Any] | str] | None, WithJsonSchema(CREW_TESTS_SCHEMA)]
+# The published shape is the list; one item given bare (a sha, one test object, a line of text) is
+# accepted as well and read by normalize_crew_evidence, instead of failing argument validation.
+CrewCommits = Annotated[list[Any] | dict[str, Any] | str | None, WithJsonSchema(CREW_COMMITS_SCHEMA)]
+CrewTests = Annotated[list[Any] | dict[str, Any] | str | None, WithJsonSchema(CREW_TESTS_SCHEMA)]
+# A list of short strings as published; an item that is not text is kept as its JSON, not refused.
+CloseItems = Annotated[list[Any] | str | None, WithJsonSchema(_STRINGS_SCHEMA)]
 
 
 def _crew_evidence(
@@ -1147,17 +1152,17 @@ def _crew_evidence(
 def close_session(
     summary: str | None = None,
     next_step: str | None = None,
-    todos_open: list[str] | str | None = None,
-    errors: list[str] | str | None = None,
-    facts: Annotated[dict[str, Any] | None, WithJsonSchema(CLOSE_FACTS_SCHEMA)] = None,
+    todos_open: CloseItems = None,
+    errors: CloseItems = None,
+    facts: Annotated[dict[str, Any] | str | None, WithJsonSchema(CLOSE_FACTS_SCHEMA)] = None,
     end_reason: str | None = None,
     project_id: str | None = None,
     git_remote: str | None = None,
     root_path: str | None = None,
     session_id: str | None = None,
     final: bool | None = None,
-    done: list[str] | str | None = None,
-    open_work: list[str] | str | None = None,
+    done: CloseItems = None,
+    open_work: CloseItems = None,
     project: str | None = None,
 ) -> str:
     """Call this LAST, before you finish: leave a handoff for the next agent.
@@ -1211,7 +1216,8 @@ def close_session(
         session_id: Defaults to this MCP session's id.
         final: true ends your crew session with the handoff; false stores a
             mid-session milestone handoff and keeps your seat and claims.
-            Default: true, unless end_reason says "checkpoint" or "milestone".
+            Default: true, unless end_reason says "checkpoint" or "milestone"
+            (and does not also say the session is over, e.g. "final checkpoint").
         open_work: Same as todos_open (both are listed).
         project: Same as project_id.
 
@@ -1228,12 +1234,15 @@ def close_session(
     try:
         client = _get_client()
         is_final = final if final is not None else not _milestone_reason(end_reason)
-        raw: dict[str, Any] = dict(facts or {})
+        # facts given as one text is what the agent knows about the session: it is the notes
+        raw: dict[str, Any] = ({"notes": facts} if facts.strip() else {}) if isinstance(facts, str) else dict(facts or {})
         for key, given in (("done", done), ("todos_open", todos_open), ("todos_open", open_work), ("errors", errors)):
             if given:
                 raw[key] = _items(raw.get(key)) + _items(given)
         # Before sending, so that a server that validates the facts as sent accepts the other vocabulary too.
         merged, rewritten = normalize_close_facts(raw, lenient_branch=True)
+        if isinstance(facts, str) and facts.strip():
+            rewritten = ["facts: text read as notes (facts takes an object of keys)", *rewritten]
         merged["facts_source"] = "agent-declared"
         if next_step:
             merged["next_step"] = next_step
@@ -1299,19 +1308,21 @@ def close_session(
                 leave=leave,
             )
 
-        result = send(merged, is_final)
-        superseded = [str(h) for h in result.get("superseded") or []]
         declared = [d for d in merged.get("done") or [] if isinstance(d, str) and d.strip()]
-        if declared and "facts_normalized" not in result:
-            # A server from before declared work had a field drops facts.done without a word. The handoff
-            # is stored again with the items in the notes; the crew part of the first close stands.
-            line = "Done (declared by the agent): " + "; ".join(declared)
-            notes = merged.get("notes")
-            retry = {k: v for k, v in merged.items() if k != "done"}
-            # First in the notes: the rendered handoff shows a limited length of them.
-            retry["notes"] = "\n".join([line, *([notes] if isinstance(notes, str) and notes.strip() else [])])
+        # A server from before declared work had a field drops facts.done without a word. Once this
+        # client has seen such an answer, the items go into the notes up front (one request).
+        up_front = bool(declared) and _server_lacks_done(client)
+        result = send(_done_in_notes(merged, declared) if up_front else merged, is_final)
+        superseded = [str(h) for h in result.get("superseded") or []]
+        old_server = "facts_normalized" not in result
+        _remember_server_lacks_done(client, old_server)
+        if up_front:
+            rewritten = [*rewritten, "done: this server has no field for declared work, kept in notes"]
+        elif declared and old_server:
+            # Found out on this close: the handoff is stored again with the items in the notes; the
+            # crew part of the first close stands.
             try:
-                again = send(retry, False)
+                again = send(_done_in_notes(merged, declared), False)
             except MemoryError as e:
                 rewritten = [
                     *rewritten,
@@ -1319,7 +1330,7 @@ def close_session(
                 ]
             else:
                 first_id = result.get("handoff_id")
-                superseded.extend(str(h) for h in again.get("superseded") or [] if h != first_id)
+                superseded = [*superseded, *(str(h) for h in again.get("superseded") or [] if h != first_id)]
                 result = {**again, "crew": result.get("crew")}
                 rewritten = [*rewritten, "done: this server has no field for declared work, kept in notes"]
         out: dict[str, Any] = {
@@ -1404,6 +1415,42 @@ def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | No
 
 
 _MILESTONE_REASON_RE = re.compile(r"\b(?:checkpoint|milestone)\b", re.IGNORECASE)
+# Wording that says the session itself ends, which wins over "checkpoint" / "milestone" in the same reason.
+_SESSION_OVER_RE = re.compile(
+    r"\b(?:final|last)\s+(?:checkpoint|milestone|close|handoff)\b"
+    r"|\bsession\s+(?:is\s+)?(?:over|ended|ending|ends|end|finished|complete|completed|done)\b"
+    r"|\bsigning\s+off\b",
+    re.IGNORECASE,
+)
+# Clients whose server last answered a close without ``facts_normalized`` (it predates facts.done).
+_servers_without_done: weakref.WeakSet[Any] = weakref.WeakSet()
+
+
+def _server_lacks_done(client: Any) -> bool:
+    try:
+        return client in _servers_without_done
+    except TypeError:  # a client that cannot be weakly referenced is asked every time
+        return False
+
+
+def _remember_server_lacks_done(client: Any, lacks: bool) -> None:
+    """Record what the last close answer showed, so an upgraded server gets ``facts.done`` again."""
+    try:
+        if lacks:
+            _servers_without_done.add(client)
+        else:
+            _servers_without_done.discard(client)
+    except TypeError:
+        pass
+
+
+def _done_in_notes(facts: dict[str, Any], declared: list[str]) -> dict[str, Any]:
+    """``facts`` without ``done``, the declared items first in the notes (the rendered handoff shows a limited length)."""
+    line = "Done (declared by the agent): " + "; ".join(declared)
+    notes = facts.get("notes")
+    out = {k: v for k, v in facts.items() if k != "done"}
+    out["notes"] = "\n".join([line, *([notes] if isinstance(notes, str) and notes.strip() else [])])
+    return out
 
 
 def _items(value: Any) -> list[Any]:
@@ -1414,8 +1461,11 @@ def _items(value: Any) -> list[Any]:
 
 
 def _milestone_reason(end_reason: str | None) -> bool:
-    """An end reason that says the session goes on ("checkpoint", "release milestone; goal remains active")."""
-    return bool(end_reason and _MILESTONE_REASON_RE.search(end_reason))
+    """An end reason that says the session goes on ("checkpoint", "release milestone; goal remains active").
+
+    Not one that also says the session is over ("final checkpoint", "milestone shipped, session over").
+    """
+    return bool(end_reason and _MILESTONE_REASON_RE.search(end_reason) and not _SESSION_OVER_RE.search(end_reason))
 
 
 def _crew_close_note(crew: dict[str, Any], is_final: bool) -> str | None:
