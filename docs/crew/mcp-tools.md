@@ -29,8 +29,8 @@ transport the answer of each of these six tools carries the line `(in CREW <proj
 An argument
 a tool does not have is refused with the list of the ones it takes.
 
-A call whose arguments do not fit (a missing or mistyped argument, a key the tool does not take, a project
-that is not the session's crew) is answered as an MCP error result (`isError`) with one line,
+A call whose arguments do not fit (a missing or mistyped argument, a key the tool does not take, a
+`git_remote` on a crew tool that is not the project the call acts on) is answered as an MCP error result (`isError`) with one line,
 `INVALID ARGUMENTS: <what is wrong>. <tool> takes: <names>.`; nothing runs and no value is repeated.
 
 Parameter order in the Python signature is free (required parameters first); names, types,

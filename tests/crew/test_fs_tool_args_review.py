@@ -155,7 +155,8 @@ def test_argument_failures_are_mcp_errors_and_real_answers_are_not(live, clock):
         ("crew_claim", {"zone": "schema:x", "bogus": 1}),
         ("crew_say", {"body": 5}),
         ("ack_inbox", {}),
-        ("crew_say", {"body": "x", "project": project_name("iserrorother")}),
+        # a project named on a crew call is where it acts since F6; a remote the tool has no argument for is checked
+        ("crew_say", {"body": "x", "git_remote": "git@github.com:acme/iserror-never-seen.git"}),
         ("crew_say", {"message": "over the wire"}),
     )
     assert missing == (True, missing[1]) and missing[1].startswith("INVALID ARGUMENTS: body: required. crew_say takes:"), missing
@@ -203,10 +204,11 @@ def test_an_empty_canonical_value_next_to_an_alias_is_not_a_conflict(live, clock
 def test_every_refusal_ends_its_reasons_before_listing_the_arguments(live, clock):
     _seated(live, "sentence")
     both = call("crew_say", body="one", message="two")
-    assert "differ: pass one. crew_say takes: body, kind, to, thread, wait_s. Nothing was done." in both, both
+    assert "differ: pass one. crew_say takes: body, kind, to, thread, wait_s, project_id, root_path. Nothing was done." in both
     help_ = call("remembra_help", topic="claims", query="other")
     assert "pass one. remembra_help takes:" in help_, help_
-    blank = call("crew_claim", zone="deploy:prod", project="  ")
+    # a blank project is no project on a crew tool since F6; the blank that is refused is a location it has no argument for
+    blank = call("crew_claim", zone="deploy:prod", git_remote="  ")
     assert "expected a non-empty string. crew_claim takes:" in blank, blank
     # a reason that already ends its sentence is left alone
     hinted = call("crew_checkpoint", summary="x", trigger="deploy")
@@ -218,12 +220,13 @@ def test_every_refusal_ends_its_reasons_before_listing_the_arguments(live, clock
 
 def test_an_unknown_location_is_not_turned_into_a_project_to_switch_to(live, clock, tmp_path):
     project = _seated(live, "noinvent")
-    nowhere = tmp_path / "zzz-never-a-project"
-    out = call("crew_checkpoint", summary="x", root_path=str(nowhere))
+    # root_path is an argument of the crew tools since F5 (it names the call's project), so the location that
+    # is checked against the crew is the one they have no argument for: a remote
+    out = call("crew_checkpoint", summary="x", git_remote="git@github.com:acme/zzz-never-a-project.git")
     assert out.startswith("INVALID ARGUMENTS: crew_checkpoint acts on this session's crew"), out
     assert f"which is {project}" in out and "Nothing was done." in out, out
     assert "; you named" not in out and "crew_status(project_id=" not in out, out
-    assert "is not on record for any project" in out and 'crew_status(root_path="' in out, out
+    assert "is not on record for any project" in out and 'crew_status(git_remote="' in out, out
     assert live.crew_rows("SELECT id FROM crew_checkpoints WHERE crew_id = ?", (crew_id_of(live, project),)) == []
     unseen = call("crew_claim", zone="schema:other", git_remote="git@github.com:acme/never-seen-anywhere.git")
     assert "; you named" not in unseen and "is not on record for any project" in unseen, unseen

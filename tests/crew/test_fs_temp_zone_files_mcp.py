@@ -120,7 +120,7 @@ def test_two_agents_claim_different_files_in_the_same_temporary_zone(live, clock
     whole = call("crew_claim", zone="lib")
     assert whole.startswith(f"REFUSED: zone lib: {a_sign} holds path lib/team-access.ts inside it (exclusive)."), whole
     assert "zone lib held EXCLUSIVELY by" not in whole
-    assert f'crew_say(to="@{a_sign}", kind="request_release")' in whole
+    assert f'crew_say(body="…", to="@{a_sign}", kind="request_release")' in whole
     assert_clean(whole)
     # release by path reaches the file claim
     assert call("crew_claim", action="release", paths=["lib/sales-research.ts"]).startswith("RELEASED path lib/sales-research.ts")
@@ -137,7 +137,7 @@ def test_a_whole_zone_holder_is_named_as_such_to_a_file_claimer(live, clock):
     assert refused.startswith(f"REFUSED: path app/api/fulfil/route.ts: the whole zone api is held EXCLUSIVELY by {a_sign}."), (
         refused
     )
-    assert f'crew_say(to="@{a_sign}", kind="request_release")' in refused
+    assert f'crew_say(body="…", to="@{a_sign}", kind="request_release")' in refused
     queued = call("crew_claim", paths=["app/api/fulfil/route.ts"], wait_s=1)
     assert queued.startswith("QUEUED path app/api/fulfil/route.ts") and f"exclusive by {a_sign} (zone api)" in queued, queued
 

@@ -3112,7 +3112,9 @@ def ack_inbox(
             except MemoryError as e:
                 items.append({"ok": False, "inbox_id": one, "error": sanitize_error_message(e), "code": e.status_code})
         done = sum(1 for i in items if i["ok"])
-        return _dump({"ok": done == len(items), "count": done, "failed": len(items) - done, "items": items})
+        summary = {"ok": done == len(items), "count": done, "failed": len(items) - done, "items": items}
+        # a row that was not acknowledged makes this a failed call (flagged isError), with the same JSON
+        return _dump(summary) if summary["ok"] else FailureText(_dump(summary))
     except MemoryError as e:
         own = _own_inbox_agent()
         if e.status_code == 404 and own:
@@ -4089,6 +4091,11 @@ def _shown(value: Any) -> str:
     return text[:120] or "?"
 
 
+def _text_argument(value: Any) -> str:
+    """A project or path argument as the crew tools read it: a non-string (refused later by the tool's model) is none."""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _same_place(a: Any, b: Any) -> bool:
     """Two locators name one checkout: same root commit, else same remote, else same path."""
     if not isinstance(a, dict) or not isinstance(b, dict):
@@ -4099,16 +4106,28 @@ def _same_place(a: Any, b: Any) -> bool:
     return False
 
 
-def _crew_scope_refusal(tool: str, scope: dict[str, str], caller: CallerInfo, remembered: dict[str, Any]) -> str | None:
-    """A crew tool was given a project or location: None when that is the crew this session is on.
+def _crew_scope_refusal(
+    tool: str,
+    scope: dict[str, str],
+    caller: CallerInfo,
+    remembered: dict[str, Any],
+    call_project: str = "",
+    call_root: str = "",
+) -> str | None:
+    """A crew tool was given a project or location it has no argument for: None when that is the crew the call acts on.
 
-    Crew tools act on the session's crew (chosen with crew_status or session_brief) and have no
-    project argument. A project named on the call used to be dropped, so a claim or a message
-    could land in another project's crew without a word. Now the call runs only when the named
-    project is the session's crew; otherwise it is refused with the crew_status call that switches.
+    A crew tool takes ``project_id`` and ``root_path`` (and ``project`` for ``project_id``): they name
+    the project for that call. Any other locator (``git_remote``) used to be dropped, so a claim or a
+    message could land in another project's crew without a word. Now the call runs only when the
+    location is the crew the call acts on: the project the call names (``call_project`` /
+    ``call_root``), else the session's crew. Otherwise it is refused, naming the project to pass.
     Runs in a worker thread: it may read git and resolve a location on the server (read-only).
     """
-    current = _crew.current_project(caller)
+    per_call = bool(call_project or call_root)
+    if per_call:
+        current: str | None = _call_project(caller.client, call_project, call_root, caller.chosen_project)
+    else:
+        current = _crew.current_project(caller)
     named = {normalize_project_id(scope[k], REMEMBRA_PROJECT_ALIASES) for k in ("project_id", "project") if k in scope}
     declared = _DECLARED_ARGUMENTS.get(tool, ())
     if len(named) > 1:
@@ -4140,13 +4159,18 @@ def _crew_scope_refusal(tool: str, scope: dict[str, str], caller: CallerInfo, re
     if wanted and current and wanted == current:
         return None
     here = f"which is {_shown(current)}" if current else "and this session has not joined one"
+    acts_on = "the project this call names" if per_call else "this session's crew"
     if wanted:
         said = f"you named {_shown(wanted)}" + (f" ({place})" if place else "")
-        then = f"Switch with {switch}, then repeat the call."
+        then = (
+            f"Leave the location out to act on {_shown(current)}."
+            if per_call
+            else f'Pass project_id="{_shown(wanted)}" to act there for this call, or switch with {switch} and repeat the call.'
+        )
     else:
         said = f"the location you named ({place}) is not on record for any project"
         then = f"Leave it out to act on this crew; if that location is where you work, join its crew with {switch} first."
-    return f"{tool_arguments.PREFIX}{tool} acts on this session's crew, {here}; {said}. {tool_arguments.NOTHING_DONE} {then}"
+    return f"{tool_arguments.PREFIX}{tool} acts on {acts_on}, {here}; {said}. {tool_arguments.NOTHING_DONE} {then}"
 
 
 def _install_argument_guard() -> None:
@@ -4181,11 +4205,20 @@ def _install_argument_guard() -> None:
             try:
                 caller, remembered = _crew_caller(), _session_project()
                 text = await anyio.to_thread.run_sync(
-                    functools.partial(_crew_scope_refusal, name, prepared.scope, caller, remembered)
+                    functools.partial(
+                        _crew_scope_refusal,
+                        name,
+                        prepared.scope,
+                        caller,
+                        remembered,
+                        _text_argument(prepared.arguments.get("project_id")),
+                        _text_argument(prepared.arguments.get("root_path")),
+                    )
                 )
-            except Exception as e:  # answered as text, like every crew failure
-                text = _crew_error(e)
-                return tool.fn_metadata.convert_result(text) if convert_result else text
+            except Exception as e:  # answered as text and flagged isError, like every crew failure
+                failed = _crew_error(e)
+                out = _finish(failed, failed)
+                return tool.fn_metadata.convert_result(out) if convert_result else out
         if text is None:
             try:
                 return await dispatch(name, prepared.arguments, context=context, convert_result=convert_result)

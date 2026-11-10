@@ -68,7 +68,7 @@ def test_an_undeclared_argument_is_refused_by_name_and_nothing_runs(live, clock)
     assert out.startswith("INVALID ARGUMENTS: crew_claim does not take claim_ids"), out
     assert "zone=" in out and "paths=" in out and "task=" in out, out
     assert "Name what to release" not in out and "Nothing was done" in out, out
-    assert "crew_claim takes: action, zone, paths, mode, task, to, baton, reason, wait_s." in out, out
+    assert "crew_claim takes: action, zone, paths, mode, task, to, baton, reason, wait_s, project_id, root_path." in out, out
     assert [c["state"] for c in _claims(live, project)] == ["active"]
 
     zones = call("crew_claim", zones=["pos", "reports"])
@@ -158,21 +158,28 @@ def test_a_crew_tool_runs_when_the_project_it_names_is_this_sessions_crew(live, 
     assert [c["resource"] for c in _claims(live, project)] == ["schema:main"]
 
 
-def test_a_crew_tool_is_refused_when_it_names_another_project(live, clock):
+def test_a_crew_tool_that_names_another_project_acts_there_for_that_call_only(live, clock):
+    # A crew tool takes project_id for one call since F6 (tests/crew/test_fs_project_resolution.py), so the
+    # project a call names, under either name, is where the call acts: it is never dropped for the session's crew.
     project = _seated(live, "here")
     other = project_name("elsewhere")
     out = call("crew_claim", zone="deploy:prod", project=other, reason="deploying")
-    assert out.startswith("INVALID ARGUMENTS: crew_claim acts on this session's crew"), out
-    assert project in out and other in out and "Nothing was done" in out, out
-    assert f'crew_status(project_id="{other}")' in out, out
+    assert out.startswith("GRANTED deploy:prod") and f"(in CREW {other} as " in out, out
     assert _claims(live, project) == []
+    assert [(c["resource"], c["reason"]) for c in _claims(live, other)] == [("deploy:prod", "deploying")]
     said = call("crew_say", body="for the other crew", project_id=other)
-    assert said.startswith("INVALID ARGUMENTS: crew_say acts on this session's crew"), said
+    assert said.startswith("SENT msg_") and f"(in CREW {other} as " in said, said
     assert live.crew_rows("SELECT id FROM crew_messages WHERE crew_id = ? AND kind = 'chat'", (crew_id_of(live, project),)) == []
-    # doing what the refusal says works
-    assert call("crew_status", project_id=other).startswith(f"CREW {other} ")
-    assert call("crew_claim", zone="deploy:prod", project=other, reason="deploying").startswith("GRANTED deploy:prod")
+    rows = live.crew_rows("SELECT body FROM crew_messages WHERE crew_id = ? AND kind = 'chat'", (crew_id_of(live, other),))
+    assert [r["body"] for r in rows] == ["for the other crew"]
+    # the session's own crew is still where a call without a project goes
+    mine = call("crew_claim", zone="schema:main")
+    assert mine.startswith("GRANTED schema:main") and f"(in CREW {project} as " in mine, mine
+    # the two names for one argument have to agree
+    clash = call("crew_claim", zone="deploy:other", project=project, project_id=other)
+    assert clash.startswith("INVALID ARGUMENTS: project_id and project are the same argument and differ"), clash
     assert [c["resource"] for c in _claims(live, other)] == ["deploy:prod"]
+    assert [c["resource"] for c in _claims(live, project)] == ["schema:main"]
 
 
 def test_a_location_named_on_a_crew_tool_is_checked_against_the_crew(live, clock):
@@ -199,12 +206,16 @@ def test_a_location_named_on_a_crew_tool_is_checked_against_the_crew(live, clock
     assert [c["resource"] for c in _claims(live, project)] == ["schema:main"]
 
 
-def test_a_crew_tool_that_names_a_project_before_any_crew_is_joined_says_how_to_join(live, clock):
+def test_a_crew_tool_that_names_a_project_before_any_crew_is_joined_acts_in_that_project(live, clock):
     use(agent(live, "claude-desktop", "nocrew-s", "default"))
     wanted = project_name("nocrew")
     out = call("crew_claim", zone="schema:main", project=wanted)
-    assert out.startswith("INVALID ARGUMENTS: crew_claim acts on this session's crew"), out
-    assert f'crew_status(project_id="{wanted}")' in out, out
+    assert out.startswith("GRANTED schema:main") and f"(in CREW {wanted} as " in out, out
+    assert [c["resource"] for c in _claims(live, wanted)] == ["schema:main"]
+    # a location the tool has no argument for is still checked, and says how to join
+    unseen = call("crew_say", body="hi", git_remote="git@github.com:acme/never-seen-anywhere.git")
+    assert unseen.startswith("INVALID ARGUMENTS: crew_say acts on this session's crew"), unseen
+    assert 'crew_status(git_remote="git@github.com:acme/never-seen-anywhere.git")' in unseen, unseen
 
 
 # -- note and intent on a claim ---------------------------------------------------------------

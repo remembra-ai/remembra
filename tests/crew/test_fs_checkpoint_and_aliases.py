@@ -179,10 +179,12 @@ def test_a_missing_required_argument_is_one_plain_line_for_every_tool(clock, mon
 
 def test_a_wrong_type_names_the_argument_without_echoing_the_value(live, clock):
     _seated(live, "badtype")
-    out = call("crew_checkpoint", summary="x", commits=[{"sha": "abc1234", "subject": "SECRETSUBJECT"}])
-    assert out.startswith("INVALID ARGUMENTS:") and "commits" in out, out
+    # commits sent as {sha, subject} are read since F16 (tests/crew/test_fs_close_facts_shapes.py): the wrong type
+    # shown here is one no reading covers, a mapping where the list of paths goes
+    out = call("crew_checkpoint", summary="x", files_changed={"path": "SECRETSUBJECT"})
+    assert out.startswith("INVALID ARGUMENTS:") and "files_changed" in out, out
     assert "SECRETSUBJECT" not in out and "pydantic" not in out and "input_value" not in out, out
-    assert "You sent: commits, summary." in out, out
+    assert "You sent: files_changed, summary." in out, out
 
 
 def test_answers_and_refusals_over_a_real_mcp_session(live, clock):
@@ -197,7 +199,7 @@ def test_answers_and_refusals_over_a_real_mcp_session(live, clock):
                 ("crew_say", {"to": "crew"}),
                 ("crew_say", {"message": "over the wire"}),
                 ("crew_checkpoint", {"summary": "nothing changed"}),
-                ("crew_checkpoint", {"commits": [{"sha": "abc"}]}),
+                ("crew_checkpoint", {"files_changed": {"path": "a.py"}}),
             ):
                 res = await session.call_tool(name, args)
                 out.append((bool(res.isError), str(res.content[0].text)))

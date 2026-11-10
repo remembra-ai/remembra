@@ -320,17 +320,23 @@ def test_an_unknown_argument_is_refused_and_names_the_real_ones(live, stdio, mon
     use(live, "claude-desktop", "sess-unknown", configured, monkeypatch)
     monkeypatch.setenv("REMEMBRA_RELAY_PROJECT", configured)  # the old silent default: the call must still not run
     with pytest.raises(ToolError) as status:
-        call("crew_status", project="application-source")
-    assert "'project'" in str(status.value) and "project_id" in str(status.value), str(status.value)
+        # `project` itself is read as project_id since F22 (tests/crew/test_fs_undeclared_arguments.py), so the
+        # refusal is shown with a name crew_status still does not have
+        call("crew_status", workspace="application-source")
+    assert "does not take workspace" in str(status.value) and "project_id" in str(status.value), str(status.value)
     assert "root_path" in str(status.value)  # the valid arguments are listed
+    named = project_name("unknownarg-named")
+    assert call("crew_status", project=named).startswith(f"CREW {named} ")  # read, not dropped: never the configured one
     with pytest.raises(ToolError) as close:
         # close_session itself takes project and open_work since F17 (tests/crew/test_fs_close_declared_work.py),
         # so the refusal is shown with two names it still does not have
         call("close_session", repo="application-source", open_items=["x"])
-    assert "'open_items'" in str(close.value) and "'repo'" in str(close.value) and "todos_open" in str(close.value)
+    assert "does not take open_items" in str(close.value) and "does not take repo" in str(close.value)
+    assert "todos_open" in str(close.value)
     assert "open_work" in str(close.value) and "project_id" in str(close.value)  # the valid arguments are listed
     with pytest.raises(ToolError):
-        call("crew_say", body="hi", message="hi")
+        # message is another name for body since F39: one value is a message, two different ones are refused
+        call("crew_say", body="hi", message="something else")
     assert sessions(live, configured) == [] and handoff_of(live, configured) is None
 
 
@@ -570,7 +576,7 @@ def test_a_refused_call_does_not_echo_its_argument_values(live, stdio, monkeypat
     with pytest.raises(ToolError) as unknown:
         call("store_memory", content="private note: door code 4417 for the client site", bogus=1)
     text = str(unknown.value)
-    assert "'bogus'" in text and "content" in text, text
+    assert "does not take bogus" in text and "content" in text, text
     assert "4417" not in text and "private note" not in text and "input_value" not in text, text
     with pytest.raises(ToolError) as wrong_type:
         call("crew_say", body="the vault code is 4417", project_id=["a"])

@@ -10,9 +10,11 @@ dropped the open work, and ``crew_claim(project="x")`` ran in whatever project t
 * declared by the tool: passed through;
 * a known other name for a declared argument (``ALIASES``, and ``project`` for ``project_id``):
   moved to that argument;
-* a project or location on a crew tool that has no such argument (``CREW_SCOPED``): handed back in
-  ``Prepared.scope`` for the server to check against the crew the session is on;
-* anything else: the call is refused in one line that names the key. A value is never echoed.
+* a project or location on a crew tool that has no such argument (``CREW_SCOPED``; a crew tool
+  declares ``project_id`` and ``root_path``, so in practice ``git_remote``): handed back in
+  ``Prepared.scope`` for the server to check against the crew the call acts on;
+* anything else: the call is refused in one line that names the key, with what to use instead
+  (``HINTS``) or the declared argument it resembles. A value is never echoed.
 
 A key whose value is null asks for nothing and is dropped. The tables here are data only; the MCP
 server (``remembra.mcp.server``) installs the guard and does the crew check.
@@ -20,6 +22,7 @@ server (``remembra.mcp.server``) installs the guard and does the crew check.
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -45,7 +48,8 @@ ADVERTISED: Final[Mapping[str, tuple[str, ...]]] = {
     "close_session": ("open_work",),
 }
 SCOPE_KEYS: Final = ("project", "project_id", "root_path", "git_remote")
-# Crew tools act on the crew this session joined; they have no project argument of their own.
+# Crew tools act on the crew this session joined, or on the project a call names with the arguments the
+# tool declares (project_id, root_path). A scope key such a tool does not declare is checked, not dropped.
 CREW_SCOPED: Final = frozenset({"crew_claim", "crew_guard", "crew_task", "crew_say", "crew_checkpoint", "crew_report"})
 # send_to_inbox tags a message with a project through metadata.project_id.
 _METADATA_PROJECT: Final = frozenset({"send_to_inbox"})
@@ -193,6 +197,9 @@ def prepare(
 
     for name in extras:
         hint = HINTS.get((tool, name)) or HINTS.get(("*", name))
+        if not hint:
+            close = difflib.get_close_matches(name, [*declared, *aliases_for(tool, declared)], n=1, cutoff=0.6)
+            hint = f"Did you mean {close[0]}?" if close else None
         problems.append(f"{tool} does not take {_key(name)}." + (f" {hint}" if hint else ""))
 
     if problems:
