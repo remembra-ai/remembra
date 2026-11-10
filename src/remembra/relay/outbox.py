@@ -26,6 +26,7 @@ Standard library only (plus the relay's own redaction): it runs inside hooks.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import hashlib
 import json
@@ -54,10 +55,19 @@ MCP_SOURCE = "mcp"
 CLAIM_MARK = ".sending-"
 
 # HTTP answers worth retrying later; anything else (400, 404, 413, 422) will
-# not get better by sending the same body again. A 403 is kept (the owner can
-# widen the key's scope) but only holds back its own entry: see
-# ``remembra.relay.cli.replay_outbox``.
+# not get better by sending the same body again. A 403 is kept but only holds
+# back its own entry (``remembra.relay.cli.replay_outbox``), and it is not sent
+# again by every brief and close: see :func:`refusal_hold`.
 RETRY_STATUS = frozenset({401, 403, 408, 409, 425, 429})
+
+# A refused (403) entry waits this long before its next try: after the first
+# refusal, the second, and every one from the third on. The owner can widen a
+# key's projects in the dashboard, so it is tried again, but rarely.
+REFUSAL_BACKOFF_SECONDS = (3600, 6 * 3600, 86400)
+# The server's answer when an agent-scoped key writes as another agent
+# (``remembra.auth.middleware.enforce_agent_scope``). A key's agent cannot be
+# changed, so that key will never be allowed to send the entry.
+AGENT_SCOPE_REFUSAL = "scoped to agent"
 
 
 def is_retryable_status(status: int) -> bool:
@@ -214,6 +224,62 @@ class Entry:
         except (TypeError, ValueError):
             return 0
 
+    @property
+    def refusals(self) -> int:
+        """How often the server refused (403) this entry; at least 1 while its last answer is a 403."""
+        try:
+            count = int(self.data.get("refusals") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        return max(count, 1) if self.data.get("last_status") == 403 else max(count, 0)
+
+    @property
+    def last_try_ts(self) -> float | None:
+        """When it was last sent: ``last_try_ts``, else ``last_try_at`` (what a 0.17.5 client wrote on a retry),
+        else when it was queued (all that client wrote for a close never retried); None when none is recorded."""
+        try:
+            value = float(self.data.get("last_try_ts") or 0.0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+        try:
+            return float(calendar.timegm(time.strptime(str(self.data.get("last_try_at")), "%Y-%m-%dT%H:%M:%SZ")))
+        except (TypeError, ValueError, OverflowError):
+            return self.queued_ts or None
+
+
+def refusal_hold(entry: Entry, now: float | None = None) -> tuple[str, str] | None:
+    """Why a refused (403) entry is not sent right now: ``(kind, reason)``, or None when it may go.
+
+    ``("agent", ...)``: the key is scoped to another agent than the one the handoff is from. That key can
+    never send it, so it is never sent on its own again (``remembra-relay outbox send`` or ``drop`` decide).
+    ``("backoff", ...)``: any other refusal (the key may not write to that project) waits
+    ``REFUSAL_BACKOFF_SECONDS`` after each refusal instead of going out with every brief and close.
+    An entry with no time recorded at all is not held by the backoff.
+    """
+    if entry.data.get("last_status") != 403:
+        return None
+    error = str(entry.data.get("last_error") or "")
+    if AGENT_SCOPE_REFUSAL in error.lower():
+        return "agent", (
+            f"the server refused it: the key it was sent with writes as another agent than {entry.agent_id or 'its own'}"
+            " and that cannot be changed; it is never sent on its own again (`remembra-relay outbox drop` removes it,"
+            " `remembra-relay outbox send --source` sends it with another key)"
+        )
+    tried = entry.last_try_ts
+    if tried is None:
+        return None
+    wait = REFUSAL_BACKOFF_SECONDS[min(entry.refusals, len(REFUSAL_BACKOFF_SECONDS)) - 1]
+    left = tried + wait - (time.time() if now is None else now)
+    if left <= 0:
+        return None
+    again = f"{round(left / 3600)}h" if left >= 5400 else f"{max(1, round(left / 60))}m"
+    return "backoff", (
+        f"the server refused it {entry.refusals} time{'s' if entry.refusals != 1 else ''}; it is tried again in about"
+        f" {again} (give the key access in the dashboard, then `remembra-relay outbox send` sends it now)"
+    )
+
 
 def _redacted_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """The close body with the redaction the server applies to facts, summary and end reason."""
@@ -291,6 +357,9 @@ def enqueue(
             else (previous.data.get("refused_key_fp") if previous else None),
             "last_error": str(redact(error))[:300],
             "last_status": http_status,
+            "refusals": (previous.refusals if previous else 0) + (1 if http_status == 403 else 0),
+            "last_try_at": _now_iso(),
+            "last_try_ts": time.time(),
             "payload": _redacted_payload(payload),
         }
         text = json.dumps(data, default=str)
@@ -412,11 +481,45 @@ def finish(
         data["last_status"] = http_status
         if http_status == 403:
             data["refused_key_fp"] = key_mark(api_key)
+            data["refusals"] = entry.refusals + 1
         data["last_try_at"] = _now_iso()
+        data["last_try_ts"] = time.time()
         atomic_write_private(claimed, json.dumps(data, default=str))
         os.replace(claimed, entry.path)
     except OSError:
         pass
+
+
+def drop(home: Path, entry: Entry, why: str) -> bool:
+    """Remove one queued entry on the owner's word (``remembra-relay outbox drop``); logged. False when it is gone."""
+    try:
+        entry.path.unlink()
+    except OSError:
+        return False
+    log(home, f"outbox: dropped {entry.agent_id} session {entry.session_id[:40]}: {why}")
+    return True
+
+
+def clear_queued_failure(home: Path, agent_id: str) -> bool:
+    """Forget ``agent_id``'s recorded close failure once nothing of it is queued (status and doctor list it otherwise).
+
+    True when a record was removed. Never raises.
+    """
+    try:
+        if any(e.agent_id == agent_id for e in pending(home)):
+            return False
+        data = read_status(home)
+        slot = (data.get("agents") or {}).get(agent_id)
+        if not isinstance(slot, dict):
+            return False
+        failure = slot.get("last_failure")
+        if not isinstance(failure, dict) or not str(failure.get("command") or "").startswith("close"):
+            return False
+        del slot["last_failure"]
+        atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
+        return True
+    except Exception:
+        return False
 
 
 def discard(home: Path, agent_id: str, session_id: str) -> bool:

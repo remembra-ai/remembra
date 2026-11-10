@@ -756,6 +756,9 @@ def held_reason(entry: outbox.Entry, environ: Mapping[str, str], home: Path) -> 
         return "it was queued without a server; it is only kept, never sent"
     if outbox.clean_url(config.url) != entry.url:
         return f"it is for {display_url(entry.url)}, and the key now points at {display_url(config.url)}"
+    hold = outbox.refusal_hold(entry)
+    if hold is not None and hold[0] == "agent":  # refused for a key scoped to another agent: that never changes
+        return f"the server refused it: the key it was sent with writes as another agent than {agent or 'its own'}"
     return None
 
 

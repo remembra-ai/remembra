@@ -124,6 +124,8 @@ REPLAY_MAX_ENTRIES = 5
 REPLAY_BUDGET_SECONDS = 3.5
 # Time a close keeps for sending its own handoff when it sends queued ones first.
 CLOSE_RESERVE_SECONDS = 4.0
+# `remembra-relay outbox send` is run by hand, not by a hook: one request may take this long.
+OUTBOX_SEND_SECONDS = 30.0
 USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usage-limit stop
 DOCTOR_POINTER = " Ask your agent to run remembra_doctor, or run `remembra-relay doctor`."
 
@@ -616,7 +618,9 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
     as that agent or to that project) holds back only that entry and the
     entries with the same key, agent and project; it stays queued (shown by
     ``status``, dropped after ``MAX_AGE_SECONDS``) and goes after the others
-    on later runs, so it never blocks the rest of the queue. ``skip`` is the
+    on later runs, so it never blocks the rest of the queue. A refused entry
+    is not sent again by every run: see :func:`outbox.refusal_hold` (never on
+    its own when the key is scoped to another agent, else on a backoff). ``skip`` is the
     (agent, session) the caller closes itself: its queued copy is never sent, and with ``drop_skipped`` it is
     dropped (the caller's close has been delivered and supersedes it).
     ``reserve`` is time left untouched for the caller's own request.
@@ -644,6 +648,9 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
         config, _held = replay_config(entry)
         if config is None:
             report.remaining.append(entry)  # no key for its source, or that source now points at another server
+            continue
+        if outbox.refusal_hold(entry) is not None:
+            report.remaining.append(entry)  # the server refused it: held, or waiting out its backoff
             continue
         scope = (config.source, entry.agent_id, str(entry.payload.get("project_id") or ""))
         if scope in refused_scopes:
@@ -704,6 +711,14 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
     return report
 
 
+def _refusal_hold(entry: outbox.Entry) -> tuple[str, str] | None:
+    """:func:`outbox.refusal_hold`; never raises (a notice or a listing must not fail on one odd entry)."""
+    try:
+        return outbox.refusal_hold(entry)
+    except Exception:
+        return None
+
+
 def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None) -> list[str]:
     """One-line notices for the top of the brief: queued handoffs, a rejected key."""
     notices: list[str] = []
@@ -714,7 +729,7 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
             " saved. Create a new key in the dashboard (API keys) and store it there, or run `remembra-install --all`;"
             " `remembra-relay status` shows what is waiting." + DOCTOR_POINTER
         )
-    elif brief_status == 403 or replay.refused:
+    elif brief_status == 403:  # this session's own request; a refused QUEUED handoff is named below instead
         notices.append(
             "Remembra: the server refused this key (HTTP 403). Check the key's projects and agent in the dashboard;"
             " `remembra-relay status` has details."
@@ -726,11 +741,26 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
     here = outbox.clean_url(ctx.config.url)
     elsewhere = [e for e in waiting if e.url and e.url != here]
     waiting = [e for e in waiting if not (e.url and e.url != here)]
-    if waiting:
+    refused = [e for e in waiting if _refusal_hold(e) is not None]
+    waiting = [e for e in waiting if e not in refused]
+
+    def _who(entries: list[outbox.Entry]) -> str:
         by_agent: dict[str, int] = {}
-        for entry in waiting:
+        for entry in entries:
             by_agent[entry.agent_id or "unknown-agent"] = by_agent.get(entry.agent_id or "unknown-agent", 0) + 1
-        who = ", ".join(f"{n} from {agent}" for agent, n in sorted(by_agent.items()))
+        return ", ".join(f"{n} from {agent}" for agent, n in sorted(by_agent.items()))
+
+    if refused:
+        total = len(refused)
+        notices.append(
+            f"Remembra: {total} queued handoff{'s' if total != 1 else ''} ({_who(refused)}) {'were' if total != 1 else 'was'}"
+            f" refused by the server (HTTP 403) and {'are' if total != 1 else 'is'} held on this machine. That is about"
+            f" {'those handoffs' if total != 1 else 'that handoff'}, not this session's key, and"
+            f" {'they are' if total != 1 else 'it is'} not re-sent by every brief or close."
+            " `remembra-relay outbox list` says why; `remembra-relay outbox drop <agent> <session>` removes one."
+        )
+    if waiting:
+        who = _who(waiting)
         total = len(waiting)
         notices.append(
             f"Remembra: {total} handoff{'s' if total != 1 else ''} ({who}) could not be sent yet and"
@@ -1306,7 +1336,13 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
         error=error,
         http_status=http_status,
     )
-    if path is not None:
+    if path is not None and http_status == 403:
+        _err(
+            f"the server refused the handoff (HTTP 403); it is queued in {path.parent} and held, not re-sent by every"
+            " brief or close. `remembra-relay outbox list` says when or whether it goes again;"
+            " `remembra-relay outbox drop <agent> <session>` removes it."
+        )
+    elif path is not None:
         _err(f"the handoff is queued in {path.parent} and will be sent by the next brief or close")
 
 
@@ -2001,6 +2037,156 @@ def _check_key(config: RelayConfig) -> dict[str, Any]:
     return {"state": "unchecked", "http_status": response.status_code, "error": _http_error(response)}
 
 
+def _held(entry: outbox.Entry) -> str | None:
+    """Why a queued entry is not sent now (:func:`replay_config`, then :func:`outbox.refusal_hold`), or None."""
+    reason = replay_config(entry)[1]
+    if reason is None:
+        hold = _refusal_hold(entry)
+        reason = hold[1] if hold else None
+    return reason
+
+
+def _queued_matching(home: Path, agent: str, session: str) -> list[outbox.Entry]:
+    """Queued entries of ``agent`` whose session id is ``session`` (or starts with it, when none is exact)."""
+    mine = [e for e in outbox.pending(home) if e.agent_id == agent]
+    exact = [e for e in mine if e.session_id == session]
+    return exact or [e for e in mine if session and e.session_id.startswith(session)]
+
+
+def _one_queued(home: Path, agent: str, session: str) -> outbox.Entry | None:
+    found = _queued_matching(home, agent, session)
+    if len(found) == 1:
+        return found[0]
+    if found:
+        _err(f"{len(found)} queued handoffs of {agent} start with {session!r}; give the whole session id:")
+        for entry in found:
+            _err(f"  {entry.session_id}")
+    else:
+        _err(f"nothing queued for {agent} session {session} (`remembra-relay outbox list` shows the queue)")
+    return None
+
+
+def cmd_outbox(args: argparse.Namespace) -> int:
+    """``outbox list | drop | send``: the handoffs queued on this machine, and the owner's way to drop or send one."""
+    home = _home()
+    if args.action == "list":
+        entries = outbox.pending(home)
+        rows = [
+            {
+                "agent_id": e.agent_id,
+                "session_id": e.session_id,
+                "queued_at": e.data.get("queued_at"),
+                "attempts": e.attempts,
+                "last_try_at": e.data.get("last_try_at"),
+                "last_status": e.data.get("last_status"),
+                "last_error": e.data.get("last_error"),
+                "url": e.url,
+                "config_source": e.data.get("config_source"),
+                "held": _held(e),
+                "file": e.path.name,
+            }
+            for e in entries
+        ]
+        if args.format == "json":
+            print(json.dumps(rows, indent=2, default=str))
+            return 0
+        print(f"{len(rows)} handoff(s) queued in {outbox.outbox_dir(home)}")
+        for row in rows:
+            print(
+                strip_controls(
+                    f"  {row['agent_id']} {row['session_id']}\n"
+                    f"    queued {row['queued_at']}, {row['attempts']} attempt(s), for {row['url'] or 'no server'}"
+                    f" (key from {row['config_source'] or 'none'})\n"
+                    f"    last error: {row['last_error']}"
+                )
+            )
+            print(strip_controls(f"    held: {row['held']}" if row["held"] else "    goes with the next brief or close"))
+        if rows:
+            print("Drop one: remembra-relay outbox drop <agent> <session>.")
+            print("Send one now: remembra-relay outbox send <agent> <session>.")
+        return 0
+    if args.action == "drop":
+        found = _queued_matching(home, args.agent_id, args.session)
+        if not found and outbox.clear_queued_failure(home, args.agent_id):
+            # the file was removed by hand before this command existed; status and doctor still listed the failure
+            print(strip_controls(f"nothing is queued for {args.agent_id}; cleared its recorded queued-close failure"))
+            return 0
+        entry = _one_queued(home, args.agent_id, args.session)
+        if entry is None:
+            return 1
+        if not outbox.drop(home, entry, "by hand (remembra-relay outbox drop)"):
+            _err(f"could not remove {entry.path}")
+            return 1
+        outbox.clear_queued_failure(home, entry.agent_id)
+        print(strip_controls(f"dropped the queued handoff of {entry.agent_id} session {entry.session_id}; it was not sent"))
+        return 0
+    entry = _one_queued(home, args.agent_id, args.session)
+    if entry is None:
+        return 1
+    return _send_queued(home, entry, getattr(args, "source", None))
+
+
+def _send_queued(home: Path, entry: outbox.Entry, source: str | None) -> int:
+    """Send one queued close now, on the owner's word: a refusal's backoff or agent hold does not apply.
+
+    Without ``source`` it goes as the queue would send it (:func:`replay_config`: the key source that queued
+    it, the very key that was refused). ``source`` names another key source (``env``, ``claude:<path>``,
+    ``codex:<path>``, ...) to send it with; it must point at the server the entry was queued for.
+    """
+    if source:
+        config = load_config_from_source(source, agent=entry.agent_id or None)
+        if config is None or not config.api_key:
+            _err(f"no key in {source} (a key source is `env` or what `remembra-relay outbox list` prints after 'key from')")
+            return 1
+        if not entry.url or outbox.clean_url(config.url) != entry.url:
+            _err(f"not sent: it is for {entry.url or 'no server'}, and {source} points at {outbox.clean_url(config.url)}")
+            return 1
+    else:
+        found, held = replay_config(entry)
+        if found is None:
+            _err(f"not sent: {held}")
+            return 1
+        config = found
+    ns = argparse.Namespace(hook=None, agent=entry.agent_id or None, cwd=None, project=None, session_id=None)
+    ctx = Context(ns, payload={})
+    ctx.deadline = factlib.Deadline(OUTBOX_SEND_SECONDS)  # run by hand, not by a hook
+    ctx.http_timeout = OUTBOX_SEND_SECONDS
+    claimed = outbox.claim(entry)
+    if claimed is None:
+        _err("another remembra-relay is sending it right now; run `remembra-relay outbox list` in a moment")
+        return 1
+    response: httpx.Response | None = None
+    error: BaseException | None = None
+    try:
+        response = ctx.request("POST", "/api/v1/session/close", json=entry.payload, config=config, agent=entry.agent_id or None)
+    except Exception as e:
+        error = e
+    status = response.status_code if response is not None else None
+    detail = _failure(response, error)
+    if status is not None and status < 400:
+        outbox.finish(entry, claimed, sent=True)
+        outbox.record(home, agent_id=entry.agent_id, command="close (queued)", ok=True, config_source=config.source)
+        outbox.log(
+            home,
+            f"outbox: delivered {entry.agent_id} session {entry.session_id[:40]} (queued {entry.data.get('queued_at')}; by hand)",
+        )
+        print(strip_controls(f"sent the queued handoff of {entry.agent_id} session {entry.session_id}"))
+        return 0
+    outbox.finish(entry, claimed, sent=False, error=detail, http_status=status, api_key=config.api_key)
+    outbox.record(
+        home,
+        agent_id=entry.agent_id,
+        command="close (queued)",
+        ok=False,
+        config_source=config.source,
+        error=detail,
+        http_status=status,
+    )
+    outbox.log(home, f"outbox: send by hand failed for {entry.agent_id} session {entry.session_id[:40]} (kept): {detail}")
+    _err(f"not sent, it stays queued: {detail}")
+    return 1
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Queue depth, last result per agent and whether the key is accepted. Exit 1 when something needs attention."""
     home = _home()
@@ -2035,7 +2221,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "last_error": e.data.get("last_error"),
             "url": e.url,
             "config_source": e.data.get("config_source"),
-            "held": replay_config(e)[1],
+            "held": _held(e),
         }
         for e in entries
     ]
@@ -2221,6 +2407,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--format", choices=["text", "json"], default="text")
     p_status.add_argument("--no-check", action="store_true", help="Do not ask the server; show the last recorded key state")
     p_status.set_defaults(func=cmd_status)
+
+    p_outbox = sub.add_parser("outbox", help="Handoffs queued on this machine: list them, drop one, or send one now")
+    actions = p_outbox.add_subparsers(dest="action", required=True)
+    p_list = actions.add_parser("list", help="Every queued handoff, its last error and whether it is held")
+    p_list.add_argument("--format", choices=["text", "json"], default="text")
+    p_drop = actions.add_parser("drop", help="Remove one queued handoff without sending it")
+    p_send = actions.add_parser("send", help="Send one queued handoff now (also one that is held after a refusal)")
+    for p_one in (p_drop, p_send):
+        p_one.add_argument("agent_id", metavar="agent", help="The agent the handoff is from")
+        p_one.add_argument("session", help="Its session id (or the start of it), as `outbox list` prints it")
+    p_send.add_argument(
+        "--source",
+        help="Send with the key of this source (`env`, `claude:<path>`, `codex:<path>`, ...), not the one that queued it",
+    )
+    p_outbox.set_defaults(func=cmd_outbox)
     projects.add_parser(sub)
     return parser
 

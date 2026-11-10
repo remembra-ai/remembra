@@ -591,7 +591,9 @@ def test_a_refused_queued_handoff_does_not_hold_back_the_rest(home):
         # in the same run; the newer claude-code and gemini entries are delivered.
         assert handler.posts == ["codex:C-old", "claude-code:A-new", "gemini:G-new"]
         assert sorted(e.session_id for e in outbox.pending(home)) == ["C-old", "C-old2"]
-        assert "refused this key (HTTP 403)" in first.stdout
+        # The notice names the refused queued handoff; it does not say this session's key was refused (F33).
+        assert "refused this key" not in first.stdout
+        assert "1 queued handoff (1 from codex) was refused by the server (HTTP 403)" in first.stdout
         assert "outbox: refused codex session C-old (kept)" in outbox.log_path(home).read_text()
         [refused] = [e for e in outbox.pending(home) if e.session_id == "C-old"]
         assert refused.data["last_status"] == 403 and "cannot write as agent codex" in refused.data["last_error"]
@@ -604,7 +606,11 @@ def test_a_refused_queued_handoff_does_not_hold_back_the_rest(home):
         assert second.returncode == 0, second.stderr
         assert handler.posts == ["codex:C-old2", "claude-code:A-later"]
         third = relay(home, url, "brief", "--agent", "claude-code", "--cwd", str(home))
-        assert third.returncode == 0 and handler.posts[2:] == ["codex:C-old"]  # both refused: oldest first again
+        assert third.returncode == 0 and handler.posts[2:] == []  # both refused: not re-sent by every brief (F33)
+        for entry in outbox.pending(home):  # an hour later the first wait is over
+            entry.path.write_text(json.dumps({**entry.data, "last_try_ts": time.time() - outbox.REFUSAL_BACKOFF_SECONDS[0] - 60}))
+        fourth = relay(home, url, "brief", "--agent", "claude-code", "--cwd", str(home))
+        assert fourth.returncode == 0 and handler.posts[2:] == ["codex:C-old"]  # both refused: oldest first again
         status = relay(home, url, "status", "--no-check")
         assert "queue: 2 handoff(s) waiting" in status.stdout and "HTTP 403" in status.stdout
     finally:
