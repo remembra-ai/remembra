@@ -157,6 +157,46 @@ def _repo_path(git_value: str) -> str:
     return git_value.split("/", 1)[1] if "/" in git_value else git_value
 
 
+# What a caller is told when it names a repository nothing identifies (see ProjectRegistry.resolve).
+# No example with "//" or two path segments: the clients' error sanitizer (security/error_sanitizer.py, in
+# every released MCP client too) reads those as an internal URL or file path and replaces the whole
+# message with "An internal error occurred", which tells the agent nothing.
+UNRECOGNISED_REPOSITORY_SEND = (
+    "send the remote as its full URL (what `git remote get-url origin` prints: the https address, or "
+    "git@host:owner/repo), the full root commit id, or root_path."
+)
+UNRECOGNISED_REPOSITORY_ERROR = f"git_remote or root_commit not understood: {UNRECOGNISED_REPOSITORY_SEND}"
+
+
+def unrecognised_repository_warning(project_id: str) -> str:
+    """The line a client that did not ask for the refusal gets with its configured project."""
+    return (
+        f"Repository not recognised (git_remote or root_commit not understood): the configured project "
+        f"'{project_id}' was used instead, so this work is filed with whatever else that project holds. "
+        f"To use the repository's own project, {UNRECOGNISED_REPOSITORY_SEND}"
+    )
+
+
+def names_unrecognised_repository(
+    locator: ProjectLocator,
+    hint_project: str | None,
+    hint_scope: str | None,
+    git_repo: bool | None,
+    allowed_projects: list[str] | None = None,
+) -> bool:
+    """Whether the caller named a repository that nothing identifies and its hint names only folders.
+
+    True for a ``hint_scope=folders`` caller (0.16.1+) with a configured project that sent a remote or
+    root commit that cannot be read, or ``git_repo``, and no ``root_path``: the configured project is all
+    that is left to answer with, and it is not meant for a repository. Not for a project-restricted key
+    that may use the hint (nothing is recorded, and it has no other project to use).
+    """
+    if not hint_project or hint_scope != HINT_SCOPE_FOLDERS or locator.fingerprints():
+        return False
+    named = bool((locator.git_remote or "").strip() or (locator.root_commit or "").strip()) or git_repo is True
+    return named and not (bool(allowed_projects) and hint_project in (allowed_projects or []))
+
+
 class ProjectRegistry:
     """Fingerprint -> project mapping and project links (SQLite)."""
 
@@ -276,6 +316,7 @@ class ProjectRegistry:
         allowed_projects: list[str] | None = None,
         hint_scope: str | None = None,
         git_repo: bool | None = None,
+        strict_project: bool = False,
     ) -> dict[str, Any]:
         """Resolve a location to a stable project id.
 
@@ -292,6 +333,13 @@ class ProjectRegistry:
         join a folder namespace it was seen in before (see :meth:`_adopt`).
         Without it (``all``, 0.16.0 clients) the hint names any new location,
         as before. ``create=False`` computes the answer without writing anything.
+
+        A repository the caller named but nothing identifies (a remote or root
+        commit that cannot be read, or ``git_repo``, and no ``root_path``) is
+        refused (:class:`ValueError`) only with ``strict_project`` (0.17.7+
+        clients send it: they show the refusal to the agent). Without it the
+        answer is what every server up to 0.17.5 gave such a client, the hint,
+        plus a line in ``warnings`` saying where the work was filed and why.
 
         ``allowed_projects`` (a project-restricted key) restricts the result
         AND makes the call read-only: bindings are per user, so a restricted
@@ -314,14 +362,14 @@ class ProjectRegistry:
                 raise ValueError("Provide git_remote, root_commit or root_path (or a project id).")
             # The caller named a repository (a remote or root commit that could not be read, or
             # git_repo) and nothing identifies it. A 0.16.1+ client's configured project names only
-            # folders, so it must not take this repository's work: say what to send instead. A
+            # folders, so it should not take this repository's work. A client that asked for the
+            # refusal (strict_project, 0.17.7+) is told what to send instead. Any other client (up to
+            # 0.17.5) was always answered with its configured project here and has nowhere to keep a
+            # refused handoff: it is answered as before, and told so in ``warnings``. A
             # project-restricted key that may use the hint keeps it (nothing is recorded).
-            names_repository = bool((locator.git_remote or "").strip() or (locator.root_commit or "").strip()) or git_repo is True
-            if hint_scope == HINT_SCOPE_FOLDERS and names_repository and not (restricted and hint in (allowed_projects or [])):
-                raise ValueError(
-                    "git_remote or root_commit not understood: send the remote as a URL "
-                    "(https://host/owner/repo or git@host:owner/repo), the full root commit id, or root_path."
-                )
+            unrecognised = names_unrecognised_repository(locator, hint, hint_scope, git_repo, allowed_projects)
+            if unrecognised and strict_project:
+                raise ValueError(UNRECOGNISED_REPOSITORY_ERROR)
             self._check_allowed(hint, allowed_projects)
             return {
                 "project_id": hint,
@@ -331,7 +379,7 @@ class ProjectRegistry:
                 "kind": None,
                 "bound": False,
                 "source": "hint",
-                "warnings": [],
+                "warnings": [unrecognised_repository_warning(hint)] if unrecognised else [],
             }
 
         primary = fingerprints[0]

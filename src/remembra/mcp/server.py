@@ -1750,6 +1750,10 @@ def _locator(
     if hint and (single or not timed_out):
         locator["hint_project"] = hint
     locator["git_repo"] = git_repo
+    # A repository the server cannot identify (a remote it cannot read and no root_path) is refused, so the
+    # agent is told what to send; without this the server answers with the configured project, as it does
+    # for clients up to 0.17.5. An older server ignores the field.
+    locator["strict_project"] = True
     return {k: v for k, v in locator.items() if v is not None and v != ""}, checkout
 
 

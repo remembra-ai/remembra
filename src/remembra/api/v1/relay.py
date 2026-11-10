@@ -59,7 +59,14 @@ from remembra.relay.declared_facts import normalize_close_facts
 from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
 from remembra.security.audit import AuditAction
 from remembra.services import relay_split
-from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, RelayService
+from remembra.services.relay import (
+    UNRECOGNISED_REPOSITORY_ERROR,
+    BindingNotAllowed,
+    ProjectAccessDenied,
+    RelayService,
+    names_unrecognised_repository,
+    unrecognised_repository_warning,
+)
 
 router = APIRouter(tags=["relay"])
 log = structlog.get_logger(__name__)
@@ -248,6 +255,15 @@ class LocatorIn(BaseModel):
     host: str | None = Field(default=None, max_length=255, description="Machine name; qualifies path fingerprints")
     git_repo: bool | None = Field(
         default=None, description="Whether root_path is inside a git repository, as the client saw it (0.16.1+)"
+    )
+    strict_project: bool = Field(
+        default=False,
+        description=(
+            "true (0.17.7+ clients): refuse (400) a repository that nothing identifies (a git_remote or root_commit "
+            "that cannot be read, or git_repo, with hint_scope=folders and no root_path) instead of answering with "
+            "hint_project. false or absent (clients up to 0.17.5): answer with hint_project as before, and say so "
+            "in warnings"
+        ),
     )
 
     def locator(self) -> ProjectLocator:
@@ -490,6 +506,7 @@ async def _resolve(
             allowed_projects=user.project_ids,
             hint_scope=hint_scope,
             git_repo=locator.git_repo,
+            strict_project=locator.strict_project,
         )
     except (ProjectAccessDenied, BindingNotAllowed) as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
@@ -785,15 +802,27 @@ async def _project_from_query(
     locator: LocatorIn,
     hint_project: str | None,
     hint_scope: str | None = None,
+    warnings: list[str] | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """The project a read addresses. Never records a binding (a read has no side effects)."""
+    """The project a read addresses. Never records a binding (a read has no side effects).
+
+    A repository the caller named but nothing identifies is read as ``hint_project``, as on every server
+    up to 0.17.5, with a line added to ``warnings``; a caller that sent ``strict_project`` is refused (400)
+    the way ``POST /projects/resolve`` refuses it.
+    """
     if project_id:
         return resolve_project_access(user, project_id), None
     if not locator.locator().is_empty():
         resolution = await _resolve(request, user, locator, hint_project, bind=False, create=False, hint_scope=hint_scope)
         return resolve_project_access(user, resolution["project_id"]), resolution
     if hint_project:
-        return resolve_project_access(user, normalize_project_id(hint_project)), None
+        hint = normalize_project_id(hint_project)
+        if hint and names_unrecognised_repository(locator.locator(), hint, hint_scope, locator.git_repo, user.project_ids):
+            if locator.strict_project:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=UNRECOGNISED_REPOSITORY_ERROR)
+            if warnings is not None:
+                warnings.append(unrecognised_repository_warning(hint))
+        return resolve_project_access(user, hint), None
     return resolve_project_access(user, None), None
 
 
@@ -804,9 +833,16 @@ def _locator_from_query(
     repo_name: str | None,
     host: str | None,
     git_repo: bool | None = None,
+    strict_project: bool = False,
 ) -> LocatorIn:
     return LocatorIn(
-        git_remote=git_remote, root_commit=root_commit, root_path=root_path, repo_name=repo_name, host=host, git_repo=git_repo
+        git_remote=git_remote,
+        root_commit=root_commit,
+        root_path=root_path,
+        repo_name=repo_name,
+        host=host,
+        git_repo=git_repo,
+        strict_project=strict_project,
     )
 
 
@@ -814,6 +850,12 @@ HINT_SCOPE_QUERY = Query(
     description="'folders' (0.16.1+ clients): hint_project names only a location that is not a git repository"
 )
 GIT_REPO_QUERY = Query(description="Whether the reader's working directory is a git repository (0.16.1+ clients)")
+STRICT_PROJECT_QUERY = Query(
+    description=(
+        "true (0.17.7+ clients): a repository that nothing identifies is refused (400) instead of read as "
+        "hint_project; false or absent: answered with hint_project as before, with a warning"
+    )
+)
 
 
 @router.get("/session/brief", summary="Session-start brief for an agent (pickup)")
@@ -845,6 +887,7 @@ async def session_brief(
     ] = None,
     hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
     git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
+    strict_project: Annotated[bool, STRICT_PROJECT_QUERY] = False,
     record: Annotated[
         bool,
         Query(description="false: observe only (an audit or a diagnostic): serve the same brief and record no pickup"),
@@ -877,8 +920,11 @@ async def session_brief(
     _require(current_user, "memory:recall")
     notes: list[str] = []
     agent, verified = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
-    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo)
-    project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project, hint_scope)
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo, strict_project)
+    # An unrecognised repository read as the configured project: the reader is told in the brief itself.
+    project, resolution = await _project_from_query(
+        request, current_user, project_id, locator, hint_project, hint_scope, warnings=notes
+    )
     configured = normalize_project_id(hint_project) if hint_project and hint_project.strip() else None
     where = locator.locator()
     if hint_scope == HINT_SCOPE_FOLDERS and where.is_repository(git_repo):
@@ -957,14 +1003,16 @@ async def trail(
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
     hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
     git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
+    strict_project: Annotated[bool, STRICT_PROJECT_QUERY] = False,
 ) -> dict[str, Any]:
     """Read-only: a location the server has not seen resolves (hint first) without being recorded."""
     _require(current_user, "memory:recall")
     agent_filter = _clean_agent(agent_id, "agent_id")
     cursor = _trail_cursor(before, before_id)
-    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo)
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo, strict_project)
+    notes: list[str] = []
     resolved, resolution = await _project_from_query(
-        request, current_user, project_id or project, locator, hint_project, hint_scope
+        request, current_user, project_id or project, locator, hint_project, hint_scope, warnings=notes
     )
     result = await _service(request).trail(
         current_user.user_id,
@@ -976,6 +1024,8 @@ async def trail(
         allowed=current_user.project_ids or None,
     )
     result["resolution"] = resolution
+    if notes:
+        result["warnings"] = [*(result.get("warnings") or []), *notes]
     return result
 
 

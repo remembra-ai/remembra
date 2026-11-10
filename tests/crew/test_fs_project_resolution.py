@@ -413,7 +413,13 @@ def test_a_remote_the_server_cannot_read_is_an_error_not_the_configured_project(
         "/projects/resolve",
         headers=headers,
         status=400,
-        json={"git_remote": "../upstream", "hint_project": "shared", "hint_scope": "folders", "git_repo": True},
+        json={
+            "git_remote": "../upstream",
+            "hint_project": "shared",
+            "hint_scope": "folders",
+            "git_repo": True,
+            "strict_project": True,  # what the MCP client sends; without it see test_fs_resolve_old_client_compat.py
+        },
     )
     assert "git_remote" in refused["detail"] and "root_path" in refused["detail"], refused
     # a 0.16.0 client (no hint_scope: one namespace for everything) is answered as before

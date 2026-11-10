@@ -545,6 +545,12 @@ A key restricted to projects never records a binding, so every new repository is
 `hint_scope=folders` it still gets its configured project there when the key may use that project (a
 project of the repository's own would be one it cannot use).
 
+A repository the server cannot identify (a `git_remote` it cannot read such as `origin` or `owner/repo`,
+or an unreadable `root_commit`, with no `root_path`) is answered with the configured project and a line
+in `warnings` that says so, as every server up to 0.17.5 answered it. A client that sends
+`strict_project=true` (the MCP server, 0.17.7+) is refused instead (400, with what to send), so the agent
+names the repository before anything is filed. An older server ignores the field.
+
 Only writes record a binding: `close` and `POST /api/v1/projects/resolve`. `brief` and `trail` compute
 the answer without recording it, so opening a session never moves anything. To move one repository to
 another project, run `remembra-relay resolve --project <id> --bind` in it. A brief in a repository whose
@@ -696,12 +702,12 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, git_repo?, hint_project?, hint_scope?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound}`. `hint_scope`: `all` (default, 0.16.0) or `folders` (the hint names only a location that is not a git repository) |
+| POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, git_repo?, hint_project?, hint_scope?, strict_project?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound, warnings}`. `hint_scope`: `all` (default, 0.16.0) or `folders` (the hint names only a location that is not a git repository) |
 | POST | `/api/v1/projects/split` | `{project, apply?, checkouts?, restricted_keys_lose_access?}` → the repositories bound to `project` and their new projects, `moves` (with `matched_by` and `evidence`), `stays` (with `reason`), `commit_candidates`, `restricted_credentials` (keys and connections restricted to `project` that would lose repositories: applying needs `restricted_keys_lose_access`, else 409); with `apply`, `batch_id` and `moved`. Dry run by default |
 | POST | `/api/v1/projects/split/undo` | `{batch_id?, apply?}` → what moves back (`moves_back`; `since_split` marks what the repository wrote in its new project after the split), what changed since (`left`) and what stays in the new projects (`written_since`). Dry run by default |
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
-| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoffs_repeated` + `handoff_location`; records a pickup when it serves another agent's handoff |
+| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `strict_project`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoffs_repeated` + `handoff_location`; records a pickup when it serves another agent's handoff |
 | GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections. Page with `before` (+ `before_id`), the oldest entry's `created_at` (and `id`): only older entries come back and `total` counts them, so new handoffs never shift a page |
 | GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |
