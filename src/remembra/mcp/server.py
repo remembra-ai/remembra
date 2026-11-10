@@ -2189,7 +2189,8 @@ async def crew_claim(
     accept/decline: answer a handover offered to you.
     Limits (defaults; the owner can raise them in the crew settings): 3 exclusive areas per session
     and 6 for all sessions of one agent id. A zone is one area, and files in one folder count as one area,
-    so a job in one folder needs one slot. A refusal names the limit and who holds what.
+    so a job in one folder needs one slot; a folder claimed by name is one area of its own.
+    A refusal names the limit and who holds what.
 
     Args:
         action: claim | release | adopt | handover | accept | decline.

@@ -1027,6 +1027,147 @@
         "title": "ClaimAdoptedPayload",
         "type": "object"
       },
+      "ClaimCapDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "maxLength": 64,
+            "pattern": "[A-Za-z0-9][A-Za-z0-9._:-]{0,63}",
+            "type": "string"
+          },
+          "cap": {
+            "description": "the limit that refused: per session, or per agent id",
+            "enum": [
+              "session",
+              "agent"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "held_by_agent": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "held_by_you": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "holders": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimCapHolder"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "holding": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimCapHolding"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "message": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "needed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "setting": {
+            "description": "the crew setting that holds the limit",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cap",
+          "setting",
+          "limit",
+          "needed",
+          "held_by_you",
+          "held_by_agent",
+          "agent_id",
+          "holders",
+          "holding",
+          "message"
+        ],
+        "title": "ClaimCapDetail",
+        "type": "object"
+      },
+      "ClaimCapHolder": {
+        "additionalProperties": false,
+        "properties": {
+          "callsign": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "description": "session id",
+                "maxLength": 80,
+                "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "callsign",
+          "count"
+        ],
+        "title": "ClaimCapHolder",
+        "type": "object"
+      },
+      "ClaimCapHolding": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "description": "claim id",
+            "maxLength": 80,
+            "pattern": "clm_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "requested",
+              "queued",
+              "active",
+              "offered",
+              "reserved",
+              "released",
+              "expired",
+              "revoked",
+              "denied"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "target",
+          "state"
+        ],
+        "title": "ClaimCapHolding",
+        "type": "object"
+      },
       "ClaimDeniedPayload": {
         "additionalProperties": false,
         "properties": {
@@ -1984,6 +2125,9 @@
             },
             "maxItems": 10,
             "type": "array"
+          },
+          "cap": {
+            "$ref": "#/components/schemas/ClaimCapDetail"
           },
           "error": {
             "description": "report_required | claim_cap | session_exists | conflict | frozen | protected | crew_policy | …",

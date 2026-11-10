@@ -5037,11 +5037,19 @@ def _set_blocker(info: dict[str, Any], zone: Mapping[str, Any] | None, claim: Ma
 _UNIT_WILDCARDS: Final = frozenset("*?[{")
 
 
+def _names_a_file(name: str) -> bool:
+    """``route.ts`` and ``.env.example`` name files; ``api``, ``.github`` and ``Makefile`` may be directories."""
+    return "." in name.lstrip(".")
+
+
 def claim_folder(glob: str) -> str:
-    """The folder a file claim counts under for the exclusive-claim caps (``.`` for a top-level path).
+    """The folder a path claim counts under for the exclusive-claim caps (``.`` for a top-level file).
 
     ``app/portal/a.tsx`` and ``app/portal/**`` are both ``app/portal``: every file claimed in one
-    folder is one area for the caps, not one slot per file.
+    folder is one area for the caps, not one slot per file. A literal path whose last name has no
+    file extension (``src``, ``app/api``) may be a directory, and a directory claim covers its
+    whole subtree, so it counts as itself: one slot per directory claimed, never a share of the
+    parent's slot (or of the repo root's, which nothing can claim).
     """
     segs = [seg for seg in str(glob or "").split("/") if seg]
     literal: list[str] = []
@@ -5049,7 +5057,7 @@ def claim_folder(glob: str) -> str:
         if any(ch in _UNIT_WILDCARDS for ch in seg):
             break
         literal.append(seg)
-    if len(literal) == len(segs):
+    if literal and len(literal) == len(segs) and _names_a_file(literal[-1]):
         literal = literal[:-1]
     return "/".join(literal) or "."
 

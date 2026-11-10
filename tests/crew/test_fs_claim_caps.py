@@ -99,7 +99,8 @@ async def test_claim_unit_keys():
     assert key({"path_glob": "lib/a.ts"}, zones) == "zone:zn_lib"  # a file inside a zone counts as that zone
     assert key({"path_glob": "app/portal/a.tsx"}, zones) == key({"path_glob": "app/portal/b.tsx"}, zones) == "dir:app/portal"
     assert key({"path_glob": "app/portal/**"}, zones) == "dir:app/portal"
-    assert key({"path_glob": "app/portal"}, zones) == "dir:app"
+    # a literal path with no file extension may be a directory: its own area, shared with the files inside it
+    assert key({"path_glob": "app/portal"}, zones) == "dir:app/portal"
     assert key({"path_glob": "README.md"}, zones) == "dir:."
     assert key({"path_glob": None, "zone_id": None, "resource": None}, zones) == "dir:."
 

@@ -366,8 +366,9 @@ def claim_unit(row: Mapping[str, Any], zones: Sequence[Mapping[str, Any]]) -> st
 
     A zone claim is its zone and a resource is itself. A file claim counts as the zone that covers
     it (file claims inside a temporary zone) or, outside every zone, as its folder: every file a
-    session holds in one folder is one area, never one slot per file. That is never more than one
-    claim on the folder itself would lock, so the caps still bound how much a session can hold.
+    session holds in one folder is one area, never one slot per file. A literal path that may be
+    a directory (no file extension) is its own area, so an area is never more than one claim on
+    that folder would lock, and the caps still bound how much a session can hold.
     """
     if row.get("zone_id"):
         return f"zone:{row['zone_id']}"
@@ -419,21 +420,47 @@ async def exclusive_counts(conn: aiosqlite.Connection, session: Mapping[str, Any
     return len({claim_unit(r, zones) for r in mine}), sum(len(u) for u in _agent_units(agent, zones).values())
 
 
+# CrewError.message is at most 500 characters (schemas.ERROR_BODY); a caller may add one short sentence.
+_CAP_MESSAGE_MAX: Final = 470
+
+
+def _listed(items: Sequence[str], room: int, none: str) -> str:
+    """As many of ``items`` as fit in ``room`` characters, then ``+N more``: a list is shortened, never cut off."""
+    if not items:
+        return none
+    shown: list[str] = []
+    for n, item in enumerate(items):
+        rest = len(items) - n - 1
+        tail = f", +{rest} more" if rest else ""
+        if len(", ".join([*shown, item])) + len(tail) > room:
+            break
+        shown.append(item)
+    left = len(items) - len(shown)
+    if not shown:
+        return f"{left} not listed here"
+    return ", ".join(shown) + (f", +{left} more" if left else "")
+
+
 def _cap_message(detail: Mapping[str, Any]) -> str:
     limit, setting = detail["limit"], detail["setting"]
     if detail["cap"] == "session":
-        held = ", ".join(str(h["target"]) for h in detail["holding"][:6]) or "none listed"
-        return (
-            f"Per-session claim limit reached: you hold {detail['held_by_you']} of {limit} exclusive areas ({held}). "
-            'Release one you no longer need with crew_claim(action="release"), or the owner can raise '
+        head = f"Per-session claim limit reached: you hold {detail['held_by_you']} of {limit} exclusive areas ("
+        tail = (
+            '). Release one you no longer need with crew_claim(action="release"), or the owner can raise '
             f"{setting} in the crew settings. Files in one folder count as one area."
         )
-    who = ", ".join(f"{h['callsign']} x{h['count']}" for h in detail["holders"][:8]) or "other sessions"
-    return (
-        f"Per-agent claim limit reached: sessions with agent id {detail['agent_id']} hold {detail['held_by_agent']} of "
-        f"{limit} exclusive areas ({who}); you hold {detail['held_by_you']}. Ask a holder to release with crew_say, "
-        f"or the owner can raise {setting} in the crew settings."
-    )
+        items, none = [str(h["target"]) for h in detail["holding"][:6]], "none listed"
+    else:
+        head = (
+            f"Per-agent claim limit reached: sessions with agent id {detail['agent_id']} hold {detail['held_by_agent']} of "
+            f"{limit} exclusive areas ("
+        )
+        tail = (
+            f"); you hold {detail['held_by_you']}. Ask a holder to release with crew_say, "
+            f"or the owner can raise {setting} in the crew settings."
+        )
+        items, none = [f"{h['callsign']} x{h['count']}" for h in detail["holders"][:8]], "other sessions"
+    return head + _listed(items, _CAP_MESSAGE_MAX - len(head) - len(tail), none) + tail
 
 
 async def cap_breach(
@@ -445,9 +472,9 @@ async def cap_breach(
     """Which §5.1 cap refuses ``adding`` (claim rows or targets) for ``session``, with numbers; None when neither does.
 
     Only areas the session does not hold yet use a slot. The per-agent cap is shared by every
-    session of one agent id (a fleet of sub-agents), so it never refuses a session its first
-    area: a session that holds nothing can always start work, and the per-session cap and the
-    seats bound the total.
+    session of one agent id (a fleet of sub-agents), so it never refuses a session that holds
+    nothing: such a session can always start work with one request (one path, one task's zones,
+    one baton group), and the per-session cap and the seats bound the total.
     """
     zones = await load_zone_rows(conn, str(session["crew_id"]))
     mine, agent = await _cap_rows(conn, session)
@@ -461,7 +488,7 @@ async def cap_breach(
     cap_a = int(settings["max_exclusive_claims_per_agent"])
     if len(my_units) + len(new) > cap_s:
         kind, limit = "session", cap_s
-    elif agent_total + len(new) > cap_a and not (not my_units and len(new) == 1):
+    elif my_units and agent_total + len(new) > cap_a:
         kind, limit = "agent", cap_a
     else:
         return None

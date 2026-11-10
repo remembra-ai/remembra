@@ -3174,12 +3174,30 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
     ),
 }
 
+# Which exclusive-claim limit refused (a 409 ``claim_cap`` only): the numbers and who holds what.
+CLAIM_CAP_DETAIL = Shape(
+    "ClaimCapDetail",
+    {
+        "cap": _e(("session", "agent"), desc="the limit that refused: per session, or per agent id"),
+        "setting": _s(64, desc="the crew setting that holds the limit"),
+        "limit": _i(0),
+        "needed": _i(0),  # areas the request would add
+        "held_by_you": _i(0),
+        "held_by_agent": _i(0),  # areas held by every session with the caller's agent id
+        "agent_id": AGENT_ID,
+        "holders": _l(_o(Shape("ClaimCapHolder", {"session_id": _opt(_id("session")), "callsign": _s(40), "count": _i(0)})), 10),
+        "holding": _l(_o(Shape("ClaimCapHolding", {"claim_id": _id("claim"), "target": _s(300), "state": _e(CLAIM_STATES)})), 10),
+        "message": _s(500),
+    },
+)
+
 ERROR_BODY = Shape(
     "CrewError",
     {
         "error": _s(64, desc="report_required | claim_cap | session_exists | conflict | frozen | protected | crew_policy | …"),
         "message": _s(500),
         "blockers": _l(_o(BLOCKER), 10, req=False),
+        "cap": _o(CLAIM_CAP_DETAIL, req=False),
         "retry_after_s": _i(0, req=False),
     },
 )
