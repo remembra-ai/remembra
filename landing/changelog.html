@@ -97,8 +97,15 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
     <div class="releases">
-      <article class="rel now" id="v0.17.6" aria-labelledby="v0-17-6-t">
-        <p class="when"><span class="ver">v0.17.6</span><span class="tag signal">Latest</span><time>October 25, 2026</time></p>
+      <article class="rel now" id="v0.17.7" aria-labelledby="v0-17-7-t">
+        <p class="when"><span class="ver">v0.17.7</span><span class="tag signal">Latest</span><time>November 10, 2026</time></p>
+        <div>
+          <h2 id="v0-17-7-t">Fixes from daily use between two agents</h2>
+          <p>A session can release the claims it holds, claim limits count areas and never starve a session that holds nothing, crew messages can be read in full, handoffs keep the work an agent declared, and the doctor stops reporting installed hooks as missing.</p>
+        </div>
+      </article>
+      <article class="rel" id="v0.17.6" aria-labelledby="v0-17-6-t">
+        <p class="when"><span class="ver">v0.17.6</span><time>October 25, 2026</time></p>
         <div>
           <h2 id="v0-17-6-t">Security updates</h2>
           <p>Four dependencies with known vulnerabilities are updated (certifi, filelock, Pillow and setuptools); a dependency audit of the server now finds none.</p>

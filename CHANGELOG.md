@@ -5,9 +5,9 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.7] - 2026-11-10
 
-**Fixes from the fault survey of 0.17.5 and 0.17.6. No route, MCP tool name or stored schema is removed.**
+**Fixes from a fault survey of 0.17.5 and 0.17.6 in daily use between Codex and Claude. No route, MCP tool name or stored schema is removed.**
 
 ### Fixed
 - **Claims lookup.** Release, handover and adopt find the claims a session really holds, including resource
