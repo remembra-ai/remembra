@@ -379,8 +379,8 @@ def _identity_split_warning(own: str | None) -> str | None:
     names = " / ".join(f"'{a}'" for a in others[:3])
     return (
         f"The crew hooks on this machine run as {names}, but this MCP server is signed in as '{own}': a session that "
-        f"has both is two agents to Remembra. Messages the hooks announce are in the {names} inbox, which this "
-        f"connection cannot read or acknowledge; messages sent here go out as '{own}' and replies to them are not "
+        f"has both is two agents to Remembra. Messages the hooks announce are in the {names} inbox, which a key "
+        f"scoped to '{own}' cannot read or acknowledge; messages sent here go out as '{own}' and replies to them are not "
         "announced by the hooks. To be one agent for the inbox, give this MCP server's entry the same REMEMBRA_AGENT_ID and "
         "REMEMBRA_API_KEY as the entry the hooked agent itself uses, then restart the client."
     )
@@ -1788,7 +1788,7 @@ def send_to_inbox(
             warnings.append(
                 f"This message is sent as '{sender}'. The crew hooks on this machine run as {names}: a reply "
                 f"addressed to '{sender}' is not announced by them (read it with get_inbox here), and one addressed "
-                f"to {names} cannot be read from this connection. See health_check."
+                f"to {names} cannot be read here when this key is scoped to '{sender}'. See health_check."
             )
         # A reply goes to its original's project, so it surfaces where the conversation is; otherwise
         # tag the message with this client's project so project-restricted readers (e.g. the
@@ -1895,7 +1895,8 @@ def get_inbox(
             names = " / ".join(f"'{a}'" for a in hook_ids[:3])
             out["warnings"] = [
                 f"This is the '{aid}' inbox. The crew hooks on this machine run as {names}: a message they announce "
-                f'("MESSAGE inbox_… for you") is in the {names} inbox, which this connection cannot read. See health_check.'
+                f"(\"MESSAGE inbox_… for you\") is in the {names} inbox, which a key scoped to '{aid}' cannot read. "
+                "See health_check."
             ]
         return _dump_data(out)
     except ValueError as e:
@@ -2001,12 +2002,13 @@ def ack_inbox(
     except MemoryError as e:
         own = _own_inbox_agent()
         if e.status_code == 404 and own:
-            # the server answers "not found" for a row addressed to another agent too (nothing to probe)
+            # the server answers "not found" for a row addressed to another agent too (nothing to probe), but only
+            # to a key scoped to one agent: an account key acknowledges any agent's row, so the limit is the key's
             hook_ids = _hook_agent_ids(own)
             names = " / ".join(f"'{a}'" for a in hook_ids[:3])
             hint = (
-                f" This connection is signed in as '{own}' and can acknowledge only messages addressed to '{own}': "
-                "a message addressed to another agent id answers 'not found' here."
+                f" This connection is signed in as '{own}'. If its key is scoped to '{own}', it acknowledges only "
+                f"messages addressed to '{own}': one addressed to another agent id answers 'not found' too."
             )
             if hook_ids:
                 hint += (

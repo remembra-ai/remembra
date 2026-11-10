@@ -188,3 +188,27 @@ def test_a_key_that_may_read_every_inbox_and_a_plain_missing_row_are_unchanged(l
     missing = _j(server.ack_inbox("inbox_0000000000000000"))
     assert missing["ok"] is False and missing["code"] == 404 and "not found" in missing["error"], missing
     assert "crew hooks" not in missing["error"], missing  # no hooks here: only who this connection is
+
+
+def test_the_identity_texts_do_not_claim_a_limit_that_an_unscoped_key_does_not_have(live, monkeypatch, tmp_path):
+    """An account key (no agent scope) reads and acknowledges every agent's inbox: nothing may say it cannot."""
+    _hooks_home(tmp_path, monkeypatch)
+    theirs = _codex_sends(live, "claude-code", "for the hook identity")
+    _as(monkeypatch, live, "claude-desktop", key="admin")
+
+    missing = _j(server.ack_inbox("inbox_0000000000000000"))
+    assert missing["ok"] is False and missing["code"] == 404 and missing["this_agent"] == "claude-desktop", missing
+    texts = [missing["error"]]
+    texts += [w for w in _j(server.health_check())["warnings"] if "crew hooks" in w]
+    texts += _j(server.get_inbox())["warnings"]
+    texts += [w for w in _j(server.send_to_inbox("codex", "status", "hello"))["warnings"] if "crew hooks" in w]
+    assert len(texts) == 4, texts
+    for text in texts:
+        assert "scoped to" in text, text  # the limit is stated as the scoped key's, not this connection's
+        for absolute in ("can acknowledge only", "this connection cannot read", "cannot be read from this connection"):
+            assert absolute not in text, text
+
+    # and the same connection does what those texts must not deny
+    assert _j(server.get_inbox(agent_id="claude-code"))["count"] == 1
+    done = _j(server.ack_inbox(theirs, result="done"))
+    assert done["ok"] is True, done
