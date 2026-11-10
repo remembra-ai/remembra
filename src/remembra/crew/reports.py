@@ -142,8 +142,8 @@ def _test_passed(item: Mapping[str, Any]) -> bool:
     passed, failed, exit_code = item.get("passed"), _int(item.get("failed")), item.get("exit_code")
     if passed is False or (failed is not None and failed > 0) or exit_code not in (None, 0):
         return False
-    if summary_shows_failure(item.get("summary")):
-        return False  # "passed" was the shell's exit code; the runner's own summary reports failures
+    if failed is None and summary_shows_failure(item.get("summary")):
+        return False  # "passed" was the shell's exit code; the runner's own summary line reports failures
     if passed is True:
         return True
     count = _int(passed)

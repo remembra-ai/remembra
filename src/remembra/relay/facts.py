@@ -27,7 +27,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from remembra.relay.handoff import is_probe_command
-from remembra.relay.testruns import failed_tests, resolve_runs, run_verdict, runner_invocations
+from remembra.relay.testruns import failed_tests, moved_directory, resolve_runs, run_verdict, runner_invocations
 from remembra.security.secrets import redact_secrets
 
 MAX_COMMITS = 30
@@ -582,29 +582,45 @@ def _outside_root(command: str, root: str | None, cwd: str | None = None) -> boo
     return not (target_path == root_path or target_path.startswith(root_path.rstrip(os.sep) + os.sep))
 
 
-def _test_command(cmd: str) -> str:
+def _test_command(cmd: str, where: str | None = None, home: str | None = None) -> str:
     """A test run's command as it is sent. One too long to keep whole is sent as the runner it
-    runs (``pytest -q tests/x``), not as its first ``CMD_CLIP`` characters (a ``cd``, a heredoc script)."""
-    if len(" ".join(cmd.split())) <= CMD_CLIP:
-        return cmd
-    return "; ".join(dict.fromkeys(run.text for run in runner_invocations(cmd))) or cmd
+    runs (``pytest -q tests/x``), not as its first ``CMD_CLIP`` characters (a ``cd``, a heredoc script).
+
+    A run made in another directory than the session's first command (``where`` is not ``home``)
+    is sent with that directory in front (``cd ../api && pytest -q``): the handoff says where it
+    ran, and the server, which sees only the command, does not take it for a run of the same
+    tests as one made elsewhere."""
+    if len(" ".join(cmd.split())) > CMD_CLIP:
+        cmd = "; ".join(dict.fromkeys(run.text for run in runner_invocations(cmd))) or cmd
+    if where and home and where != home:
+        relative = os.path.isabs(where) == os.path.isabs(home)
+        cmd = f"cd {shlex.quote(os.path.relpath(where, home) if relative else where)} && {cmd}"
+    return cmd
 
 
 def _finish(
     facts: TranscriptFacts, command_log: list[dict[str, Any]], files: list[str], open_todos: list[str]
 ) -> TranscriptFacts:
-    """Turn a parsed command log (oldest first: ``cmd``, ``exit_code``, ``output``) into the facts
-    every transcript parser reports: commands, test verdicts, errors, files, open todos."""
+    """Turn a parsed command log (oldest first: ``cmd``, ``exit_code``, ``output``, and ``cwd``
+    when the transcript records where the command ran) into the facts every transcript parser
+    reports: commands, test verdicts, errors, files, open todos."""
     # Tests: commands that run a test runner, with the runner's verdict (testruns.run_verdict:
     # the exit code when it is the runner's, else the runner's own summary line), newest
-    # result per exact command, in the order they last ran.
-    tests: dict[str, dict[str, Any]] = {}
+    # result per exact command and directory, in the order they last ran. The directory is the
+    # recorded one, else followed through the log's own ``cd`` commands from wherever it started.
+    tests: dict[tuple[str, str], dict[str, Any]] = {}
+    shell_dir = "."
+    home: str | None = None
     for item in command_log:
+        where = str(item.get("cwd") or shell_dir)
+        home = home or where
+        shell_dir = moved_directory(item["cmd"], shell_dir)
         verdict = run_verdict(item["cmd"], item["exit_code"], item["output"])
-        tests.pop(item["cmd"], None)
+        tests.pop((where, item["cmd"]), None)
         if verdict is not None:
-            tests[item["cmd"]] = {
+            tests[(where, item["cmd"])] = {
                 "cmd": item["cmd"],
+                "where": where,  # a run in another directory never replaces this one (used here only, not sent)
                 "passed": verdict[0],
                 "summary": _scrub_clip(verdict[1], 200) if verdict[1] else None,
                 # Which tests failed, when the output names all of them: a later green run of
@@ -612,6 +628,7 @@ def _finish(
                 "failed_tests": [] if verdict[0] else failed_tests(item["output"], verdict[1]),
             }
     # Errors: failed non-probe, non-test commands whose exact command did not later succeed.
+    test_cmds = {cmd for _, cmd in tests}
     last_exit: dict[str, int] = {}
     for item in command_log:
         last_exit[item["cmd"]] = item["exit_code"]
@@ -619,7 +636,7 @@ def _finish(
     seen: set[str] = set()
     for item in reversed(command_log):
         cmd = item["cmd"]
-        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or cmd in tests or is_probe_command(cmd):
+        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or cmd in test_cmds or is_probe_command(cmd):
             continue
         seen.add(cmd)
         detail = _last_meaningful_line(item["output"])
@@ -631,7 +648,7 @@ def _finish(
     facts.commands = [{"cmd": _scrub_clip(c["cmd"], CMD_CLIP), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]]
     facts.tests = [
         {
-            "cmd": _scrub_clip(_test_command(t["cmd"]), CMD_CLIP),
+            "cmd": _scrub_clip(_test_command(t["cmd"], t.get("where"), home), CMD_CLIP),
             "passed": t["passed"],
             "summary": _scrub(t["summary"]) if t["summary"] else None,
         }
@@ -730,7 +747,7 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                         continue
                     facts.commit_shas.extend(_COMMIT_LINE_RE.findall(text))
                     exit_code = int(match.group(1)) if match else 0
-                    command_log.append({"cmd": command, "exit_code": exit_code, "output": text})
+                    command_log.append({"cmd": command, "exit_code": exit_code, "output": text, "cwd": use_cwd})
                 elif name in ("Edit", "Write", "MultiEdit", "NotebookEdit") and not is_error:
                     target = tool_input.get("file_path") or tool_input.get("notebook_path")
                     if isinstance(target, str) and target:
@@ -969,7 +986,7 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
         if _outside_root(command, root, cwd):
             continue
         facts.commit_shas.extend(_COMMIT_LINE_RE.findall(item["output"]))
-        command_log.append(item)
+        command_log.append({**item, "cwd": cwd})
     open_todos = [str(p.get("step") or "") for p in plan or [] if p.get("status") != "completed"]
     facts.usage_limit = _scrub(limit) if limit else None
     return _finish(facts, command_log, files, open_todos)

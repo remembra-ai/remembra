@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -224,6 +225,27 @@ _TWO_WORD_RUNNERS: dict[str, frozenset[str]] = {
     "gmake": frozenset({"test", "check"}),
 }
 _PACKAGE_MANAGERS = frozenset({"npm", "pnpm", "yarn", "bun"})
+# Package-manager options that take a value (``pnpm --filter web test``, ``npm --prefix web test``).
+_PM_VALUE_FLAGS = frozenset({"--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--workspace"})
+# Arguments with which a runner starts but runs no test: it lists, collects, compiles or prints help.
+_NO_RUN_FLAGS = frozenset({"--version", "--help", "-h", "--collect-only", "--co", "--list-tests", "--listTests", "--dry-run"})
+_NO_RUN_FLAGS_BY_RUNNER: dict[str, frozenset[str]] = {
+    "pytest": frozenset({"-V", "--fixtures", "--fixtures-per-test", "--markers", "--setup-only", "--setup-plan"}),
+    "py.test": frozenset({"-V", "--fixtures", "--fixtures-per-test", "--markers", "--setup-only", "--setup-plan"}),
+    "cargo test": frozenset({"--no-run"}),
+    "cargo nextest": frozenset({"--no-run", "list"}),
+    "go test": frozenset({"-c", "-list"}),
+    "tox": frozenset({"-l", "-a", "--list", "--listenvs", "--listenvs-all", "--showconfig", "--notest"}),
+    "nox": frozenset({"-l", "--list"}),
+    "jest": frozenset({"--showConfig"}),
+    "vitest": frozenset({"list"}),
+    "ctest": frozenset({"-N", "--show-only"}),
+    "swift test": frozenset({"list"}),
+    "make test": frozenset({"-n", "--just-print", "--recon"}),
+    "make check": frozenset({"-n", "--just-print", "--recon"}),
+    "gmake test": frozenset({"-n", "--just-print", "--recon"}),
+    "gmake check": frozenset({"-n", "--just-print", "--recon"}),
+}
 _BUILD_TOOLS = frozenset({"xcodebuild", "mvn", "mvnw", "gradle", "gradlew"})
 _PYTHON_RE = re.compile(r"^(?:python[\d.]*|pypy[\d.]*|py)$")
 _REDIRECT_RE = re.compile(r"^(?:\d*[<>]|&>)")
@@ -248,6 +270,13 @@ class Invocation:
     @property
     def text(self) -> str:
         return " ".join((self.runner, *self.args))
+
+    @property
+    def executes(self) -> bool:
+        """False when the arguments keep the runner from running a test (``pytest --collect-only``,
+        ``pytest --version``, ``cargo test --no-run``, ``tox -l``): such a command tested nothing."""
+        mine = _NO_RUN_FLAGS_BY_RUNNER.get(self.runner, frozenset())
+        return not any(arg.split("=", 1)[0] in _NO_RUN_FLAGS or arg.split("=", 1)[0] in mine for arg in self.args)
 
     @property
     def key(self) -> tuple[Any, ...]:
@@ -341,10 +370,20 @@ def _runner_at(words: tuple[str, ...], i: int) -> tuple[str, tuple[str, ...]] | 
             return f"{base} {plain[0][1]}", rest[plain[0][0] + 1 :]
         return None
     if base in _PACKAGE_MANAGERS:
-        j = 1 if rest[:1] == ("run",) else 0
+        # The script or program the package manager runs: its first plain word, after its own
+        # options (``pnpm -r``, ``pnpm --filter web``), ``yarn workspace <name>`` and ``run``.
+        j = 0
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 2 if rest[j] in _PM_VALUE_FLAGS or (base == "npm" and rest[j] == "-w") else 1
+        if base == "yarn" and rest[j : j + 1] == ("workspace",):
+            j += 2
+        if rest[j : j + 1] == ("run",):
+            j += 1
         script = rest[j] if j < len(rest) else ""
         if script == "test" or script.startswith("test:"):
             return f"{base} {script}", rest[j + 1 :]
+        if script.rsplit("/", 1)[-1] in _SINGLE_RUNNERS:  # ``yarn jest``, ``pnpm vitest run``, ``bun run vitest``
+            return script.rsplit("/", 1)[-1], rest[j + 1 :]
         return None
     if base in _BUILD_TOOLS and any(w in ("test", "test-without-building") or w.endswith(":test") for w in rest):
         return base, tuple(w for w in rest if not w.startswith("-"))
@@ -417,6 +456,53 @@ def runner_invocations(command: Any) -> list[Invocation]:
     return list(_cached_invocations(text)) if text.strip() else []
 
 
+def executing_invocations(command: Any) -> list[Invocation]:
+    """The runners ``command`` runs tests with: :func:`runner_invocations` without the ones whose
+    arguments run no test (``pytest --version``, ``pytest --collect-only``, ``cargo test --no-run``)."""
+    return [run for run in runner_invocations(command) if run.executes]
+
+
+def mentions_runner_only(command: Any) -> bool:
+    """True when ``command`` is known not to run tests: every program it runs is one that never
+    does (``pip install pytest``, ``pkill -f pytest``, ``grep -rn 'cargo test' docs``). False for a
+    program this module does not know (``./scripts/run-tests.sh``, ``python manage.py test``)."""
+    segments = [seg for seg in _segments(str(command or "")) if seg.words]
+    if not segments or runner_invocations(command):
+        return False
+    for seg in segments:
+        words = [w for w, q in zip(seg.words, seg.quoted, strict=True) if not q and not w.startswith("-")]
+        while words and (_ASSIGN_RE.match(words[0]) or words[0] in _PREFIX_WORDS):
+            words.pop(0)
+        if not words:
+            return False
+        program = words[0].rsplit("/", 1)[-1]
+        if program in _CARRIERS or program in _CARRIER_SUBCOMMANDS:
+            # ``uv pip install pytest``, ``timeout 5 grep pytest log``: the program it carries.
+            carried = [w.rsplit("/", 1)[-1] for w in words[1:4]]
+            if not any(w in _NOT_RUNNERS for w in carried):
+                return False
+        elif program not in _NOT_RUNNERS and program != "cd":
+            return False
+    return True
+
+
+def moved_directory(command: Any, directory: str) -> str:
+    """The shell's directory after ``command``, when the command only changes directory
+    (``cd ../other``, ``cd a && cd b``); ``directory`` unchanged for anything else."""
+    segments = [seg for seg in _segments(str(command or "")) if seg.words]
+    if not segments or any(seg.words[0] != "cd" for seg in segments):
+        return directory
+    for seg in segments:
+        target = seg.words[1] if len(seg.words) > 1 else "~"
+        # ``cd -`` goes somewhere this log does not name: kept as a directory of its own ("-").
+        directory = _join_dir(directory, (target,))
+    return directory
+
+
+def _join_dir(base: str, targets: tuple[str, ...]) -> str:
+    return os.path.normpath(os.path.join(base, *(os.path.expanduser(t) for t in targets)))
+
+
 # ---------------------------------------------------------------------------
 # Summaries
 # ---------------------------------------------------------------------------
@@ -456,10 +542,61 @@ _FAILURE_RES = (
 )
 
 
+# A summary an agent typed as counts only ("1 failed, 214 passed", "2 errors"): a runner's line without its timing.
+_COUNTS_ONLY_RE = re.compile(
+    r"^(?:\d+ (?:passed|failed|errors?|failures?|skipped|xfailed|xpassed|warnings?|deselected|rerun)(?:, | and |; | \| )?)+"
+    r"(?: in \d[\d.:]*\s*[a-z]*)?\.?$",
+    re.IGNORECASE,
+)
+# A summary that says tests ran and passed ...
+_RAN_RES = (
+    re.compile(r"(?<![\w.])[1-9]\d*\s+(?:tests?\s+)?(?:passed|passing|pass|succeeded|examples?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:passed|pass)\s*[:=]\s*[1-9]", re.IGNORECASE),
+    re.compile(r"^ok\s+\S+\s+[\d.]+s\b|^PASS$|^OK(?:\s+\(.*\))?$|^All tests passed!"),
+    re.compile(r"\*\* TEST SUCCEEDED \*\*|\btest result: ok\b|\bExecuted [1-9]\d* tests?, with 0 failures\b"),
+    re.compile(r"^# pass [1-9]|^Tests: [1-9]\d*, Assertions: \d+", re.IGNORECASE),
+)
+# ... and one that says the runner ran none.
+_NOTHING_RAN_RE = re.compile(
+    r"\bno tests? (?:ran|to run|files|found|collected|were (?:run|found))\b|\bcollected 0 items\b|\b0 passed; 0 failed\b"
+    r"|\bran 0 tests\b|\bExecuted 0 tests\b|^0 examples\b",
+    re.IGNORECASE,
+)
+
+
+def _reads_failed(text: str) -> bool:
+    return any(rx.search(text) for rx in _FAILURE_RES)
+
+
+# Lines only a runner prints for a failure ("not ok 3 - parses the header", "FAILED tests/a.py::test_x", "FAILURES!").
+_FAILURE_LINE_RE = re.compile(r"^(?:not ok\b|FAIL(?:ED|URES!)?(?=$|[\s:(])|# fail [1-9]|Some tests failed\b)|\bTEST FAILED\b")
+
+
+def _is_summary_line(text: str) -> bool:
+    return any(rx.search(text) for rx in _SUMMARY_RES) or bool(_COUNTS_ONLY_RE.match(text)) or bool(_FAILURE_LINE_RE.search(text))
+
+
 def summary_shows_failure(summary: Any) -> bool:
-    """True when a runner's summary line reports failed tests or errors (``"1 failed, 214 passed"``)."""
+    """True when ``summary`` is a runner's summary line that reports failed tests or errors
+    (``"1 failed, 214 passed in 3.2s"``, ``"1 failed, 214 passed"``, ``"Tests: 1 failed, 10 total"``).
+
+    Only a runner's line counts. A sentence an agent wrote about its run (``"214 passed after
+    fixing the 2 failures from the first run"``) is not one and never overrides the verdict it
+    comes with.
+    """
     text = str(summary or "").strip(" =\t")
-    return bool(text) and any(rx.search(text) for rx in _FAILURE_RES)
+    return bool(text) and _is_summary_line(text) and _reads_failed(text)
+
+
+def summary_shows_tests_ran(summary: Any) -> bool:
+    """True when ``summary`` says tests ran and none failed (``"4 passed in 0.1s"``, ``"12 passed"``,
+    ``"ok pkg 0.01s"``): what a green run needs before it stands in for an earlier red one. False
+    with no summary, for one that ran nothing (``"no tests ran"``, ``"4 deselected"``, ``"[no tests to
+    run]"``) and for one that reports failures."""
+    text = str(summary or "").strip(" =\t")
+    if not text or _NOTHING_RAN_RE.search(text) or _reads_failed(text):
+        return False
+    return any(rx.search(text) for rx in _RAN_RES)
 
 
 def _summary_lines(output: str) -> tuple[list[str], list[str]]:
@@ -477,7 +614,7 @@ def run_summary(output: Any, runs: int = 1) -> str | None:
     strict, loose = _summary_lines(str(output or ""))
     if strict:
         if runs > 1:
-            failed = next((ln for ln in strict if summary_shows_failure(ln)), None)
+            failed = next((ln for ln in strict if _reads_failed(ln)), None)
             if failed:
                 return failed
         return strict[-1]
@@ -500,20 +637,21 @@ def run_verdict(command: Any, exit_code: Any, output: Any) -> tuple[bool, str | 
     """``(passed, summary)`` for a command that ran tests; None when it is not a test run
     or its result was not captured.
 
-    The runner's exit code decides when it is the command's (and a summary that
-    reports failures still fails the run). When something after the runner
-    replaces its exit code, the summary decides; with no summary there is no verdict.
+    The runner's exit code decides when it is the command's (and a runner's
+    summary line that reports failures still fails the run). When something
+    after the runner replaces its exit code, the summary decides; with no summary
+    there is no verdict. A command whose runners run no test (``pytest
+    --version``, ``pytest --collect-only``) is not a test run.
     """
-    runs = runner_invocations(command)
+    runs = executing_invocations(command)
     if not runs:
         return None
     summary = run_summary(output, len({run.key for run in runs}))
-    failed = summary_shows_failure(summary)
     if all(run.decisive for run in runs):
-        return (exit_code == 0 and not failed), summary
+        return (exit_code == 0 and not summary_shows_failure(summary)), summary
     if summary is None:
         return None
-    return (not failed), summary
+    return (not _reads_failed(summary.strip(" =\t"))), summary
 
 
 # ---------------------------------------------------------------------------
@@ -537,18 +675,27 @@ def resolve_runs(tests: Any, *, collected: bool = False) -> tuple[list[dict[str,
     """``(current, test_commands)`` from recorded runs ``[{cmd, passed, summary}]``, oldest first.
 
     ``current`` holds each run that still stands, in order, with ``passed``
-    corrected: a run whose summary reports failures did not pass, whatever
-    verdict was sent. A run is replaced by a later run of the same tests, and
-    by later *passing* runs that cover them (the whole suite, their directory,
-    or between them every file it ran; for a failing run that carries
-    ``failed_tests``, every test that failed), so a red run that was fixed and
-    re-run does not stay failing.
+    corrected: a run whose summary is a runner's line that reports failures did
+    not pass, whatever verdict was sent. A run is replaced by a later run of
+    the same command, by a later run of the same tests, and by later *passing*
+    runs that cover them (the whole suite, their directory, or between them
+    every file it ran; for a failing run that carries ``failed_tests``, every
+    test that failed), so a red run that was fixed and re-run does not stay
+    failing. A passing run stands in for another command's run only when its
+    summary says tests ran (:func:`summary_shows_tests_ran`), and never when
+    its arguments run no test (``pytest --version``, ``--collect-only``): a
+    command that tested nothing does not clear a failure.
+
+    An entry may carry ``where``, the directory its command ran in (the client
+    knows it; it is not sent): runs in different directories never replace
+    each other.
 
     ``collected`` marks runs a client took from a transcript by itself (not
-    typed by an agent): there, an entry whose command runs no test runner is
+    typed by an agent): there, a "passed" entry whose command runs no test is
     not a test, and a "passed" with no summary whose exit code was not the
-    runner's is unknown. Both are left out. ``test_commands`` is every entry
-    that is a real test run (current or replaced).
+    runner's is unknown. Both are left out. A failing entry is kept unless its
+    command is known not to run tests (:func:`mentions_runner_only`).
+    ``test_commands`` is every entry that is a real test run (current or replaced).
     """
     runs: list[tuple[dict[str, Any], tuple[Invocation, ...]]] = []
     for item in tests or []:
@@ -558,11 +705,16 @@ def resolve_runs(tests: Any, *, collected: bool = False) -> tuple[list[dict[str,
         # A clipped command ("…") may have lost its runner, a target or a filter: it is kept as
         # recorded and only an identical command replaces it.
         clipped = cmd.endswith("…")
-        found = () if clipped else tuple(runner_invocations(cmd))
+        found = () if clipped else tuple(executing_invocations(cmd))
+        where = item.get("where")
+        if found and isinstance(where, str) and where:
+            found = tuple(replace(run, cwd=(_join_dir(where, run.cwd),)) for run in found)
         passed = item.get("passed")
         summary = item.get("summary")
         if collected and not clipped:
-            if not found:
+            # A failing entry is dropped only when its command is known not to run tests (an
+            # older client listed ``pip install pytest``); one this module cannot read is kept.
+            if not found and (passed is not False or mentions_runner_only(cmd)):
                 continue
             if passed is True and not summary and not all(run.decisive for run in found):
                 continue
@@ -570,18 +722,27 @@ def resolve_runs(tests: Any, *, collected: bool = False) -> tuple[list[dict[str,
             passed = False
         runs.append(({**item, "passed": passed}, found))
 
+    def stands_in(other: dict[str, Any]) -> bool:
+        """A later run whose result may replace an earlier, different command's: not a bare "passed"."""
+        return other.get("passed") is not True or summary_shows_tests_ran(other.get("summary"))
+
     current: list[dict[str, Any]] = []
     for i, (item, found) in enumerate(runs):
         cmd = str(item.get("cmd") or "")
         later = runs[i + 1 :]
-        replaced = any(str(other.get("cmd") or "") == cmd for other, _ in later)
+        replaced = any(str(other.get("cmd") or "") == cmd and other.get("where") == item.get("where") for other, _ in later)
         if not replaced and found:
             keys = [run.key for run in found]
-            green = [run for other, other_found in later if other.get("passed") is True for run in other_found]
+            green = [
+                run
+                for other, other_found in later
+                if other.get("passed") is True and summary_shows_tests_ran(other.get("summary"))
+                for run in other_found
+            ]
             failed = [str(t) for t in item.get("failed_tests") or []] if item.get("passed") is False else None
-            replaced = any(other_found and [run.key for run in other_found] == keys for _, other_found in later) or all(
-                _covered(run, green, failed) for run in found
-            )
+            replaced = any(
+                other_found and [run.key for run in other_found] == keys and stands_in(other) for other, other_found in later
+            ) or all(_covered(run, green, failed) for run in found)
         if not replaced:
             current.append(item)
     return current, {str(item.get("cmd") or "") for item, _ in runs}
