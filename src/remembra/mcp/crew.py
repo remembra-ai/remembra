@@ -27,6 +27,7 @@ item, tags neutralised; nothing ever names a destructive command or the bypass m
 
 from __future__ import annotations
 
+import math
 import re
 import shlex
 import threading
@@ -68,6 +69,7 @@ _SAFE_PATH_RE: Final = re.compile(r"[A-Za-z0-9._@+$(\[][A-Za-z0-9._/@+:=$()\[\]*
 _TASK_NUMBER_RE: Final = re.compile(r"(?:t-?|#)?([1-9][0-9]{0,6})", re.IGNORECASE)
 _TARGET_RE: Final = re.compile(r"@?[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
 _CLIENT_ID_RE: Final = re.compile(r"[^A-Za-z0-9._:-]+")
+_RETRY_TAIL_RE: Final = re.compile(r"\s*Retry in [0-9]+(?:\.[0-9]+)?s\.?\s*$")
 _LIVE_CLAIM_STATES: Final = ("active", "offered", "reserved", "queued")
 _OPEN_TASK_STATUSES: Final = ("backlog", "ready", "claimed", "in_progress", "blocked", "review", "stalled")
 
@@ -374,24 +376,41 @@ def _safe_path(value: Any) -> str | None:
     return text
 
 
-def _path_claim_covered(claim: Mapping[str, Any], paths: Sequence[str] | None, zone_globs: Sequence[str]) -> bool:
-    """True when ``claim`` is a path claim (no zone) that one of ``paths`` or the named zone's globs covers.
+def _path_claim_covered(
+    claim: Mapping[str, Any],
+    paths: Sequence[str] | None,
+    zone_globs: Sequence[str],
+    zone_excludes: Sequence[str] = (),
+    *,
+    wide: bool = False,
+) -> bool:
+    """True when ``claim`` is a path claim (no zone) that one of ``paths`` names or the named zone contains.
 
     A path claim is stored with no zone id, and it stays that way when a zone arrives over its folder
     later (a derived folder zone, a zones.yml upload). Naming the path, a folder above it or that zone
     must still find it, although ``/match`` now files the path under the zone.
+
+    A path names the claim spelled the same and every claim under it as a folder. With ``wide`` it also
+    names a wider claim whose glob covers it (to say who holds a file, never to release: one file does
+    not end a claim on its whole folder). A zone contains a claim its ``include_globs`` overlap, unless
+    its ``exclude_globs`` cover the claim: an excluded part of the zone is not in the zone.
     """
-    glob = str(claim.get("path_glob") or "")
+    glob = str(claim.get("path_glob") or "").strip().strip("/")
     if not glob or claim.get("zone_id"):
         return False
-    if any(G.claim_covers_path(str(p), glob) for p in paths or ()):
-        return True
+    for p in paths or ():
+        path = str(p).strip().strip("/")
+        if path and (path == glob or glob.startswith(path + "/") or (wide and G.claim_covers_path(path, glob))):
+            return True
     if not zone_globs:
         return False
     from remembra.crew import policy as P  # the overlap test the server uses for a path claim under a zone
 
     try:
-        return P.any_overlap([str(g) for g in zone_globs], [glob])
+        if not P.any_overlap([str(g) for g in zone_globs], [glob]):
+            return False
+        # the claim's own text is matched as a path: an exclude covers it when it matches every spelling of it
+        return not any(str(x) == glob or G.glob_match(str(x), glob, case_insensitive=True) for x in zone_excludes)
     except (ValueError, re.error):
         return False
 
@@ -433,19 +452,22 @@ def rate_limit_text(e: CrewApiError) -> str:
 
     The crew limiter's sentence names the kind of request, whose budget it is and the limit
     (``Too many adopt requests for this session (6/hour). Retry in 3569s.``); it is printed as sent.
+    Only a JSON answer's own ``message`` counts as a sentence: the page of a proxy in front of the
+    server, or any other body, is not printed. The wait is ``retry_after_s`` (any number, rounded up),
+    and it is given once: it replaces a wait the sentence ends with.
     """
-    retry = e.body.get("retry_after_s")
-    if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
-        retry = None
+    raw = e.body.get("retry_after_s")
+    retry: int | None = None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and 0 <= raw < 10**9:  # also not NaN or inf
+        retry = math.ceil(raw)
     wait = "" if retry is None else f"{retry}s" + (f" (about {round(retry / 60)} min)" if retry >= 120 else "")
-    said = (e.message or "").strip()
-    if said in ("rate_limited", e.error):  # only the error code came back
+    said = (e.message or "").strip() if isinstance(e.body.get("message"), str) else ""
+    if said in ("rate_limited", e.error) or "<" in said or ">" in said:  # only the error code came back, or markup
         said = ""
     if not said:
         return f"retry in {wait}." if wait else ""
     if wait:
-        plain = f"Retry in {retry}s."
-        said = f"{said[: -len(plain)]}Retry in {wait}." if said.endswith(plain) else f"{said} Retry in {wait}."
+        said = f"{_RETRY_TAIL_RE.sub('', said)} Retry in {wait}.".lstrip()
     if e.error == "rate_limited":  # the crew limiter: one budget per kind of request
         said += " Other kinds of crew call are not limited by this."
     return said
@@ -1319,10 +1341,10 @@ class CrewBridge:
         return [c for c in mine if (task_id and c.get("task_id") == task_id) or (named is not None and named(c))]
 
     def _claim_matcher(
-        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None
+        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None, *, wide: bool = False
     ) -> Callable[[Mapping[str, Any]], bool]:
         """Whether a claim is on the named zone/resource/paths: by the target the server would file them
-        under today, and by what a path claim covers (see :func:`_path_claim_covered`)."""
+        under today, and by what a path claim covers (see :func:`_path_claim_covered`; ``wide`` as there)."""
         zone_ids: set[str] = set()
         globs: set[str] = set()
         resources: set[str] = set()
@@ -1335,15 +1357,18 @@ class CrewBridge:
             if t.get("resource"):
                 resources.add(str(t["resource"]))
         zone_globs: list[str] = []
+        zone_excludes: list[str] = []
         if zone and not _is_resource(zone):
-            zone_globs = [str(g) for g in self._zone(http, seat, zone).get("include_globs") or ()]
+            z = self._zone(http, seat, zone)
+            zone_globs = [str(g) for g in z.get("include_globs") or ()]
+            zone_excludes = [str(g) for g in z.get("exclude_globs") or ()]
 
         def named(c: Mapping[str, Any]) -> bool:
             return (
                 c.get("zone_id") in zone_ids
                 or c.get("path_glob") in globs
                 or c.get("resource") in resources
-                or _path_claim_covered(c, paths, zone_globs)
+                or _path_claim_covered(c, paths, zone_globs, zone_excludes, wide=wide)
             )
 
         return named
@@ -1375,7 +1400,7 @@ class CrewBridge:
             return " ".join(out)
         mine = [c for c in live if c.get("holder_session_id") == seat.session_id]
         try:
-            named = self._claim_matcher(http, seat, zone, paths)
+            named = self._claim_matcher(http, seat, zone, paths, wide=True)  # also who holds a wider claim over it
         except (CrewApiError, CrewUsageError):
             named = None
         theirs = [c for c in live if c not in mine and c.get("state") != "queued" and named is not None and named(c)]
@@ -1472,6 +1497,7 @@ class CrewBridge:
         data: list[str] = []
         reserved = [c for c in self._claims(http, seat) if c.get("state") == "reserved"]
         picked: list[dict[str, Any]] = []
+        under: list[dict[str, Any]] = []  # reserved path claims inside the named zone (not the zone's own claims)
         labels: list[str] = []
         if zone and _is_resource(zone):
             labels.append(_safe(zone) or "resource")
@@ -1480,7 +1506,10 @@ class CrewBridge:
             z = self._zone(http, seat, zone)
             labels.append(f"zone {_safe(z.get('slug'))}")
             zone_globs = [str(g) for g in z.get("include_globs") or ()]
-            picked += [c for c in reserved if c.get("zone_id") == z["id"] or _path_claim_covered(c, None, zone_globs)]
+            zone_excludes = [str(g) for g in z.get("exclude_globs") or ()]
+            picked += [c for c in reserved if c.get("zone_id") == z["id"]]
+            under = [c for c in reserved if _path_claim_covered(c, None, zone_globs, zone_excludes)]
+            picked += under
         if paths:
             # a lost session's path claim, or the zone a path lies in
             labels.append(self._paths_label(paths, data))
@@ -1496,6 +1525,15 @@ class CrewBridge:
         if not picked:
             return join_text([f"NOT ADOPTED {label}: nothing is reserved there."], data)
         saved = {str(c["baton_ref"]) for c in picked if c.get("baton_ref")}
+        later: list[dict[str, Any]] = []
+        if len(saved) > 1 and under:
+            # the zone slug names the zone's own baton first; a path baton under it with other saved work waits
+            first = [c for c in picked if c not in under]
+            first_refs = {str(c["baton_ref"]) for c in first if c.get("baton_ref")}
+            if first and len(first_refs) <= 1:
+                later = [c for c in under if c.get("baton_ref") and str(c["baton_ref"]) not in first_refs]
+                picked = [c for c in picked if c not in later]
+                saved = {str(c["baton_ref"]) for c in picked if c.get("baton_ref")}
         if len(saved) > 1:  # one adopt takes one lost session's saved work, as remembra-crew adopt does
             names = sorted(
                 {
@@ -1543,6 +1581,13 @@ class CrewBridge:
             done |= {str(x.get("id")) for x in got} | {str(c["id"])}
             if baton is None and isinstance(body.get("baton"), dict):
                 baton = body["baton"]
+        for c in later:
+            if str(c["id"]) in done:
+                continue
+            glob = str(c.get("path_glob") or "")
+            quoted = G.SAFE_CLAIM_PATH_RE.fullmatch(glob) and ".." not in glob.split("/")
+            how = f'with paths=["{glob}"]' if quoted else "by its path"
+            refused.append(f"STILL RESERVED {self._claim_label(http, seat, c, data)}: adopt it on its own {how}.")
         if own_left:
             refused.append(
                 "A reserved claim of your own needs no adopt: a plain crew_claim on it re-takes it, "

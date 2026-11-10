@@ -4860,7 +4860,7 @@ def _file_claim_facts(rel: str, ci: bool, ctx: _Ctx, facts: dict[str, Any], info
         glob = c.get("path_glob")
         # equality first: a claim is sent as the literal file path, and one with brackets (a ``[id]`` route) reads
         # as a character class to the glob engine, which then matches other paths but not the file it names
-        if not glob or c.get("zone_id") or not (str(glob) == rel or compile_glob(str(glob), ci).match(rel)):
+        if not glob or c.get("zone_id") or not (fold(str(glob), ci) == fold(rel, ci) or compile_glob(str(glob), ci).match(rel)):
             continue
         state = c.get("state")
         if ctx.is_mine(c) and state in LIVE_HOLD_STATES:

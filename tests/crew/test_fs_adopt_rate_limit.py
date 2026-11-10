@@ -91,7 +91,7 @@ def _parked(live: LiveServer, prefix: str, paths: list[str]) -> tuple[str, Memor
 
 
 def test_a_429_prints_what_the_server_said():
-    e = CrewApiError(429, "rate_limited", SERVER_SAID, {"error": "rate_limited", "retry_after_s": 3569})
+    e = CrewApiError(429, "rate_limited", SERVER_SAID, {"error": "rate_limited", "message": SERVER_SAID, "retry_after_s": 3569})
     text = error_text(e, "crew")
     assert text.startswith("RATE LIMITED (crew): Too many adopt requests for this session (6/hour)."), text
     assert "Retry in 3569s (about 59 min)." in text, text
@@ -100,7 +100,7 @@ def test_a_429_prints_what_the_server_said():
 
 def test_a_short_wait_is_not_given_in_minutes():
     said = "Too many claims requests for this session (60/minute). Retry in 12s."
-    e = CrewApiError(429, "rate_limited", said, {"retry_after_s": 12})
+    e = CrewApiError(429, "rate_limited", said, {"message": said, "retry_after_s": 12})
     text = error_text(e, "claim zone pos")
     assert text == (
         "RATE LIMITED (claim zone pos): Too many claims requests for this session (60/minute). Retry in 12s."
@@ -114,9 +114,19 @@ def test_a_short_wait_is_not_given_in_minutes():
         ("", {"retry_after_s": 30}, "RATE LIMITED (crew): retry in 30s."),  # an answer with no sentence: as before
         ("rate_limited", {"retry_after_s": 30}, "RATE LIMITED (crew): retry in 30s."),  # only the error code came back
         ("", {}, "RATE LIMITED (crew)."),
-        ("Rate limit exceeded: 100 per 1 minute", {}, "RATE LIMITED (crew): Rate limit exceeded: 100 per 1 minute"),
-        ("Slow down.", {"retry_after_s": 600}, "RATE LIMITED (crew): Slow down. Retry in 600s (about 10 min)."),
-        ("Slow down.", {"retry_after_s": "soon"}, "RATE LIMITED (crew): Slow down."),
+        # a sentence counts only as the ``message`` of a JSON answer (a bare body is not printed)
+        ("Rate limit exceeded: 100 per 1 minute", {}, "RATE LIMITED (crew)."),
+        (
+            "Rate limit exceeded: 100 per 1 minute",
+            {"message": "Rate limit exceeded: 100 per 1 minute"},
+            "RATE LIMITED (crew): Rate limit exceeded: 100 per 1 minute",
+        ),
+        (
+            "Slow down.",
+            {"message": "Slow down.", "retry_after_s": 600},
+            "RATE LIMITED (crew): Slow down. Retry in 600s (about 10 min).",
+        ),
+        ("Slow down.", {"message": "Slow down.", "retry_after_s": "soon"}, "RATE LIMITED (crew): Slow down."),
     ],
 )
 def test_a_429_without_the_crew_sentence_still_reads(message, body, expected):
@@ -248,7 +258,9 @@ def test_against_a_server_that_limits_own_retakes_the_answer_points_to_claim_and
 
     def old_server(self: Any, method: str, path: str, **kw: Any) -> Any:
         if method == "POST" and path.endswith("/adopt"):
-            raise CrewApiError(429, "rate_limited", SERVER_SAID, {"error": "rate_limited", "retry_after_s": 3569})
+            raise CrewApiError(
+                429, "rate_limited", SERVER_SAID, {"error": "rate_limited", "message": SERVER_SAID, "retry_after_s": 3569}
+            )
         return real_call(self, method, path, **kw)
 
     monkeypatch.setattr(crew_mod.CrewHttp, "call", old_server)
