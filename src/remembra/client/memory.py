@@ -120,6 +120,24 @@ def _header_agent_id(agent: str | None) -> str | None:
     return None
 
 
+def _validation_text(detail: Any) -> Any:
+    """A request-validation ``detail`` (a list of ``{loc, msg}``) as ``facts.tests.0.cmd: Field required; ...``.
+
+    The same text the crew tools give for a 422, instead of the Python repr of the list. Any other
+    detail is returned as it is.
+    """
+    if not isinstance(detail, builtins.list) or not detail or not all(isinstance(d, dict) for d in detail):
+        return detail
+    parts = []
+    for item in detail[:5]:
+        loc = [str(p) for p in item.get("loc") or []]
+        where = ".".join(loc[1:] if loc[:1] == ["body"] else loc)
+        parts.append(f"{where}: {item.get('msg')}" if where else str(item.get("msg")))
+    if len(detail) > 5:
+        parts.append(f"(+{len(detail) - 5} more)")
+    return "; ".join(parts)
+
+
 class MemoryError(Exception):
     """Base exception for Memory client errors."""
 
@@ -251,7 +269,7 @@ class Memory:
             except Exception:
                 error_detail = response.text
             raise MemoryError(
-                f"Request failed: {error_detail}",
+                f"Request failed: {_validation_text(error_detail)}",
                 status_code=response.status_code,
             )
 

@@ -42,12 +42,12 @@ import re
 import socket
 import sys
 import uuid
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import ConfigDict, create_model, model_validator
+from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
 
 from remembra import __version__
 from remembra.client.memory import Memory, MemoryError
@@ -66,6 +66,7 @@ from remembra.mcp.crew import (
     local_crew,
 )
 from remembra.mcp.crew import error_text as crew_error_text
+from remembra.relay.declared_facts import normalize_close_facts, normalize_crew_evidence
 from remembra.relay.identity import canonical_git_remote
 from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
 from remembra.security.untrusted import dump_untrusted
@@ -1036,6 +1037,104 @@ def _locator(
     return {k: v for k, v in locator.items() if v is not None and v != ""}, checkout
 
 
+# The facts shape as an MCP client sees it. Published, not enforced: the argument stays a free object and
+# normalize_close_facts reads the other spellings, so a near-miss is rewritten instead of refused.
+CLOSE_FACTS_EXAMPLE = (
+    '{"branch": "main", "head_commit": "1ec6d03", '
+    '"commits": [{"sha": "1ec6d03", "subject": "fix checkout"}], '
+    '"files_changed": ["src/app.py"], "uncommitted_files": [], '
+    '"tests": [{"cmd": "pytest -q", "passed": true, "summary": "170 passed, 0 failed"}], '
+    '"commands": [{"cmd": "make build", "exit_code": 0}], '
+    '"unpushed_commits": 2, "upstream": "origin/main", "notes": "free text"}'
+)
+_STRINGS_SCHEMA: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
+CLOSE_FACTS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "Facts",
+    "additionalProperties": True,
+    "description": (
+        "What you know about the session. Every key is optional. Example: " + CLOSE_FACTS_EXAMPLE + ". "
+        "tests[].passed is true or false (put counts in summary); unpushed_commits is a count, omit it when "
+        "you do not know the push state; branch is one branch name."
+    ),
+    "properties": {
+        "branch": {"type": "string", "description": "One git branch name (not a range, no spaces)."},
+        "head_commit": {"type": "string"},
+        "commits": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"sha": {"type": "string"}, "subject": {"type": "string"}},
+                "required": ["sha"],
+            },
+        },
+        "files_changed": _STRINGS_SCHEMA,
+        "uncommitted_files": _STRINGS_SCHEMA,
+        "diff_stat": {"type": "string"},
+        "commands": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}, "exit_code": {"type": "integer"}},
+                "required": ["cmd"],
+            },
+        },
+        "tests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "cmd": {"type": "string"},
+                    "passed": {"type": "boolean", "description": "true only when the whole run passed."},
+                    "summary": {"type": "string", "description": 'Counts and detail, e.g. "170 passed, 0 failed".'},
+                },
+                "required": ["cmd", "passed"],
+            },
+        },
+        "unpushed_commits": {"type": "integer", "minimum": 0, "description": "A count. Omit when unknown."},
+        "upstream": {"type": "string"},
+        "notes": {"type": "string"},
+    },
+}
+CREW_COMMITS_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": 'Commit shas, e.g. ["1ec6d03"]. {sha, subject} objects are read as their sha.',
+}
+CREW_TESTS_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": (
+        'Test runs with counts, e.g. [{"command": "pytest -q", "passed": 170, "failed": 0}]. '
+        "close_session's {cmd, passed: true|false, summary} is read too."
+    ),
+    "items": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "maxLength": 256},
+            "passed": {"type": "integer", "minimum": 0, "description": "How many tests passed."},
+            "failed": {"type": "integer", "minimum": 0, "description": "How many tests failed."},
+        },
+        "required": ["command", "passed", "failed"],
+    },
+}
+CrewCommits = Annotated[list[str | dict[str, Any]] | None, WithJsonSchema(CREW_COMMITS_SCHEMA)]
+CrewTests = Annotated[list[dict[str, Any] | str] | None, WithJsonSchema(CREW_TESTS_SCHEMA)]
+
+
+def _crew_evidence(
+    commits: Any, tests: Any, summary: str | None
+) -> tuple[list[str] | None, list[dict[str, Any]] | None, str | None]:
+    """Commits, tests and summary in the crew contract's shape, whichever vocabulary the agent used.
+
+    What the closed test shape cannot hold (a run's summary text, an entry with no result) is added
+    to the summary, so it is recorded instead of refused as an unknown field.
+    """
+    out_commits, out_tests, notes = normalize_crew_evidence(commits, tests)
+    if notes:
+        summary = "\n".join([*([summary] if summary and summary.strip() else []), *notes])
+    return out_commits, out_tests, summary
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         title="Close Session",
@@ -1050,7 +1149,7 @@ def close_session(
     next_step: str | None = None,
     todos_open: list[str] | None = None,
     errors: list[str] | None = None,
-    facts: dict[str, Any] | None = None,
+    facts: Annotated[dict[str, Any] | None, WithJsonSchema(CLOSE_FACTS_SCHEMA)] = None,
     end_reason: str | None = None,
     project_id: str | None = None,
     git_remote: str | None = None,
@@ -1079,10 +1178,17 @@ def close_session(
             suggestion, not an instruction).
         todos_open: Work you did not finish.
         errors: Errors you hit that are not resolved.
-        facts: Anything else you know, using these keys: branch, head_commit,
-            commits [{sha, subject}], files_changed [path], uncommitted_files,
-            diff_stat, commands [{cmd, exit_code}], tests [{cmd, passed, summary}],
-            unpushed_commits, upstream, notes.
+        facts: Anything else you know. Keys and types, all optional:
+            branch "main" (one branch name), head_commit "1ec6d03",
+            commits [{"sha": "1ec6d03", "subject": "fix checkout"}],
+            files_changed ["src/app.py"], uncommitted_files ["x.png"], diff_stat,
+            commands [{"cmd": "make build", "exit_code": 0}],
+            tests [{"cmd": "pytest -q", "passed": true, "summary": "170 passed, 0 failed"}]
+            (passed is true or false; counts go in summary),
+            unpushed_commits 2 (a count; omit it when you do not know),
+            upstream "origin/main", notes "free text".
+            crew_checkpoint's shapes ({command, passed: 170, failed: 0}, bare
+            shas) are read too; the result lists what was rewritten.
         end_reason: Why the session ends (e.g. "done", "blocked", "context full").
         project_id: Project. Default: the project your session_brief or
             crew_status resolved, else your crew session's. A local (stdio)
@@ -1111,7 +1217,8 @@ def close_session(
     try:
         client = _get_client()
         is_final = final if final is not None else not _milestone_reason(end_reason)
-        merged: dict[str, Any] = dict(facts or {})
+        # Before sending, so that a server that validates the facts as sent accepts the other vocabulary too.
+        merged, rewritten = normalize_close_facts(facts, lenient_branch=True)
         merged["facts_source"] = "agent-declared"
         if next_step:
             merged["next_step"] = next_step
@@ -1188,6 +1295,8 @@ def close_session(
             "grounding": result.get("grounding"),
             "rendered": result.get("rendered"),
         }
+        if rewritten:
+            out["normalized"] = rewritten
         crew = result.get("crew")
         if seat is not None and isinstance(crew, dict):
             out["crew"] = {
@@ -1203,6 +1312,11 @@ def close_session(
                 _crew_mark_left(seat)
         return _dump(out)
     except Exception as e:
+        if isinstance(e, MemoryError) and e.status_code == 422:
+            # One format for a refused close, with the shape it wanted.
+            return json.dumps(
+                {"status": "error", "error": sanitize_error_message(e), "code": 422, "expected_facts": CLOSE_FACTS_EXAMPLE}
+            )
         return _error(e)
 
 
@@ -2800,8 +2914,8 @@ async def crew_say(
 async def crew_checkpoint(
     files_changed: list[str],
     summary: str | None = None,
-    commits: list[str] | None = None,
-    tests: list[dict[str, Any]] | None = None,
+    commits: CrewCommits = None,
+    tests: CrewTests = None,
     next_step: str | None = None,
     task: str | None = None,
     project_id: str | None = None,
@@ -2815,8 +2929,9 @@ async def crew_checkpoint(
     Args:
         files_changed: Repo-relative paths you changed since the last checkpoint.
         summary: Short note on what you did.
-        commits: Commit shas since the last checkpoint.
-        tests: Test runs [{command, passed, failed}] (counts).
+        commits: Commit shas since the last checkpoint, e.g. ["1ec6d03"].
+        tests: Test runs with counts, e.g. [{"command": "pytest -q", "passed": 170, "failed": 0}].
+            close_session's shapes ({cmd, passed: true, summary}, {sha, subject}) are read too.
         next_step: What you do next.
         task: Task ref (default: none).
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
@@ -2824,11 +2939,12 @@ async def crew_checkpoint(
             the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
+    shas, runs, summary = _crew_evidence(commits, tests, summary)
     args = {
         "files_changed": files_changed,
         "summary": summary,
-        "commits": commits,
-        "tests": tests,
+        "commits": shas,
+        "tests": runs,
         "next_step": next_step,
         "task": task,
         "project_id": project_id,
@@ -2841,8 +2957,8 @@ async def crew_checkpoint(
             who,
             files_changed=files_changed,
             summary=summary,
-            commits=commits,
-            tests=tests,
+            commits=shas,
+            tests=runs,
             next_step=next_step,
             task=task,
             project_id=_write_project(project_id),
@@ -2859,8 +2975,8 @@ async def crew_report(
     task: str,
     sections: dict[str, Any],
     criteria_evidence: list[dict[str, Any]] | None = None,
-    commits: list[str] | None = None,
-    tests: list[dict[str, Any]] | None = None,
+    commits: CrewCommits = None,
+    tests: CrewTests = None,
     summary: str | None = None,
     release: bool = True,
     project_id: str | None = None,
@@ -2875,8 +2991,9 @@ async def crew_report(
         task: Task ref (T-14).
         sections: {done, not_done, failing, next, follow_ups}: lists of short strings.
         criteria_evidence: [{id, evidence}] per acceptance criterion.
-        commits: Commit shas of the task.
-        tests: Test runs [{command, passed, failed}].
+        commits: Commit shas of the task, e.g. ["1ec6d03"].
+        tests: Test runs with counts, e.g. [{"command": "pytest -q", "passed": 170, "failed": 0}].
+            close_session's shapes ({cmd, passed: true, summary}, {sha, subject}) are read too.
         summary: Optional short summary (checked against the facts).
         release: Release the task's claims when it is done (default true).
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
@@ -2884,12 +3001,13 @@ async def crew_report(
             the only project this session chose with session_brief / crew_status).
         root_path: Your repository checkout: resolves the project from it instead of project_id.
     """
+    shas, runs, summary = _crew_evidence(commits, tests, summary)
     args = {
         "task": task,
         "sections": sections,
         "criteria_evidence": criteria_evidence,
-        "commits": commits,
-        "tests": tests,
+        "commits": shas,
+        "tests": runs,
         "summary": summary,
         "release": release,
         "project_id": project_id,
@@ -2903,8 +3021,8 @@ async def crew_report(
             task=task,
             sections=sections,
             criteria_evidence=criteria_evidence,
-            commits=commits,
-            tests=tests,
+            commits=shas,
+            tests=runs,
             summary=summary,
             release=release,
             project_id=_write_project(project_id),

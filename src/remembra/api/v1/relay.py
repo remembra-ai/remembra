@@ -55,6 +55,7 @@ from remembra.auth.middleware import (
 from remembra.client.project import normalize_project_id
 from remembra.cloud.limits import hold_unenriched_writes, record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
+from remembra.relay.declared_facts import normalize_close_facts
 from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
 from remembra.security.audit import AuditAction
 from remembra.services import relay_split
@@ -353,6 +354,8 @@ class FactsIn(BaseModel):
     )
     commit_evidence: str | None = Field(default=None, description="How commits were chosen (session-reflog, last-12h, ...)")
     incomplete: list[str] = Field(default_factory=list, description="git probes that did not finish (log, status, ...)")
+    # Set by the server, never read from the request and never stored: what normalize_close_facts rewrote.
+    normalized: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("branch")
     @classmethod
@@ -368,7 +371,10 @@ class FactsIn(BaseModel):
     def _truncate(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        data = dict(data)
+        # The other vocabulary for the same facts (crew_checkpoint's counts, bare shas, a list of unpushed
+        # shas, one string for a list) is read, not refused: a close-out must not fail on the spelling.
+        data, rewritten = normalize_close_facts(data)
+        data["normalized"] = rewritten
         for name, cap in _LIST_CAPS.items():
             value = data.get(name)
             if isinstance(value, list):
@@ -760,6 +766,7 @@ async def close_session(
         "agent_verified": verified,
         "session_id": session_id,
         "resolution": resolution,
+        "facts_normalized": body.facts.normalized,
         **result,
     }
 
