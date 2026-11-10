@@ -1413,7 +1413,8 @@ def collect(
         trail = _trail(items)
         pickups_7d = _pickup_counts(summary_body)
         if trail_ok:
-            page_parts = [f"{len(items) - trail['crew_rows']} handoffs and checkpoints"]
+            written = len(items) - trail["crew_rows"]
+            page_parts = ["1 handoff or checkpoint" if written == 1 else f"{written} handoffs and checkpoints"]
             if trail["crew_rows"]:
                 page_parts.append(words.plural(trail["crew_rows"], "crew row"))
             covering = f"; covering {span_words(trail['span'])}" if trail["span"] is not None and items else ""

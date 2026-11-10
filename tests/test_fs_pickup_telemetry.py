@@ -114,7 +114,8 @@ def test_a_pickup_survives_the_author_closing_again(api):
     assert second != first
     trail = _trail(api)
     assert first not in trail  # superseded: not listed any more
-    picks = trail[second]["picked_up_by"]
+    assert trail[second]["picked_up_by"] == []  # nobody was served the new version
+    picks = trail[second]["earlier_version_picked_up_by"]
     assert [p["agent_id"] for p in picks] == ["claude-desktop"]
     assert picks[0]["picked_up_at"] and picks[0]["handoff_id"] == first  # the version that was read
 

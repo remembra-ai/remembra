@@ -974,7 +974,9 @@ class RelayService:
             before=before,
             ids=ids,
         )
-        pickups = await self.pickups_for(user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"])
+        pickups, earlier_pickups = await self._pickups_by_version(
+            user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"]
+        )
         # The brief's trust policy, per entry: the trail shows the recorded text as stored (for review), and
         # says what the brief did with it, so a client can mark it or keep it out of a copied prompt.
         prefixes: dict[str, tuple[str, ...]] = {}
@@ -1002,6 +1004,9 @@ class RelayService:
                     "health": stored_health(mem),
                     "trust": handoff_verdict(mem, prefixes.get(str(mem.get("project_id") or ""), ())).as_dict(),
                     "picked_up_by": pickups.get(mem["id"], []),
+                    # Readers served a version this handoff superseded (the session closed again): not a
+                    # pickup of this one, whose content they were never served.
+                    "earlier_version_picked_up_by": earlier_pickups.get(mem["id"], []),
                     "detail": _trail_detail(mem, relay),
                 }
             )
@@ -1376,16 +1381,23 @@ class RelayService:
         return inserted
 
     async def pickups_for(self, user_id: str, handoff_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        """First pickup per reader agent for each handoff, oldest first.
+        """First pickup per reader agent for each handoff (that version of it, no other), oldest first."""
+        return (await self._pickups_by_version(user_id, handoff_ids))[0]
+
+    async def _pickups_by_version(
+        self, user_id: str, handoff_ids: list[str]
+    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+        """``(served, earlier)``: first pickup per reader agent for each handoff, oldest first.
 
         A session that closes again supersedes its handoff, and a pickup row
-        names the version that was served. Each handoff here therefore also
-        carries the pickups of the versions it superseded (``handoff_id`` says
-        which version the reader was served), so a pickup does not vanish from
-        the trail when the author closes again.
+        names the version that was served. ``served`` holds the pickups of the
+        handoff itself. ``earlier`` holds those of the versions it superseded
+        (``handoff_id`` says which), so a pickup does not vanish from the trail
+        when the author closes again, and is not passed off as a pickup of the
+        new version either: its reader was never served that content.
         """
         if not handoff_ids:
-            return {}
+            return {}, {}
         marks = ",".join("?" for _ in handoff_ids)
         cursor = await self.db.conn.execute(
             f"""
@@ -1401,12 +1413,13 @@ class RelayService:
             """,  # noqa: S608 - placeholders and a module constant only; values are bound
             [user_id, *handoff_ids, user_id, user_id],
         )
-        first: dict[tuple[str, str], dict[str, Any]] = {}
+        first: dict[tuple[str, bool, str], dict[str, Any]] = {}
         for root, handoff_id, agent, verified, at, gap in await cursor.fetchall():
             when = _parse_iso(at)
-            seen = first.get((root, agent))
+            key = (root, handoff_id == root, agent)
+            seen = first.get(key)
             if seen is None:
-                first[(root, agent)] = {
+                first[key] = {
                     "agent_id": agent,
                     "agent_verified": bool(verified),
                     "picked_up_at": at,
@@ -1418,12 +1431,13 @@ class RelayService:
             seen["agent_verified"] = seen["agent_verified"] or bool(verified)
             if when is not None and (seen["_when"] is None or when < seen["_when"]):
                 seen.update(picked_up_at=at, gap_seconds=gap, handoff_id=handoff_id, _when=when)
-        out: dict[str, list[dict[str, Any]]] = {}
+        served: dict[str, list[dict[str, Any]]] = {}
+        earlier: dict[str, list[dict[str, Any]]] = {}
         floor = datetime.min.replace(tzinfo=UTC)
-        for (root, _agent), pick in sorted(first.items(), key=lambda kv: kv[1]["_when"] or floor):
+        for (root, own, _agent), pick in sorted(first.items(), key=lambda kv: kv[1]["_when"] or floor):
             pick.pop("_when")
-            out.setdefault(root, []).append(pick)
-        return out
+            (served if own else earlier).setdefault(root, []).append(pick)
+        return served, earlier
 
     async def pickup_summary(
         self,
