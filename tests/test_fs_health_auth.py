@@ -25,6 +25,7 @@ from remembra.client.memory import Memory
 
 KEY = "rem_SYNTHETICrevokedKey0123456789abcdefXYZ"
 PROBE = "/api/v1/trail/summary"
+READY = "/health/ready"  # the readiness read health_check makes after the key check; it needs no key
 CLOUDFLARE = "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head><body>blocked</body></html>"
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -57,8 +58,12 @@ class FakeServer:
 
 
 @pytest.fixture()
-def wire(monkeypatch):
-    """Point the MCP server's real ``_get_client`` at a :class:`FakeServer` (stdio transport, one key)."""
+def wire(monkeypatch, tmp_path):
+    """Point the MCP server's real ``_get_client`` at a :class:`FakeServer` (stdio transport, one key).
+
+    HOME is an empty directory, so the hook-identity warning reads no crew hooks from the developer's machine.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "no-hooks"))
 
     def _wire(authed: Handler, *, key: str = KEY, transport: str = "stdio") -> FakeServer:
         fake = FakeServer(authed)
@@ -107,7 +112,7 @@ def test_revoked_key_is_an_error_not_ok(wire) -> None:
     assert out["health"] == {"status": "ok", "version": __version__}
     assert (out["agent_id"], out["project"], out["session_id"]) == ("claude-desktop", "alpha", "sess-health")
     assert out["server"] == "http://remembra.test" and out["client_version"] == __version__
-    assert fake.paths() == ["/health", PROBE]
+    assert fake.paths() == ["/health", PROBE, READY]
     probe = fake.requests[1]
     assert probe.method == "GET" and probe.headers["x-api-key"] == KEY  # the key every other tool sends
 

@@ -36,7 +36,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -76,7 +76,7 @@ class SeatRecord:
     crew_id: str
     session_id: str
     callsign: str
-    token: str
+    token: str = field(repr=False)  # the crew session token: never in a repr, a log line or a traceback
     verified: bool
     saved_at: float = 0.0
     version: int = RECORD_VERSION

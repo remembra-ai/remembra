@@ -18,7 +18,7 @@ import pytest
 
 import remembra.mcp.server as server
 import tests.test_fs_health_auth as base
-from tests.test_fs_health_auth import KEY, PROBE, health
+from tests.test_fs_health_auth import KEY, PROBE, READY, health
 
 wire = base.wire  # the same fixture: the real tool and SDK client over a fake server
 
@@ -127,7 +127,7 @@ def test_the_probe_is_the_request_every_other_tool_sends(wire) -> None:
     """Made on the SDK client's own connection: same key header, same declared agent, one read, no write."""
     fake = wire(lambda r: httpx.Response(200, json={"agents": []}))
     health()
-    assert fake.paths() == ["/health", PROBE]
+    assert fake.paths() == ["/health", PROBE, READY]  # one authenticated read; readiness is keyless
     probe = fake.requests[1]
     assert probe.method == "GET" and probe.url.params["days"] == "1"
     assert probe.headers["x-api-key"] == KEY
