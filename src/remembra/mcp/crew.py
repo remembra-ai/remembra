@@ -156,6 +156,95 @@ def local_crew(timeout: float = 1.0) -> LocalCrew | None:
     return LocalCrew(layout, dict(who))
 
 
+# The crew-hook adapter that is the same program as an MCP agent id. Claude Code's hooks join as ``claude-code``
+# while the Claude desktop app's MCP server, which also serves the Claude Code sessions that app starts, signs
+# as ``claude-desktop``. Any other agent id is its own adapter (codex, cursor, …).
+_HOOK_ADAPTER_OF: Final = {"claude": "claude-code", "claude-desktop": "claude-code"}
+
+
+def local_hook_sessions(timeout: float = 1.0) -> list[dict[str, Any]]:
+    """The live crew-hook sessions on this machine (crewd's ``status``, open to this user's processes), or []."""
+    try:
+        from pathlib import Path
+
+        from remembra.relay.crew.gate import Layout, rpc
+
+        layout = Layout(Path.home())
+        if not layout.socket.exists():
+            return []
+        res = rpc(layout, "status", {}, timeout=timeout)
+    except Exception:
+        return []
+    if not res or not res.get("ok"):
+        return []
+    rows = res.get("sessions")
+    return [dict(r) for r in rows if isinstance(r, dict) and r.get("session_id")] if isinstance(rows, list) else []
+
+
+@dataclass(frozen=True)
+class HookShadow:
+    """Crew-hook sessions of the caller's own program that this MCP server cannot act as.
+
+    A stdio MCP server started by the agent is a child of it and acts as its hook session (:class:`LocalCrew`).
+    One started by something else (the Claude desktop app for the Claude Code sessions it launches) is not, so it
+    holds a separate ``mcp`` seat. A claim taken on that seat belongs to a second identity: the edit gate, which
+    runs as the hook session, then denies the agent's own edits, and both identities reporting the same files
+    open collisions between them. ``here`` are such hook sessions in the seat's crew (claims are not taken while
+    there is one); ``elsewhere`` are the projects of the others (a claim here does not cover edits there).
+    """
+
+    agent_id: str
+    callsign: str
+    here: tuple[str, ...]
+    elsewhere: tuple[str, ...] = ()
+
+    @property
+    def who(self) -> str:
+        return ", ".join(self.here)
+
+    def refusal(self, verb: str, cli: str | None) -> str:
+        """The answer to a call that would take a claim; ``cli`` is the shell command that does it as the hook session."""
+        many = len(self.here) > 1
+        one = "one of them" if many else self.who
+        own = (
+            f"the gate claims an area for it on your first edit, and `{cli}` in your shell acts as it"
+            if cli
+            else f"ask the sender to hand it over to {'that session' if many else '@' + self.who} instead"
+        )
+        return (
+            f"NOT {verb}: {'crew-hook sessions are' if many else 'a crew-hook session is'} live in this project on this "
+            f"machine ({self.who}) and this MCP server runs outside {'their' if many else 'its'} process tree as "
+            f"'{self.agent_id}', so it cannot act as {'one of them' if many else 'that session'}. Anything taken here "
+            f"would be held by a second identity ({self.callsign}) and the edit gate would block "
+            f"{'their' if many else 'its'} edits. If {one} is your own session (`remembra-crew whereami` in your shell "
+            f"says), take nothing here: {own}. If you are a different agent, ask "
+            f"{'them' if many else '@' + self.who} with crew_say."
+        )
+
+    def status_lines(self, held: int) -> list[str]:
+        many = len(self.here) > 1
+        lines = [
+            f"CREW-HOOK SESSION{'S' if many else ''} ON THIS MACHINE: {self.who} (enforced by the edit gate). This MCP "
+            f"server runs outside {'their' if many else 'its'} process tree as '{self.agent_id}', so {self.callsign} "
+            f"is a separate identity. If {'one of them' if many else self.who} is your own session (`remembra-crew "
+            f"whereami` in your shell says), what it holds is yours, also where it is listed under DO NOT TOUCH."
+        ]
+        if held:
+            lines.append(
+                f"THIS MCP SEAT HOLDS {held} claim(s) that block {self.who}: release them with "
+                'crew_claim(action="release", zone=... or paths=[...]).'
+            )
+        return lines
+
+    @property
+    def footer(self) -> str:
+        return (
+            "Do not claim through this MCP seat: the edit gate claims for the hook session on its first edit, and "
+            "`remembra-crew claim|release|adopt|task|checkpoint` in your shell act as it. crew_say, crew_report "
+            "and release still work here."
+        )
+
+
 class CrewHttp:
     """Crew REST calls with the caller's own client (key, agent header, base URL)."""
 
@@ -583,6 +672,43 @@ class CrewBridge:
         with self._lock:
             self._current[(caller.fingerprint, caller.client_session_id)] = project_id
 
+    def _shadow(self, caller: CallerInfo, seat: Seat) -> HookShadow | None:
+        """Hook sessions of the caller's own program beside this MCP seat (see :class:`HookShadow`), or None.
+
+        Only for a stdio server on the agent's machine whose seat is not the hook session itself, and only when
+        this process is in no hook session's tree at all (a server inside one that chose another project keeps
+        its seat as before). Asked on every call: the server can outlive many agent sessions.
+        """
+        if not caller.local or seat.local is not None:
+            return None
+        agent = str(caller.agent_id or seat.agent_id or "").strip().lower()
+        adapter = _HOOK_ADAPTER_OF.get(agent, agent)
+        rows = [
+            r
+            for r in local_hook_sessions()
+            if str(r.get("adapter") or "").strip().lower() == adapter and r.get("session_id") != seat.session_id
+        ]
+        if not rows or local_crew() is not None:
+            return None
+        here = [str(_safe(r.get("callsign")) or "a hook session") for r in rows if r.get("crew_id") == seat.crew_id]
+        elsewhere = [str(p) for p in (_safe(r.get("project_id")) for r in rows if r.get("crew_id") != seat.crew_id) if p]
+        return HookShadow(
+            agent_id=_safe(agent) or "this agent id",
+            callsign=_safe(seat.callsign) or "this seat",
+            here=tuple(dict.fromkeys(here)),
+            elsewhere=tuple(dict.fromkeys(elsewhere)),
+        )
+
+    def _elsewhere_note(self, seat: Seat, shadow: HookShadow | None) -> str | None:
+        """Said with a grant in a crew the agent's hook session is not in: the gate does not read this crew."""
+        if shadow is None or shadow.here or not shadow.elsewhere:
+            return None
+        return (
+            f"NOTE: this is the crew of project {_safe(seat.project_id) or '(this project)'}. The crew-hook sessions on "
+            f"this machine are in {', '.join(shadow.elsewhere[:4])}: their edit gate does not read claims made here. "
+            "If you work in one of those repositories, call crew_status(root_path=...) for it first."
+        )
+
     def _http(self, caller: CallerInfo, seat: Seat) -> CrewHttp:
         """How this seat reaches the server: crewd as the hook session, or the MCP seat's own token."""
         return seat.local.http(caller.client) if seat.local is not None else CrewHttp(caller.client)
@@ -817,6 +943,16 @@ class CrewBridge:
         if brief:
             lines.append(brief)
         lines.append(self._you_line(http, seat, rejoin, data))
+        shadow = self._shadow(caller, seat)
+        if shadow is not None and shadow.here:
+            try:
+                held = sum(1 for c in self._claims(http, seat) if c.get("holder_session_id") == seat.session_id)
+            except CrewApiError:
+                held = 0
+            lines.extend(shadow.status_lines(held))
+        note = self._elsewhere_note(seat, shadow)
+        if note:
+            lines.append(note)
         items = self._queue_items(http, seat)
         if items:
             lines.append("FOR YOU (session queue):")
@@ -827,7 +963,7 @@ class CrewBridge:
             v_lines, v_data = self._verbose(http, seat)
             lines.extend(v_lines)
             data.extend(v_data)
-        lines.append(MCP_FOOTER)
+        lines.append(shadow.footer if shadow is not None and shadow.here else MCP_FOOTER)
         self._resolve_items(http, seat, items)
         with seat.lock:
             seat.pending.clear()
@@ -1096,8 +1232,19 @@ class CrewBridge:
         seat, _ = self.seat(caller)
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
+        shadow = self._shadow(caller, seat)
+        if shadow is not None and shadow.here and action in ("claim", "adopt", "accept"):
+            # release, handover and decline stay open: they give up what this seat holds
+            refusals: dict[str, tuple[str, str | None]] = {
+                "claim": ("CLAIMED", "remembra-crew claim <zone|path>"),
+                "adopt": ("ADOPTED", "remembra-crew adopt T-n"),
+                "accept": ("ACCEPTED", None),
+            }
+            return shadow.refusal(*refusals[action])
         if action == "claim":
-            return self._claim(http, seat, zone=zone, paths=paths, mode=mode, task=task, reason=reason, wait_s=wait_s)
+            text = self._claim(http, seat, zone=zone, paths=paths, mode=mode, task=task, reason=reason, wait_s=wait_s)
+            note = self._elsewhere_note(seat, shadow)
+            return f"{text}\n{note}" if note else text
         if action == "release":
             return self._release(http, seat, zone=zone, paths=paths, task=task, baton=baton, reason=reason)
         if action == "adopt":
@@ -1673,6 +1820,9 @@ class CrewBridge:
         seat, _ = self.seat(caller)
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
+        shadow = self._shadow(caller, seat)
+        if shadow is not None and shadow.here:  # the check auto-claims a free zone for the session that asks
+            return shadow.refusal("CHECKED", "remembra-crew claim <zone|path>")
         body: dict[str, Any] = {"session_id": seat.session_id, "paths": [str(p) for p in paths][:200]}
         if mcp_tool:
             body["op"] = "mcp"
@@ -1748,6 +1898,9 @@ class CrewBridge:
         row = self._task(http, seat, task)
         ref = task_ref(row) or str(row.get("id"))
         if action == "start":
+            shadow = self._shadow(caller, seat)
+            if shadow is not None and shadow.here:  # starting a task claims its zones for the session that starts it
+                return shadow.refusal("STARTED", f"remembra-crew task start {ref}")
             _, res, _ = http.call("POST", f"/tasks/{row['id']}/start", token=seat.token, json={})
             seat.forget("tasks")
             seat.current_task_id = str(row["id"])
@@ -1889,7 +2042,11 @@ class CrewBridge:
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
         task_row = self._task(http, seat, task) if task else None
-        facts: dict[str, Any] = {"files_changed": [str(p) for p in files_changed][:500]}
+        shadow = self._shadow(caller, seat)
+        shadowed = shadow is not None and bool(shadow.here)
+        # the hook session reports the working tree itself: the same files under this second identity would be
+        # recorded as two sessions editing one file (same_file / exclusive_breach between the two)
+        facts: dict[str, Any] = {"files_changed": [] if shadowed else [str(p) for p in files_changed][:500]}
         if commits:
             facts["commits"] = [{"sha": str(c)} for c in commits][:200]
         if tests:
@@ -1915,6 +2072,12 @@ class CrewBridge:
             + (f" (seq {res.get('seq')})" if res.get("seq") else "")
         ]
         data: list[str] = []
+        if shadow is not None and shadowed and files_changed:
+            lines.append(
+                f"FILES NOT ATTRIBUTED to this MCP seat ({shadow.callsign}): the crew-hook session on this machine "
+                f"({shadow.who}) reports the working tree itself; recorded here they would count as a second session "
+                "editing the same files."
+            )
         lines.extend(self._collision_lines(http, seat, data))
         notice = self.notice(CallerInfo(caller.client, caller.fingerprint, caller.client_session_id, caller.agent_id), force=True)
         if notice:
