@@ -607,9 +607,11 @@ class RelayService:
         # brief withholds the same handoff as Blocked.
         policy_trust = assess_text(text, facts.get("upstream"), *location_texts(location), stored_trust=trust_score).trust
 
-        health = assess_handoff(facts, grounding, trust=policy_trust)
-        key = relay_key(agent_id, session_id)
         facts_source = facts.get("facts_source")
+        # Facts the server inferred for a session that never closed (crew outbox): graded as such.
+        server_inferred = bool(server_facts and facts_source in SERVER_FACTS_SOURCES)
+        health = assess_handoff(facts, grounding, trust=policy_trust, server_inferred=server_inferred)
+        key = relay_key(agent_id, session_id)
         relay_meta: dict[str, Any] = {
             "v": HANDOFF_FORMAT_VERSION,
             "agent_id": agent_id,

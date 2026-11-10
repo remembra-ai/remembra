@@ -524,7 +524,10 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
     next_step = agent_next or derived_next
 
     if commits:
-        done_part = f"{len(commits)} commit(s), last: {clip(commits[-1].get('subject'), 70)}"
+        last_subject = clip(commits[-1].get("subject"), 70)
+        # A checkpoint may record a commit by its sha alone: name it by that, never by an empty subject.
+        last = last_subject or f"{short_sha(str(commits[-1].get('sha') or '')) or 'unknown'} (no subject recorded)"
+        done_part = f"{len(commits)} commit(s), last: {last}"
     elif incomplete & {"log", "status", "repo"}:
         done_part = "git facts incomplete (git timed out)"
     elif files or uncommitted:
@@ -744,7 +747,8 @@ def recorded_summary(content: Any) -> str | None:
 
 
 def handoff_location(memory: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Where a relay handoff was recorded (``relay.location``), or None (free-form, or closed before 0.16.1)."""
+    """Where a relay handoff was recorded (``relay.location``), or None: a free-form handoff, a close that
+    sent no location (a plain ``project_id``, or a client before 0.16.1), or one the server wrote itself."""
     relay = _relay_meta(memory)
     location = (relay or {}).get("location")
     return location if isinstance(location, dict) else None
@@ -975,7 +979,13 @@ def _failed_commands(facts: dict[str, Any], test_cmds: set[str]) -> int:
     )
 
 
-def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trust: float = 1.0) -> dict[str, Any]:
+# Why a handoff the server wrote for a session that never closed is Incomplete (server text).
+NO_CLOSE_HEALTH_REASON = "session ended without a close (facts inferred by the server from its last checkpoint)"
+
+
+def assess_handoff(
+    facts: dict[str, Any], grounding: dict[str, Any] | None, trust: float = 1.0, *, server_inferred: bool = False
+) -> dict[str, Any]:
     """Grade a handoff from its recorded facts. Pure and deterministic; no LLM.
 
     Returns ``{status, label, missing, warnings, rules_version}``. ``status``
@@ -985,7 +995,10 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
       matched prompt-injection patterns (the handoff is withheld from briefs);
     * ``conflicted``: the agent's summary contradicts the facts (each
       contradiction is in ``warnings``, with its text);
-    * ``incomplete``: git probes did not finish, or no git state was recorded;
+    * ``incomplete``: git probes did not finish, no git state was recorded, or
+      the session ended without a close (``server_inferred``: the server wrote
+      the handoff itself from the session's last crew checkpoint; the caller
+      says so, a client's ``facts_source`` cannot);
     * ``ready_with_warnings``: anything left for the next agent (unpushed or
       unrecorded push state, uncommitted files, open todos, tests not run on
       changed work, errors, failed commands);
@@ -1025,6 +1038,8 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
         warnings.extend(f"summary contradicted: {clip(i, 200)}" for i in contradictions)
     warnings.extend(f"summary claim not checkable: {clip(i, 200)}" for i in issues if "(unverifiable)" in i)
 
+    if server_inferred:
+        gaps.append(NO_CLOSE_HEALTH_REASON)
     if incomplete:
         gaps.append(f"git facts incomplete ({', '.join(incomplete)} did not finish)")
     if not facts.get("branch") and not facts.get("head_commit") and not commits:
@@ -1137,6 +1152,9 @@ GRADE_BASIS_RELAY_DECLARED = (
     "The server does not verify them."
 )
 GRADE_BASIS_REPORTED = "Graded by the server from facts the agent reported, not verified."
+GRADE_BASIS_SERVER_INFERRED = (
+    "Graded by the server from its own record of the session's last checkpoint; the agent did not close. Not verified."
+)
 
 
 def grade_basis(relay: dict[str, Any] | None) -> str:
@@ -1151,6 +1169,10 @@ def grade_basis(relay: dict[str, Any] | None) -> str:
     """
     relay = relay or {}
     source = str(relay.get("facts_source") or "")
+    if source == "server-inferred":
+        # Only the server's own close keeps this source in a relay block (a client claiming it is
+        # recorded as agent-declared): the session never closed, so the agent reported nothing.
+        return GRADE_BASIS_SERVER_INFERRED
     if relay.get("agent_verified") is True and source.startswith("relay-cli:"):
         return GRADE_BASIS_RELAY_DECLARED
     return GRADE_BASIS_REPORTED
@@ -1377,10 +1399,15 @@ def location_line(handoff: dict[str, Any] | None, reader: dict[str, Any] | None,
         if where is None and location is not None:
             return "This working directory is not a git repository; where the last session worked is withheld (low trust)."
         if where is None:
-            return (
-                "This working directory is not a git repository; where the last session worked was not recorded "
-                "(its handoff was written before Remembra 0.16.1)."
-            )
+            # No location has several causes, none of them told apart by a version: say the one that applies.
+            relay = _relay_meta(handoff)
+            if relay is None:
+                why = "a free-form handoff records no location"
+            elif relay.get("facts_source") == "server-inferred":
+                why = "the session ended without a close"
+            else:
+                why = "its close did not send a location"
+            return f"This working directory is not a git repository; where the last session worked was not recorded ({why})."
         return f"This working directory is not a git repository; the last session worked in {where}."
     if not where or not location or reader.get("git_repo") is not True:
         return None

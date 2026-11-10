@@ -530,13 +530,14 @@ def test_brief_in_a_folder_names_where_the_last_session_worked(env, monkeypatch,
     assert lines[data + 2] == f"This working directory is not a git repository; the last session worked in beta at {beta}."
     assert lines[data + 3].startswith("Last session: codex (self-declared)") and "prisma migration" in lines[data + 3]
 
-    # A handoff closed before 0.16.1 recorded no location: the line says so.
+    # A handoff whose close recorded no location (here: closed before 0.16.1): the line says so, without
+    # blaming a version (F44: current closes by project id and server-written handoffs have none either).
     newest = rows(env, "SELECT id FROM memories WHERE memory_type = 'handoff' ORDER BY julianday(created_at) DESC LIMIT 1")
     as_closed_before_0161(env, newest[0][0])
     lines = brief_text(monkeypatch, capsys, task).splitlines()
     assert lines[data + 2] == (
         "This working directory is not a git repository; where the last session worked was not recorded "
-        "(its handoff was written before Remembra 0.16.1)."
+        "(its close did not send a location)."
     )
 
     # In a repository the preamble still points at it.

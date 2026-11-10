@@ -363,6 +363,69 @@ def memory_promotion_handler(
     return handle
 
 
+def relay_facts_from_crew(facts: dict[str, Any]) -> dict[str, Any]:
+    """Crew checkpoint facts in the relay's vocabulary (the shapes ``/session/close`` validates).
+
+    A lost or stalled session's facts come from its last crew checkpoint, which
+    records commits as ``{sha}`` (MCP ``crew_checkpoint``) or bare sha strings
+    (crewd), tests as ``{command | fingerprint, passed: n, failed: n}`` and, from
+    crewd, ``head`` and ``dirty``. The relay builds and grades a handoff from
+    ``commits [{sha, subject}]``, ``tests [{cmd, passed: bool, summary}]``,
+    ``head_commit`` and ``uncommitted_files``. A test entry counts as failed
+    when any test failed, as passed when some passed and none failed, and is
+    left out when nothing ran (0 passed, 0 failed) or it names no command.
+    Anything that is not in a shape the relay can read is dropped; other keys
+    pass through.
+    """
+    out = dict(facts)
+    if not out.get("head_commit") and isinstance(out.get("head"), str) and out["head"].strip():
+        out["head_commit"] = out["head"].strip()
+    if not out.get("uncommitted_files") and isinstance(out.get("dirty"), list):
+        out["uncommitted_files"] = out["dirty"]
+    for key in ("uncommitted_files", "files_changed", "todos_open", "errors"):
+        if key in out:
+            value = out[key]
+            if isinstance(value, list):
+                out[key] = [v for v in value if isinstance(v, str) and v.strip()]
+            else:
+                del out[key]
+    if "commits" in out:
+        commits: list[dict[str, Any]] = []
+        for item in out["commits"] if isinstance(out["commits"], list) else []:
+            sha = item.get("sha") if isinstance(item, dict) else item
+            if isinstance(sha, str) and sha.strip():
+                subject = item.get("subject") if isinstance(item, dict) else None
+                commits.append({"sha": sha.strip(), "subject": subject if isinstance(subject, str) and subject.strip() else None})
+        out["commits"] = commits
+    if "tests" in out:
+        tests: list[dict[str, Any]] = []
+        for item in out["tests"] if isinstance(out["tests"], list) else []:
+            if not isinstance(item, dict):
+                continue
+            cmd = next(
+                (item[k].strip() for k in ("cmd", "command", "fingerprint") if isinstance(item.get(k), str) and item[k].strip()),
+                "",
+            )
+            if not cmd:
+                continue
+            passed, failed = item.get("passed"), item.get("failed")
+            summary = item.get("summary") if isinstance(item.get("summary"), str) else None
+            if isinstance(passed, bool):
+                verdict: bool | None = passed and not (isinstance(failed, int) and failed > 0)
+            else:
+                n_passed = passed if isinstance(passed, int) else 0
+                n_failed = failed if isinstance(failed, int) and not isinstance(failed, bool) else 0
+                verdict = False if n_failed > 0 else (True if n_passed > 0 else None)
+                summary = summary or f"{n_passed} passed, {n_failed} failed"
+            if verdict is not None:
+                tests.append({"cmd": cmd, "passed": verdict, "summary": summary})
+        out["tests"] = tests
+    unpushed = out.get("unpushed_commits")
+    if "unpushed_commits" in out and (not isinstance(unpushed, int) or isinstance(unpushed, bool) or unpushed < 0):
+        del out["unpushed_commits"]
+    return out
+
+
 def relay_handoff_handler(
     relay_service: Any,
     *,
@@ -413,7 +476,7 @@ def relay_handoff_handler(
             project_id=project_id,
             agent_id=agent_id,
             session_id=session_id,
-            facts=facts,
+            facts=relay_facts_from_crew(facts),
             summary=summary,
             end_reason=end_reason,
             agent_verified=agent_verified,
