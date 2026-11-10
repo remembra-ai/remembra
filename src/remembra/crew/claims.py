@@ -624,13 +624,14 @@ class ClaimOutcome:
 
 
 async def _check_agent_glob(conn: aiosqlite.Connection, crew_id: str, glob: str, source: str) -> None:
-    """File claims by an agent (§5.1, ``undeclared_policy: file_claim``) are for paths that no zone covers.
+    """File claims by an agent (§5.1, ``undeclared_policy: file_claim``) are for paths that no declared zone covers.
 
     A path glob must be anchored under a literal top-level name (no ``**`` / ``*.md`` squats on the
     whole repo) and must not overlap any zone, the built-in ``crew-policy`` zone included: zone
     paths are claimed through their zone, where protected, frozen, ``reserve_for`` and
-    task-for-parent rules apply. The one exception is a serialize micro-lease on a commons file
-    (§5.2 row 12): a literal path that a commons entry names.
+    task-for-parent rules apply. Two exceptions: a serialize micro-lease on a commons file
+    (§5.2 row 12), a literal path that a commons entry names; and one literal file inside a
+    temporary folder zone (:func:`temporary_file_zone`).
     """
     if not P.glob_is_anchored(glob):
         raise CrewOpError(
@@ -644,11 +645,31 @@ async def _check_agent_glob(conn: aiosqlite.Connection, crew_id: str, glob: str,
         raise CrewOpError(422, "invalid_claim", "A micro-lease is taken on one commons file.")
     for z in await load_zone_rows(conn, crew_id):
         if P.any_overlap([glob], _globs(z)):
+            if temporary_file_zone(z) and P.glob_is_literal(glob):
+                continue  # one file inside an auto-derived folder zone: the file is claimed, not the folder
             raise CrewOpError(
                 422,
                 "zone_path",
                 f"path_glob overlaps zone {z['slug']}: claim the zone instead (file claims are for paths outside every zone).",
             )
+
+
+def temporary_file_zone(zone: Mapping[str, Any]) -> bool:
+    """A TEMPORARY zone (auto-derived from a folder when the repo declares none, D37) that takes file claims.
+
+    Such a zone is one whole folder (``lib/**``): locking it for one file blocks every other agent
+    there, so an agent may claim single files inside it. A zone a human declared, protected, froze
+    or reserved for an agent keeps the zone rules, as does a parent zone.
+    """
+    return (
+        zone.get("source") == "suggested"
+        and bool(zone.get("is_leaf"))
+        and not zone.get("builtin")
+        and not zone.get("protected")
+        and not zone.get("reserve_for")
+        and not is_frozen(zone)
+        and str(zone.get("mode") or "exclusive") == "exclusive"
+    )
 
 
 async def _resolve_target(
@@ -2067,6 +2088,7 @@ async def guard_snapshot(conn: aiosqlite.Connection, crew_id: str, caller: Mappi
             "fail_closed_zones": settings["fail_closed_zones"],
             "lease_ttl_s": settings["lease_ttl_s"],
         },
+        "features": list(S.SNAPSHOT_FEATURES),
         "sessions": [_session_view(s) for s in sessions],
         "claims": [claim_view(c, now) for c in claims],
         "zones": [zone_view(z) for z in zones],

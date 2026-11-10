@@ -3909,6 +3909,8 @@ class SnapshotIndex:
         self.offers: list[Mapping[str, Any]] = list(snapshot.get("offers") or ())
         self.footprints: list[Mapping[str, Any]] = list(snapshot.get("footprints") or ())
         self.zones = ZoneIndex(snapshot.get("zones") or (), snapshot.get("commons") or (), snapshot.get("ignore") or ())
+        # what the server that wrote this snapshot supports beyond the 0.17.5 contract (absent on older servers)
+        self.features: frozenset[str] = frozenset(str(f) for f in snapshot.get("features") or () if isinstance(f, str))
         self.host_id = snapshot.get("host_id")
         self.synced_at = parse_ts(snapshot.get("synced_at")) or parse_ts(snapshot.get("server_time"))
         self.skew_s = float(snapshot.get("skew_s") or 0.0)
@@ -4833,9 +4835,11 @@ def _target_facts(t: Target, ctx: _Ctx) -> tuple[dict[str, Any], dict[str, Any]]
         elif fp.get("state") in ("dirty", "committed"):
             facts["dirty_in_other_checkout"] = True
             info.setdefault("dirty_session", sid)
-    if not is_dir and not zi.match(rel, ci):
-        # file claims cover only paths outside every zone: a zone path is governed by its zone's claims
-        # (protected, frozen, reserve_for, task-for-parent), never by a path glob that happens to match it
+    file_level = not is_dir and _file_level(zi.match(rel, ci), ctx)
+    if not is_dir and (file_level or not zi.match(rel, ci)):
+        # file claims cover paths outside every zone, and single files inside a temporary folder zone. Any
+        # other zone path is governed by its zone's claims (protected, frozen, reserve_for, task-for-parent),
+        # never by a path glob that happens to match it
         _file_claim_facts(rel, ci, ctx, facts, info)
     # zones
     if is_dir:
@@ -4845,13 +4849,48 @@ def _target_facts(t: Target, ctx: _Ctx) -> tuple[dict[str, Any], dict[str, Any]]
         _zone_facts(containing, list(merged.values()), rel, ctx, facts, info, leaf_candidates=containing)
     else:
         zones = zi.match(rel, ci)
-        _zone_facts(zones, zones, rel, ctx, facts, info, leaf_candidates=zones)
+        _zone_facts(
+            zones,
+            zones,
+            rel,
+            ctx,
+            facts,
+            info,
+            leaf_candidates=zones,
+            file_rel=rel if file_level else None,
+            file_request=file_level and ctx.server_reachable,
+        )
     if facts.get("no_zone_match"):
         policy = ctx.idx.settings.get("undeclared_policy") or "footprint"
         facts["undeclared_policy"] = policy
         if policy == "file_claim" and not is_dir:
             info["claim_request"] = ClaimRequest(None, None, "exclusive", path_glob=rel)
     return facts, info
+
+
+FEATURE_TEMP_ZONE_FILE_CLAIMS: Final = S.FEATURE_TEMP_ZONE_FILE_CLAIMS
+
+
+def temporary_file_zone(zone: Mapping[str, Any], now: datetime) -> bool:
+    """A TEMPORARY zone (auto-derived from a folder, no zones.yml) that takes single-file claims
+    (the server's ``claims.temporary_file_zone``): never one a human declared, protected, froze or reserved."""
+    if zone.get("source") != "suggested" or not zone.get("is_leaf", True) or zone.get("builtin"):
+        return False
+    if zone.get("protected") or zone.get("reserve_for") or str(zone.get("mode") or "exclusive") != "exclusive":
+        return False
+    if zone.get("frozen_by"):
+        until = parse_ts(zone.get("frozen_until"))
+        if until is None or until > now:
+            return False
+    return True
+
+
+def _file_level(zones: Sequence[Mapping[str, Any]], ctx: _Ctx) -> bool:
+    """The file is claimed by itself, not through its zone: every zone that covers it is a temporary folder
+    zone, and the server that wrote the snapshot accepts such claims (an older server refuses them)."""
+    return (
+        bool(zones) and FEATURE_TEMP_ZONE_FILE_CLAIMS in ctx.idx.features and all(temporary_file_zone(z, ctx.now) for z in zones)
+    )
 
 
 def _file_claim_facts(rel: str, ci: bool, ctx: _Ctx, facts: dict[str, Any], info: dict[str, Any]) -> None:
@@ -4889,7 +4928,13 @@ def _zone_facts(
     info: dict[str, Any],
     *,
     leaf_candidates: list[Mapping[str, Any]],
+    file_rel: str | None = None,
+    file_request: bool = False,
 ) -> None:
+    """``file_rel``: the target is one file inside a temporary folder zone, claimed by itself (see
+    :func:`_file_level`); its own file claim was already judged by :func:`_file_claim_facts`.
+    ``file_request``: an auto-claim asks for that file; offline it asks for the zone, which the
+    local arbiter can decide."""
     all_zones = {str(z["id"]): z for z in [*zones, *blocking_zones]}
     if not zones and not blocking_zones:
         facts["no_zone_match"] = True
@@ -4951,7 +4996,7 @@ def _zone_facts(
             facts["shared_claim_by_others"] = True
             info.setdefault("shared_zone", cz)
     # auto-claim / parent (rows 17, 18)
-    if own:
+    if own or (file_rel is not None and (facts.get("own_claim_lease_ok") or facts.get("own_claim_lease_passed"))):
         return
     leaves = [z for z in leaf_candidates if z.get("is_leaf", True) and not z.get("protected")]
     parents = [z for z in leaf_candidates if not z.get("is_leaf", True)]
@@ -4967,7 +5012,11 @@ def _zone_facts(
         ):
             facts["unconfirmed_pending"] = True
         info.setdefault("zone", leaf)
-        info["claim_request"] = ClaimRequest(str(leaf["id"]), str(leaf.get("slug")), str(leaf.get("mode") or "exclusive"))
+        if file_rel is not None and file_request:
+            # a temporary folder zone: claim the one file, never the whole folder (it counts as the zone's area)
+            info["claim_request"] = ClaimRequest(None, None, "exclusive", path_glob=file_rel)
+        else:
+            info["claim_request"] = ClaimRequest(str(leaf["id"]), str(leaf.get("slug")), str(leaf.get("mode") or "exclusive"))
     elif parents:
         facts["parent_zone_unclaimed"] = True
         info.setdefault("zone", parents[0])
@@ -5137,6 +5186,13 @@ def _fit(text: str, channel: str, fallback: str) -> str:
     return fallback
 
 
+def _file_request(info: Mapping[str, Any]) -> str | None:
+    """The file a row-17 auto-claim asked for by itself (inside a temporary folder zone), when it is a plain path."""
+    req = info.get("claim_request")
+    glob = str(getattr(req, "path_glob", None) or "")
+    return glob if glob and SAFE_CLAIM_PATH_RE.fullmatch(glob) and ".." not in glob.split("/") else None
+
+
 def render_deny_reason(
     verdict: Verdict,
     info: Mapping[str, Any],
@@ -5275,6 +5331,10 @@ def render_deny_reason(
             f"{head}a tree-wide git operation ({op}) would change files {other} is editing in this checkout. "
             f"Work in your own worktree or ask @{other} with crew_say."
         )
+    elif rule == 17 and variant.endswith("claim_conflict") and _file_request(info):
+        winner = idx.callsign(info.get("winner")) if info.get("winner") else "another session"
+        ask = f" or ask @{winner} with crew_say" if info.get("winner") else ""
+        text = f"{head}{path} was just claimed by {winner}. Do not edit it. Work on other files{ask}."
     elif rule in (17, 19) and variant.endswith("claim_conflict"):
         if info.get("winner"):
             winner = idx.callsign(info.get("winner"))
@@ -5301,6 +5361,8 @@ def render_deny_reason(
                 f"{n_held} of your {limit}. Ask a holder to release with crew_say, or @{human} can raise "
                 f"max_exclusive_claims_per_agent, before working in zone {slug}."
             )
+    elif rule == 17 and variant.endswith("claim_required") and _file_request(info):
+        text = f'{head}{path} must be claimed first: call crew_claim(paths=["{_file_request(info)}"]).'
     elif rule in (17, 19) and variant.endswith("claim_required"):
         text = f'{head}zone {slug} must be claimed first: call crew_claim(zone="{slug}") or crew_task(action="start").'
     elif rule in (17, 19) and variant.endswith("unconfirmed_pending"):

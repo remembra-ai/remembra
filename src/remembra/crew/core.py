@@ -331,6 +331,7 @@ class CrewCore:
             "server_time": now_iso(now),
             "as_of_seq": int(crew["last_seq"] or 0),
             "etag": "",
+            "features": list(schemas.SNAPSHOT_FEATURES),
             "sessions": [views.session_view(s) for s in views.nest_sessions(sessions)],
             "claims": [views.claim_view(c, now) for c in claims],
             "zones": [views.zone_view(z) for z in zones],

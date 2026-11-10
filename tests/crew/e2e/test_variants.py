@@ -253,8 +253,16 @@ def test_e2e_g_no_zone_bootstrap(tmp_path: Path) -> None:
         assert {"pos", "reports"} <= set(zones), zones
         allowed(a.write("src/app/pos/split.ts", "export const split = 5;\n"))  # A works in its feature folder
         reason = denied(b.write("src/app/pos/split.ts", "export const split = 6;\n"))  # enforced at once
-        assert 'zone "pos"' in reason and "cc-1" in reason, reason
+        # a temporary zone is claimed file by file: A holds the file it wrote, not the whole pos folder
+        assert "src/app/pos/split.ts is claimed EXCLUSIVELY by cc-1" in reason, reason
+        allowed(b.write("src/app/pos/tender.ts", "export const tender = 'b';\n"))  # another file in the same folder
         allowed(b.write("src/app/reports/export.ts", "export const exportCsv = () => 'b';\n"))
+        claims = {(c["path_glob"], c["zone_id"]) for c in w.snapshot(crew)["claims"] if c["state"] == "active"}
+        assert claims == {
+            ("src/app/pos/split.ts", None),
+            ("src/app/pos/tender.ts", None),
+            ("src/app/reports/export.ts", None),
+        }, claims
     finally:
         w.close()
 

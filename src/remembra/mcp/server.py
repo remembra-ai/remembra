@@ -2194,7 +2194,8 @@ async def crew_claim(
     Args:
         action: claim | release | adopt | handover | accept | decline.
         zone: Zone slug (e.g. "pos") or a resource like "schema:main".
-        paths: Repo-relative paths; their zones are claimed.
+        paths: Repo-relative paths. In a declared zone the path's whole zone is claimed; in a temporary
+            zone (auto-derived from a folder) and outside every zone, each file is claimed by itself.
         mode: exclusive (default) | shared | watch.
         task: Task ref (T-14) to link or act on.
         to: For handover: the receiving session's callsign (@codex-1).

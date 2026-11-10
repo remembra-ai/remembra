@@ -1567,10 +1567,17 @@ def verify_chain(events: Iterable[Mapping[str, Any]], start_hash: str = GENESIS_
 # Snapshots and WebSocket frames (§4.4)
 # ---------------------------------------------------------------------------
 
+# What this server does beyond the 0.17.5 contract, told to the gate in the snapshot so that a newer
+# client never asks an older server for something it refuses. ``temp_zone_file_claims``: an agent
+# may claim one file inside a temporary (auto-derived) folder zone.
+FEATURE_TEMP_ZONE_FILE_CLAIMS: Final = "temp_zone_file_claims"
+SNAPSHOT_FEATURES: Final = (FEATURE_TEMP_ZONE_FILE_CLAIMS,)
+
 SNAPSHOT = Shape(
     "CrewSnapshot",
     {
         "crew": _o(CREW_VIEW),
+        "features": _l(_s(64), 32, req=False),
         "server_time": TS,
         "as_of_seq": _i(0),
         "etag": _s(80),

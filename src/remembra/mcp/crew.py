@@ -527,6 +527,20 @@ def _safe_target(value: Any) -> str | None:
     return _safe(value)
 
 
+def _temporary_file_zone(zone: Mapping[str, Any]) -> bool:
+    """A TEMPORARY zone (auto-derived from a folder, no zones.yml) where single files are claimed: the
+    server's ``claims.temporary_file_zone``. A zone a human declared, protected, froze or reserved is not."""
+    return (
+        zone.get("source") == "suggested"
+        and bool(zone.get("is_leaf", True))
+        and not zone.get("builtin")
+        and not zone.get("protected")
+        and not zone.get("reserve_for")
+        and not zone.get("frozen_by")
+        and str(zone.get("mode") or "exclusive") == "exclusive"
+    )
+
+
 def agent_text(value: Any) -> str:
     """One agent- or repo-authored value under the brief's trust policy (R-14,
     :func:`remembra.relay.handoff.police_item`): low-trust text becomes the fixed withheld note,
@@ -1353,11 +1367,23 @@ class CrewBridge:
             pass
 
     def _targets(
-        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None, data: list[str] | None = None
+        self,
+        http: CrewHttp,
+        seat: Seat,
+        zone: str | None,
+        paths: Sequence[str] | None,
+        data: list[str] | None = None,
+        *,
+        claiming: bool = False,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
         """``[(label, claim body target)]`` for a zone and/or paths; plus notes for paths that need no claim.
 
-        A path that is not one plain token is labelled ``#n`` (its place in ``paths``) and named in ``data``."""
+        A path that is not one plain token is labelled ``#n`` (its place in ``paths``) and named in ``data``.
+
+        A path inside a zone stands for that zone. ``claiming`` (a new claim) narrows that: inside a
+        TEMPORARY folder zone the path itself is the target (its ``_zone`` key keeps the zone, for a
+        server that only takes whole zones), and a path widened to a declared zone gets a note.
+        """
         targets: list[tuple[str, dict[str, Any]]] = []
         notes: list[str] = []
         if zone:
@@ -1383,9 +1409,19 @@ class CrewBridge:
                     notes.append(f"{label}: ignored by the crew, no claim needed")
                 elif hit.get("leaf_zone"):
                     z = self._zone(http, seat, str(hit["leaf_zone"]))
+                    slug = _safe(z.get("slug")) or z["id"]
+                    if claiming and _temporary_file_zone(z) and z["id"] not in seen and _safe(path):
+                        # an auto-derived folder zone: claim the file, not the whole folder
+                        targets.append((f"path {label}", {"path_glob": path, "_zone": z}))
+                        continue
+                    if claiming and z["id"] not in seen:
+                        kind = "zone" if z.get("source") == "suggested" else "declared zone"
+                        notes.append(
+                            f"{label}: inside {kind} {slug}: the whole zone is claimed (its files are claimed through the zone)"
+                        )
                     if z["id"] not in seen:
                         seen.add(z["id"])
-                        targets.append((f"zone {_safe(z.get('slug')) or z['id']}", {"zone_id": z["id"]}))
+                        targets.append((f"zone {slug}", {"zone_id": z["id"]}))
                 elif hit.get("zones"):
                     notes.append(f'{label}: only in a parent zone; claim it with a task (crew_task action="start")')
                 elif hit.get("commons"):
@@ -1414,16 +1450,20 @@ class CrewBridge:
             got = [self._claim_label(http, seat, c) for c in (claimed or {}).get("claims") or []]
             return f"GRANTED {task_ref(task_row)}: " + (", ".join(got) if got else "claimed (the task has no zones)")
         data: list[str] = []
-        targets, notes = self._targets(http, seat, zone, paths, data)
+        targets, notes = self._targets(http, seat, zone, paths, data, claiming=True)
         if not targets:
             if notes:
                 return join_text(["NOTHING TO CLAIM:", *[f"- {n}" for n in notes]], data)
             raise CrewUsageError('Name what to claim: zone="pos", paths=["src/app/pos/cart.ts"] or task="T-14".')
         lines: list[str] = []
         granted = capped = 0
-        for label, target in targets:
+        widened: dict[str, list[str]] = {}  # zone id -> the paths a whole-zone-only server widened to it
+        queue = list(targets)
+        while queue:
+            label, target = queue.pop(0)
+            fallback = target.get("_zone")
             body: dict[str, Any] = {
-                **target,
+                **{k: v for k, v in target.items() if k != "_zone"},
                 "mode": mode,
                 "wait": wait_s > 0,
                 "source": "mcp",
@@ -1444,6 +1484,13 @@ class CrewBridge:
                     timeout=(wait_s + HTTP_GRACE_S) if wait_s > 0 else None,
                 )
             except CrewApiError as e:
+                if e.status == 422 and e.error == "zone_path" and isinstance(fallback, dict):
+                    # a server before file claims in temporary zones (0.17.5): the zone is claimed, as it always was
+                    zid = str(fallback["id"])
+                    if zid not in widened:
+                        queue.insert(0, (f"zone {_safe(fallback.get('slug')) or zid}", {"zone_id": zid}))
+                    widened.setdefault(zid, []).append(label.removeprefix("path "))
+                    continue
                 capped += 1 if e.status == 409 and e.error == "claim_cap" else 0
                 lines.append(self._refused(http, seat, label, e, data))
                 continue
@@ -1463,6 +1510,11 @@ class CrewBridge:
                 )
             else:
                 lines.append(f"{str(state or status).upper()} {label} ({claim.get('id')})")
+        for zid, asked in widened.items():
+            notes.append(
+                f"{', '.join(asked[:5])}: this server claims whole zones only: all of zone "
+                f"{self._zone_label(http, seat, zid)} is now yours, or refused as shown above"
+            )
         if capped and len(targets) > 1:
             lines.append(
                 f"PARTIAL: {granted} of {len(targets)} granted; the rest hit a claim limit (see above). "
@@ -1478,7 +1530,22 @@ class CrewBridge:
         holder = _safe(b.get("holder_callsign")) or self._callsign(http, seat, b.get("holder_session_id")) or "another session"
         task = task_ref(self._task_by_id(http, seat, b.get("task_id"))) if b.get("task_id") else None
         why = _safe(b.get("reason")) or "held"
-        return f"{why} by {holder}" + (f" for {task}" if task else "")
+        what = self._blocking_target(http, seat, b.get("claim_id"))
+        return f"{why} by {holder}" + (f" ({what})" if what else "") + (f" for {task}" if task else "")
+
+    def _blocking_target(self, http: CrewHttp, seat: Seat, claim_id: Any) -> str | None:
+        """``zone api`` / ``path lib/a.ts``: what the blocking claim is on (a blocker row carries no path)."""
+        try:
+            claim = next((c for c in self._claims(http, seat) if c.get("id") == claim_id), None) if claim_id else None
+        except CrewApiError:
+            return None
+        return self._target_of(http, seat, claim) if claim else None
+
+    def _target_of(self, http: CrewHttp, seat: Seat, claim: Mapping[str, Any]) -> str | None:
+        if claim.get("zone_id"):
+            return f"zone {self._zone_label(http, seat, claim['zone_id'])}"
+        path = _safe(claim.get("path_glob"))
+        return f"path {path}" if path else _safe(claim.get("resource"))
 
     def _refused(self, http: CrewHttp, seat: Seat, label: str, e: CrewApiError, data: list[str]) -> str:
         blockers = e.body.get("blockers") or []
@@ -1494,10 +1561,18 @@ class CrewBridge:
             reason = str(b.get("reason") or "")
             if holder:
                 how = "RESERVED for the next pickup" if "reserved" in reason else "held EXCLUSIVELY"
-                return (
-                    f"REFUSED: {label} {how} by {holder}" + (f" for {ref}" if ref else "") + ". "
-                    f'Work elsewhere or crew_say(to="@{holder}", kind="request_release").'
-                )
+                ask = f'Work elsewhere or crew_say(to="@{holder}", kind="request_release").'
+                tail = f" for {ref}" if ref else ""
+                # say what the blocker really holds: one file inside the zone asked for, or the whole zone
+                # around the file asked for, is not "the zone/the path held by" that session
+                held = e.body.get("claim") if isinstance(e.body.get("claim"), dict) else None
+                what = self._target_of(http, seat, held) if held else self._blocking_target(http, seat, b.get("claim_id"))
+                if what and what != label and label.startswith("zone ") and what.startswith("path "):
+                    kind = "reserved for the next pickup" if "reserved" in reason else "exclusive"
+                    return f"REFUSED: {label}: {holder} holds {what} inside it ({kind}){tail}. {ask}"
+                if what and what != label and label.startswith("path ") and what.startswith("zone "):
+                    return f"REFUSED: {label}: the whole {what} is {how} by {holder}{tail}. {ask}"
+                return f"REFUSED: {label} {how} by {holder}{tail}. {ask}"
             return f"REFUSED: {label} is held by a human or reserved. Work elsewhere or ask @mani with crew_say."
         if e.status == 423:
             return f"REFUSED: {label}: {e.message} Work elsewhere or ask @mani with crew_say."

@@ -838,13 +838,56 @@ class SqlTaskClaims:
                         "reason": reason,
                     }
                 )
+        # a file claim another session holds inside a zone (a temporary folder zone is claimed file by file,
+        # and a path claim can predate its zone) blocks the whole-zone claim like a claim on the zone would
+        inside: str | None = None
+        if zones and mode != "watch":
+            from remembra.crew import policy as P
+
+            files = await fetchall(
+                conn,
+                "SELECT c.*, s.callsign AS holder_callsign FROM crew_claims c"
+                " LEFT JOIN crew_sessions s ON s.id = c.holder_session_id"
+                " WHERE c.crew_id = ? AND c.zone_id IS NULL AND c.path_glob IS NOT NULL"
+                " AND c.state IN ('active','offered','reserved') ORDER BY c.created_at",
+                (crew_id,),
+            )
+            for c in files:
+                if c["holder_kind"] == "session" and c["holder_session_id"] == sid:
+                    continue
+                if c["state"] != "reserved" and (c["mode"] == "watch" or (mode == "shared" and c["mode"] == "shared")):
+                    continue
+                hit = next(
+                    (
+                        z
+                        for z in zones
+                        if P.any_overlap([str(g) for g in loads(z.get("include_globs"), []) or []], [c["path_glob"]])
+                    ),
+                    None,
+                )
+                if hit is None:
+                    continue
+                if not blockers:
+                    who = c.get("holder_callsign") or "a human"
+                    inside = f"{who} holds {c['path_glob']} inside zone {hit['slug']}"
+                blockers.append(
+                    {
+                        "claim_id": c["id"],
+                        "zone_id": None,
+                        "holder_session_id": c.get("holder_session_id"),
+                        "holder_callsign": c.get("holder_callsign"),
+                        "task_id": c.get("task_id"),
+                        "reason": "reserved" if c["state"] == "reserved" else f"{c['mode']}_held",
+                    }
+                )
         if blockers:
             first = blockers[0]
             who = first.get("holder_callsign") or "a human"
+            what = inside or f"Zone {first['zone_id']} is held by {who}"
             raise _err(
                 409,
                 "conflict",
-                f"Zone {first['zone_id']} is held by {who}; the task's zones are claimed all or nothing.",
+                f"{what}; the task's zones are claimed all or nothing.",
                 blockers=blockers[:10],
             )
 

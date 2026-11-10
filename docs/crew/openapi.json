@@ -2158,6 +2158,14 @@
             "maxLength": 80,
             "type": "string"
           },
+          "features": {
+            "items": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
           "footprints": {
             "items": {
               "$ref": "#/components/schemas/FootprintView"
@@ -4258,6 +4266,14 @@
           "etag": {
             "maxLength": 80,
             "type": "string"
+          },
+          "features": {
+            "items": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
           },
           "footprints": {
             "items": {
