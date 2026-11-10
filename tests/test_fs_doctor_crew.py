@@ -140,7 +140,7 @@ def test_the_fixture_is_crew_mode_as_the_product_writes_it(crew_home: FakeHome) 
     assert claude["SessionEnd"][0].endswith("end --hook claude-code --agent claude-code # remembra-crew")
     assert not [c for cs in claude.values() for c in cs if "remembra-relay" in c]  # crew connect took them out
     codex = hook_commands(crew_home.home / ".codex" / "hooks.json")
-    assert sum(len(cs) for cs in codex.values()) == 6 and not [c for cs in codex.values() for c in cs if "remembra-relay" in c]
+    assert sum(len(cs) for cs in codex.values()) == 7 and not [c for cs in codex.values() for c in cs if "remembra-relay" in c]
 
 
 def test_crew_hooks_count_as_hooks(crew_home: FakeHome) -> None:
@@ -347,7 +347,7 @@ def test_untrusted_crew_hooks_in_codex_are_found(crew_home: FakeHome) -> None:
     config.write_text(config.read_text().split("\n[hooks.state.")[0])
     report = run(crew_home)
     f = only(report, "CODEX_TRUST_MISSING", "codex")
-    assert f.severity == "blocker" and any("6 remembra-crew hooks" in e for e in f.evidence)
+    assert f.severity == "blocker" and any("7 remembra-crew hooks" in e for e in f.evidence)
     assert "trust NOT recorded" in report.text(Style())
 
 
