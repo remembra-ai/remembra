@@ -638,6 +638,11 @@ class CrewBridge:
             project = self._current.get(scope)
             return self._seats.get(scope, {}).get(project) if project else None
 
+    def seat_in(self, caller: CallerInfo, project_id: str) -> Seat | None:
+        """This MCP session's seat in ``project_id`` (None when it never joined that project's crew)."""
+        with self._lock:
+            return self._seats.get((caller.fingerprint, caller.client_session_id), {}).get(project_id)
+
     def _remember(self, seat: Seat) -> None:
         with self._lock:
             if seat.scope not in self._seats and len(self._seats) >= MAX_SCOPES:
@@ -770,8 +775,22 @@ class CrewBridge:
         project_id: str | None = None,
         checkout: Mapping[str, Any] | None = None,
     ) -> tuple[Seat, dict[str, Any] | None]:
-        """:meth:`_seat`, remembering the seat's project for :meth:`used_project`."""
+        """:meth:`_seat`, remembering the seat's project for :meth:`used_project`.
+
+        A project named by one call (``caller.call_project``) is used for that call only: the session's
+        current project, which later calls without a project follow, is left as it was.
+        """
+        call_only = bool(caller.call_project) and not project_id
+        scope = (caller.fingerprint, caller.client_session_id)
+        with self._lock:
+            before = self._current.get(scope)
         seat, joined = self._seat(caller, project_id or caller.call_project, checkout)
+        if call_only:
+            with self._lock:
+                if before is None:
+                    self._current.pop(scope, None)
+                else:
+                    self._current[scope] = before
         self._used.project = seat.project_id
         return seat, joined
 

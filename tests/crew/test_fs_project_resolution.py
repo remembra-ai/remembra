@@ -160,7 +160,7 @@ def test_stdio_single_namespace_opt_in_files_a_locator_less_close_there(live, st
     use(live, "codex", "sess-single-close", configured, monkeypatch)
     monkeypatch.setenv("REMEMBRA_RELAY_PROJECT", single)
     out = as_json(call("close_session", facts={"branch": "main"}))
-    assert out["status"] == "ok" and out["project_id"] == single and out["project_source"] == "named", out
+    assert out["status"] == "ok" and out["project_id"] == single and out["project_source"] == "relay-project", out
     assert handoff_of(live, configured) is None
 
 
@@ -233,9 +233,10 @@ def test_a_call_naming_its_project_writes_there_whatever_another_conversation_br
     assert out.rstrip().endswith(f"(project {mine})"), out
     assert any("Batch 8 is live" in body for body in messages(live, mine))
     assert crews(live, theirs) == []
-    # without a project the call follows the latest choice of this MCP session, and says which that is
+    # the named call moved nothing: without a project the next call follows what the session chose (the
+    # brief), and says which project that is
     again = call("crew_say", body="second note", kind="note")
-    assert again.rstrip().endswith(f"(project {mine})"), again
+    assert again.rstrip().endswith(f"(project {theirs})"), again
 
 
 def test_a_call_naming_its_folder_resolves_the_project_like_session_brief(live, stdio, monkeypatch, tmp_path):
@@ -428,3 +429,183 @@ def test_the_mcp_client_sends_a_url_an_older_server_reads(mcp_env):
     assert locator is not None and locator["git_remote"] == "https://github.com/acme/widget"
     locator, _ = server._locator(git_remote="git@github.com:Acme/Widget.git", root_path=None)
     assert locator is not None and locator["git_remote"] == "git@github.com:Acme/Widget.git"
+
+
+# ---------------------------------------------------------------------------
+# Review round: a folder is not a way back to the configured project, a call's project stays
+# with that call, and close_session says how it found its project
+# ---------------------------------------------------------------------------
+
+
+def test_stdio_crew_call_from_a_plain_or_missing_folder_does_not_write_to_the_configured_project(
+    live, stdio, monkeypatch, tmp_path
+):
+    """root_path on a folder that is not a repository resolved through the hint to REMEMBRA_PROJECT."""
+    configured = project_name("cfg")
+    use(live, "claude-desktop", "sess-plain", configured, monkeypatch)
+    plain = tmp_path / "back-to-hello-import"
+    plain.mkdir()
+    for folder in (plain, tmp_path / "does-not-exist"):
+        out = call("crew_say", body="deploy note from a folder", root_path=str(folder))
+        assert out.startswith("CREW: ") and "not a git repository" in out, out
+        assert "project_id" in out and configured in out and "(project" not in out, out
+    checkpoint = call("crew_checkpoint", files_changed=["a.md"], root_path=str(plain))
+    assert checkpoint.startswith("CREW: ") and "not a git repository" in checkpoint, checkpoint
+    assert messages(live, configured) == [] and sessions(live, configured) == []
+    closed = as_json(call("close_session", summary="Portal fixes", facts={"branch": "main"}, root_path=str(plain)))
+    assert closed["status"] == "error" and "not a git repository" in closed["error"], closed
+    assert "project_id" in closed["error"] and configured in closed["error"], closed
+    assert handoff_of(live, configured) is None
+    # nothing was chosen by the refused calls either
+    assert call("crew_say", body="still nowhere").startswith("CREW: No project yet")
+
+
+def test_stdio_plain_folder_works_once_the_agent_chose_that_project(live, stdio, monkeypatch, tmp_path):
+    """session_brief showed the agent which project the folder gets: the same folder then works on a call."""
+    configured = project_name("cfg")
+    use(live, "claude-desktop", "sess-plain-chosen", configured, monkeypatch)
+    plain = tmp_path / "notes-folder"
+    plain.mkdir()
+    assert as_json(call("session_brief", root_path=str(plain), compact=True))["project_id"] == configured
+    out = call("crew_say", body="note from the folder", root_path=str(plain))
+    assert out.startswith("SENT msg_") and out.rstrip().endswith(f"(project {configured})"), out
+    closed = as_json(call("close_session", facts={"branch": "main"}, root_path=str(plain)))
+    assert closed["status"] == "ok" and closed["project_id"] == configured, closed
+    assert closed["project_source"] in ("hint", "known"), closed
+
+
+def test_plain_folder_keeps_the_hint_for_one_namespace_and_off_stdio(live, mcp_env, monkeypatch, tmp_path):
+    plain = tmp_path / "scratch"
+    plain.mkdir()
+    # a remote transport's caller selected the project per request: unchanged
+    selected = project_name("selected")
+    use(live, "chatgpt", "sess-plain-remote", selected, monkeypatch)
+    out = call("crew_say", body="remote note", root_path=str(plain))
+    assert out.startswith("SENT msg_") and "remote note" in messages(live, selected), out
+    # REMEMBRA_RELAY_PROJECT: one namespace by choice, on a stdio server too
+    monkeypatch.setattr(server, "_STDIO_SERVER", True, raising=False)
+    monkeypatch.setattr(server, "_crew", CrewBridge())
+    single = project_name("single")
+    use(live, "codex", "sess-plain-single", project_name("cfg"), monkeypatch)
+    monkeypatch.setenv("REMEMBRA_RELAY_PROJECT", single)
+    out = call("crew_say", body="single note", root_path=str(plain))
+    assert out.startswith("SENT msg_") and out.rstrip().endswith(f"(project {single})"), out
+
+
+def test_a_call_naming_its_project_does_not_move_the_session(live, stdio, monkeypatch):
+    """One process, two conversations: B's named call must not re-point A's store, inbox, crew calls or close."""
+    configured, a, b = project_name("cfg"), project_name("conva"), project_name("convb")
+    use(live, "claude-desktop", "sess-callonly", configured, monkeypatch)
+    assert as_json(call("session_brief", project_id=a, compact=True))["project_id"] == a
+    named = call("crew_say", body="B's note", kind="note", project_id=b)
+    assert named.startswith("SENT msg_") and named.rstrip().endswith(f"(project {b})"), named
+    # a named call that fails moves nothing either
+    failed = call("crew_claim", zone="nonexistent-zone", project_id=b)
+    assert "Unknown zone" in failed and failed.rstrip().endswith(f"(project {b})"), failed
+    stored = as_json(call("store_memory", content="Conversation A decided to keep server actions."))
+    assert stored["project_id"] == a, stored
+    sent = as_json(call("send_to_inbox", to_agent="codex", subject="s", body="A says hi"))
+    assert sent["project_id"] == a, sent
+    mine = call("crew_say", body="A's note", kind="note")
+    assert mine.rstrip().endswith(f"(project {a})"), mine
+    assert messages(live, a) == ["A's note"] and messages(live, b) == ["B's note"]
+    closed = as_json(call("close_session", summary="A done", facts={"branch": "main"}))
+    assert (closed["status"], closed["project_id"], closed["project_source"]) == ("ok", a, "remembered"), closed
+    assert handoff_of(live, a) is not None and handoff_of(live, b) is None
+
+
+def test_a_named_call_with_nothing_chosen_leaves_nothing_chosen_and_a_named_close_ends_its_seat(live, stdio, monkeypatch):
+    configured, b = project_name("cfg"), project_name("named")
+    use(live, "claude-desktop", "sess-named-close", configured, monkeypatch)
+    assert call("crew_say", body="one note", project_id=b).rstrip().endswith(f"(project {b})")
+    assert call("crew_say", body="no project").startswith("CREW: No project yet")
+    assert as_json(call("close_session", facts={"branch": "main"}))["status"] == "error"
+    closed = as_json(call("close_session", facts={"branch": "main"}, project_id=b))
+    assert (closed["status"], closed["project_id"], closed["project_source"]) == ("ok", b, "named"), closed
+    # the close ended the crew session the named call opened in that project
+    assert closed["crew"]["session_left"] is True, closed
+    assert [r["state"] for r in sessions(live, b)] == ["ended"], sessions(live, b)
+    assert handoff_of(live, configured) is None
+
+
+def test_a_crew_status_that_fails_does_not_move_the_session(live, stdio, monkeypatch):
+    configured, a, b = project_name("cfg"), project_name("conva"), project_name("convb")
+    use(live, "", "sess-status-fails", configured, monkeypatch)
+    assert as_json(call("session_brief", project_id=a, compact=True))["project_id"] == a
+    out = call("crew_status", project_id=b)
+    assert out.startswith("CREW: Crew mode needs this agent's id"), out
+    stored = as_json(call("store_memory", content="The importer keeps its own retry queue."))
+    assert stored["project_id"] == a, stored
+
+
+def test_close_session_says_how_it_found_its_project(live, mcp_env, monkeypatch):
+    # off stdio the caller's configured project is still the default, and the result says so
+    selected = project_name("selected")
+    use(live, "chatgpt", "sess-source-remote", selected, monkeypatch)
+    closed = as_json(call("close_session", facts={"branch": "main"}))
+    assert (closed["project_id"], closed["project_source"]) == (selected, "configured"), closed
+    # the crew seat, when the brief's memory is gone
+    monkeypatch.setattr(server, "_STDIO_SERVER", True, raising=False)
+    monkeypatch.setattr(server, "_crew", CrewBridge())
+    seat = project_name("seat")
+    use(live, "claude-desktop", "sess-source-seat", project_name("cfg"), monkeypatch)
+    assert call("crew_status", project_id=seat).startswith(f"CREW {seat} ")
+    remembered = as_json(call("close_session", facts={"branch": "main"}))
+    assert (remembered["project_id"], remembered["project_source"]) == (seat, "remembered"), remembered
+    monkeypatch.setattr(server, "_crew", CrewBridge())
+    use(live, "claude-desktop", "sess-source-seat2", project_name("cfg"), monkeypatch)
+    assert call("crew_status", project_id=seat).startswith(f"CREW {seat} ")
+    server._session_projects.clear()
+    by_seat = as_json(call("close_session", facts={"branch": "main"}))
+    assert (by_seat["project_id"], by_seat["project_source"]) == (seat, "crew-seat"), by_seat
+
+
+def test_a_refused_call_does_not_echo_its_argument_values(live, stdio, monkeypatch):
+    configured = project_name("cfg")
+    use(live, "claude-desktop", "sess-noecho", configured, monkeypatch)
+    with pytest.raises(ToolError) as unknown:
+        call("store_memory", content="private note: door code 4417 for the client site", bogus=1)
+    text = str(unknown.value)
+    assert "'bogus'" in text and "content" in text, text
+    assert "4417" not in text and "private note" not in text and "input_value" not in text, text
+    with pytest.raises(ToolError) as wrong_type:
+        call("crew_say", body="the vault code is 4417", project_id=["a"])
+    assert "project_id" in str(wrong_type.value) and "4417" not in str(wrong_type.value), str(wrong_type.value)
+
+
+def test_store_memory_reads_a_project_alias_like_every_other_tool(live, stdio, monkeypatch):
+    target = project_name("aliased")
+    use(live, "claude-code", "sess-alias", project_name("cfg"), monkeypatch)
+    monkeypatch.setattr(server, "REMEMBRA_PROJECT_ALIASES", {"oldname": target})
+    stored = as_json(call("store_memory", content="The alias points at the renamed project.", project_id="oldname"))
+    assert stored["status"] == "stored" and stored["project_id"] == target, stored
+
+
+@pytest.mark.asyncio
+async def test_stdio_close_with_nothing_chosen_uses_the_agents_crew_hook_session(live, stdio, monkeypatch, tmp_path):
+    """Claude Code's usual flow: the hooks brief the agent, it never calls session_brief or a crew tool
+    over MCP, and closes with only a summary. A real crewd answers whoami for this process."""
+    import os
+
+    from tests.crew.test_wp9_gate import _start_crewd
+    from tests.crew.wp9_support import crew_server, make_repo, peer
+
+    configured = project_name("cfg")
+    repo = make_repo(tmp_path / "repo")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv)
+        monkeypatch.setenv("HOME", str(layout.home))
+        joined = await d.join(
+            peer(me), {"adapter": "claude-code", "client_session_id": "sess-hook", "cwd": str(repo), "agent_pid": me}
+        )
+        hook_project = (await asyncio.to_thread(server.local_crew)).who["project_id"]
+        assert hook_project and hook_project != configured, joined
+        use(live, "claude-code", "sess-hook-close", configured, monkeypatch)
+        # the hook session is consulted only by a server running on the agent's machine
+        off = as_json(await asyncio.to_thread(call, "close_session", summary="done", facts={"branch": "main"}))
+        assert off["status"] == "error", off
+        monkeypatch.setattr(server, "_LOCAL_CREW", True)
+        closed = as_json(await asyncio.to_thread(call, "close_session", summary="done", facts={"branch": "main"}))
+    assert (closed["status"], closed["project_id"], closed["project_source"]) == ("ok", hook_project, "crew-seat"), closed
+    assert handoff_of(live, hook_project) is not None and handoff_of(live, configured) is None

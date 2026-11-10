@@ -15,11 +15,13 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 | `crew_report` | `task` (required), `sections` (required: `done not_done failing next follow_ups`), `criteria_evidence?`, `commits?`, `tests?`, `summary?`, `release=true`, `project_id?`, `root_path?` | verdict, `accepted`/`review`, unmet criteria (MCP evidence is `agent-declared`) |
 
 **Which project a call acts in.** `project_id` (or `root_path`, the repository checkout, resolved
-read-only like `session_brief`) on any tool names the project for that call and becomes this MCP
-session's choice; without it the call follows the latest choice (`session_brief`, `crew_status` or
-an earlier call), else the agent's crew-hook session. A local stdio server never falls back to the
-configured `REMEMBRA_PROJECT` on its own (only `REMEMBRA_RELAY_PROJECT`, the one-namespace opt-in,
-is a default): with no project chosen the tool answers `CREW: No project yet …`. On a stdio server
+read-only like `session_brief`) on one of these tools names the project for that call only; it does
+not change what later calls default to. Without it the call follows the latest project this MCP
+session chose with `session_brief` or `crew_status`, else the agent's crew-hook session. A local
+stdio server does not fall back to the configured `REMEMBRA_PROJECT` on its own (only
+`REMEMBRA_RELAY_PROJECT`, the one-namespace opt-in, is a default): with no project chosen the tool
+answers `CREW: No project yet …`, and a `root_path` that is not a git repository and is bound to no
+project is refused unless the session already chose the configured project. On a stdio server
 every result but `crew_status`'s ends with `(project <id>)`, the project the call used. An argument
 a tool does not have is refused with the list of the ones it takes.
 

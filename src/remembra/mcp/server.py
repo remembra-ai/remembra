@@ -47,7 +47,7 @@ from typing import Any, Literal, cast
 import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import create_model, model_validator
+from pydantic import ConfigDict, create_model, model_validator
 
 from remembra import __version__
 from remembra.client.memory import Memory, MemoryError
@@ -62,6 +62,7 @@ from remembra.mcp.crew import (
     CrewUsageError,
     clean_client_session_id,
     hook_adapter_of,
+    local_crew,
 )
 from remembra.mcp.crew import error_text as crew_error_text
 from remembra.relay.identity import canonical_git_remote
@@ -451,7 +452,9 @@ def store_memory(
 
         client = _get_client()
         # This call's project, else the one this session's session_brief / crew_status resolved.
-        target = project_id.strip() if isinstance(project_id, str) and project_id.strip() else None
+        target = None
+        if isinstance(project_id, str) and project_id.strip():
+            target = normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
         target = target or _session_project().get("project_id")
         stored_in = client._project(target)
         result = client.store(
@@ -1031,8 +1034,11 @@ def close_session(
 
     Returns:
         JSON with handoff_id, project_id (where the handoff was filed), project_source
-        (how a location was resolved: known, derived, adopted, hint = the configured
-        project), headline, the rendered handoff and grounding verdict.
+        (named = project_id on this call; known, derived, adopted or hint = how the
+        location on this call was resolved, hint being the configured project;
+        remembered = from an earlier session_brief or crew_status; crew-seat = your
+        crew session's; relay-project = REMEMBRA_RELAY_PROJECT; configured = the
+        caller's default project), headline, the rendered handoff and grounding verdict.
     """
     try:
         client = _get_client()
@@ -1045,22 +1051,35 @@ def close_session(
         if errors:
             merged["errors"] = list(merged.get("errors") or []) + list(errors)
         locator = None
+        # how the project was found: named on this call, a location on this call (then the server's
+        # resolution source), or inherited: remembered / crew-seat / relay-project / configured
+        origin: str | None = "named" if project_id else None
         if not project_id:
             locator, _ = _locator(git_remote=git_remote, root_path=root_path)
-            if locator is None:
+            if locator is not None:
+                refused = _folder_fallback_refusal(client, locator, root_path, _session_project().get("project_id"))
+                if refused:
+                    return json.dumps({"status": "error", "error": refused})
+            else:
                 remembered = _session_project()
                 locator = remembered.get("locator")
                 project_id = None if locator else remembered.get("project_id")
-        seat = _crew_seat_for_close()
+                origin = "remembered" if (locator or project_id) else None
+        seat = _crew_seat_for_close(project_id)
         if not project_id and locator is None:
-            # Nothing names a project: the handoff belongs with this session's crew seat. Without one
-            # a stdio server does not guess (REMEMBRA_PROJECT took other repositories' handoffs).
+            # Nothing names a project: the handoff belongs with this session's crew seat, else with the
+            # agent's crew-hook session on this machine. Without either a stdio server does not guess
+            # (REMEMBRA_PROJECT took other repositories' handoffs).
             if seat is not None:
-                project_id = seat.project_id
+                project_id, origin = seat.project_id, "crew-seat"
+            elif _LOCAL_CREW and (hooked := local_crew()) is not None and hooked.who.get("project_id"):
+                project_id, origin = str(hooked.who["project_id"]), "crew-seat"
             elif _STDIO_SERVER:
-                project_id = _single_namespace()  # REMEMBRA_RELAY_PROJECT: one namespace, by choice
+                project_id, origin = _single_namespace(), "relay-project"  # one namespace, by choice
                 if not project_id:
                     return json.dumps({"status": "error", "error": _no_project_text("close_session", client)})
+            else:
+                origin = "configured"
         if seat is None:
             result = client.close_session(
                 facts=merged,
@@ -1086,7 +1105,7 @@ def close_session(
             "status": "ok",
             "handoff_id": result.get("handoff_id"),
             "project_id": result.get("project_id"),
-            "project_source": (result.get("resolution") or {}).get("source") if locator else "named",
+            "project_source": origin or (result.get("resolution") or {}).get("source"),
             "changed": result.get("changed"),
             "headline": result.get("headline"),
             "grounding": result.get("grounding"),
@@ -1101,7 +1120,7 @@ def close_session(
                 "tasks_stalled": len(crew.get("tasks_stalled") or []),
             }
             if crew.get("session_left"):
-                _crew_mark_left()
+                _crew_mark_left(seat)
         return _dump(out)
     except Exception as e:
         return _error(e)
@@ -1120,19 +1139,63 @@ def _no_project_text(tool: str, client: Memory) -> str:
     return text
 
 
-def _crew_seat_for_close() -> Any:
-    """This MCP session's live crew seat, so the close also ends the crew session (§6 relay close)."""
+def _folder_fallback_refusal(client: Memory, locator: dict[str, Any], root_path: str | None, chosen: str | None) -> str | None:
+    """Why a stdio server will not write for this location, or None when it may.
+
+    A folder that is not a git repository and is bound to no project resolves through the hint to the
+    configured REMEMBRA_PROJECT. That is fine in a brief the agent reads, but a write would land there
+    unseen, so it is refused unless the agent already chose that project (session_brief / crew_status)
+    or REMEMBRA_RELAY_PROJECT keeps one namespace. Resolved read-only, as the brief does.
+    """
+    if not _STDIO_SERVER or locator.get("git_repo") is True or _single_namespace():
+        return None
+    brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
+    return _hint_refusal(brief, root_path, chosen)
+
+
+def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | None) -> str | None:
+    resolved = str(brief.get("project_id") or "")
+    source = (brief.get("resolution") or {}).get("source")
+    if not _STDIO_SERVER or source != "hint" or not resolved or resolved == chosen or _single_namespace():
+        return None
+    where = repr(str(root_path)[:200]) if root_path else "This location"
+    return (
+        f"{where} is not a git repository and is not bound to a project, so only the configured project "
+        f"'{resolved}' would take this and it is not used on its own: pass project_id='{resolved}' to work "
+        "there, or the project_id you mean, or root_path=<your repository checkout>."
+    )
+
+
+def _crew_seat_for_close(project_id: str | None = None) -> Any:
+    """This MCP session's live crew seat, so the close also ends the crew session (§6 relay close).
+
+    A close that names its project ends the seat this session holds in that project, when it has one
+    (a call that named the project opened it); otherwise the session's current seat, as before.
+    """
     try:
         caller = _crew_caller()
+        project = _named_project(project_id)
+        named = _crew.seat_in(caller, project) if project else None
     except Exception:
         return None
-    seat = _crew.seat_for_scope(caller)
+    seat = named if named is not None and not named.left else _crew.seat_for_scope(caller)
     return seat if seat is not None and not seat.left else None
 
 
-def _crew_mark_left() -> None:
+def _named_project(project_id: str | None) -> str | None:
+    if not isinstance(project_id, str) or not project_id.strip():
+        return None
+    return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
+
+
+def _crew_mark_left(seat: Any = None) -> None:
     try:
-        _crew.mark_left(_crew_caller())
+        if seat is None:
+            _crew.mark_left(_crew_caller())
+            return
+        with seat.lock:
+            seat.left = True
+            seat.pending.clear()
     except Exception:
         return
 
@@ -2150,9 +2213,10 @@ async def _run_crew(
     """Validate against the §7 contract, then run ``fn(caller)`` in a worker thread.
 
     A call that names its project (``project_id`` or ``root_path`` in ``args``) runs in that project,
-    whatever this MCP session used before, and that project becomes the session's choice. On a stdio
-    server, where one process may serve several conversations, every result but crew_status's (its
-    header names the crew) ends with ``(project <id>)``: where the call wrote.
+    whatever this MCP session used before, and for that call only: one process may serve several
+    conversations, so only session_brief and crew_status move what later calls default to. On a stdio
+    server every result but crew_status's (its header names the crew) ends with ``(project <id>)``:
+    where the call wrote.
     """
     errors = crew_schemas.validate_mcp_call(tool, {k: v for k, v in args.items() if v is not None})
     if errors:
@@ -2161,13 +2225,11 @@ async def _run_crew(
     path_arg = str(args.get("root_path") or "").strip()
     named = tool != "crew_status" and bool(project_arg or path_arg)
 
-    def work(who: CallerInfo) -> tuple[str, str | None, dict[str, Any] | None]:
-        chosen: str | None = None
-        locator: dict[str, Any] | None = None
+    def work(who: CallerInfo) -> str:
         _crew.begin_call()
         try:
             if named:
-                chosen, locator = _call_project(who.client, project_arg, path_arg)
+                chosen = _call_project(who.client, project_arg, path_arg, who.chosen_project)
                 who = dataclasses.replace(who, call_project=chosen)
             out = str(fn(who))
         except Exception as e:  # every failure is answered as text; the agent keeps working
@@ -2175,28 +2237,32 @@ async def _run_crew(
         used = _crew.used_project()
         if used and _STDIO_SERVER and tool != "crew_status":
             out = f"{out}\n(project {used})"
-        return out, chosen, locator
+        return out
 
     try:
         who = caller or _crew_caller()
-        out, chosen, locator = await anyio.to_thread.run_sync(functools.partial(work, who))
-        if chosen:
-            _remember_session_project(chosen, locator)
-        return out
+        return str(await anyio.to_thread.run_sync(functools.partial(work, who)))
     except Exception as e:
         return _crew_error(e)
 
 
-def _call_project(client: Memory, project_id: str, root_path: str) -> tuple[str, dict[str, Any] | None]:
-    """The project one crew call named: its ``project_id``, else ``root_path`` resolved read-only (as the brief does)."""
+def _call_project(client: Memory, project_id: str, root_path: str, chosen: str | None = None) -> str:
+    """The project one crew call named: its ``project_id``, else ``root_path`` resolved read-only (as the brief does).
+
+    On a stdio server a ``root_path`` that only the configured project would take (a folder that is not a
+    repository, or does not exist) is refused unless ``chosen``, the session's project, is that project.
+    """
     if project_id:
-        return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES), None
+        return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
     locator, _ = _locator(git_remote=None, root_path=root_path)
     brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
     resolved = brief.get("project_id")
     if not resolved:
         raise CrewUsageError("root_path did not resolve to a project: pass project_id instead.")
-    return str(resolved), locator
+    refused = _hint_refusal(brief, root_path, chosen)
+    if refused:
+        raise CrewUsageError(refused)
+    return str(resolved)
 
 
 def _crew_project(
@@ -2206,10 +2272,7 @@ def _crew_project(
     client = _get_client()
     locator, checkout = _locator(git_remote=git_remote, root_path=root_path)
     if project_id:
-        chosen = normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES)
-        # close_session, store_memory and send_to_inbox follow this choice too, not only the crew tools
-        _remember_session_project(chosen, None)
-        return chosen, checkout, client
+        return normalize_project_id(project_id, REMEMBRA_PROJECT_ALIASES), checkout, client
     if locator:
         brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
         resolved = brief.get("project_id")
@@ -2253,12 +2316,19 @@ async def crew_status(
         caller = _crew_caller()
     except Exception as e:
         return _crew_error(e)
-    return await _run_crew(
-        "crew_status",
-        args,
-        lambda who: _crew.status(who, project_id=project, checkout=checkout, verbose=verbose),
-        caller,
-    )
+    answered: list[bool] = []
+
+    def status(who: CallerInfo) -> str:
+        out = _crew.status(who, project_id=project, checkout=checkout, verbose=verbose)
+        answered.append(True)
+        return out
+
+    out = await _run_crew("crew_status", args, status, caller)
+    if answered and project_id and project:
+        # close_session, store_memory and send_to_inbox follow a project chosen here too, not only the
+        # crew tools; a status that failed chose nothing
+        _remember_session_project(project, None)
+    return out
 
 
 @mcp.tool(
@@ -2808,11 +2878,14 @@ def _close_tool_arguments() -> None:
                     raise ValueError(_unknown_arguments_text(__tool, unknown, __known))
             return data
 
+        # hide_input_in_errors: a refused call (unknown argument, wrong type) must not echo the values
+        # the agent sent (memory content, message bodies) back in the error text
+        quiet = cast(Any, type(model.__name__, (model,), {"model_config": ConfigDict(hide_input_in_errors=True)}))
         closed = cast(
             Any,
             create_model(
                 model.__name__,
-                __base__=model,
+                __base__=quiet,
                 __validators__={"_reject_unknown_arguments": cast(Any, model_validator(mode="before")(reject))},
             ),
         )
