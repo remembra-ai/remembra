@@ -323,8 +323,11 @@ def test_an_unknown_argument_is_refused_and_names_the_real_ones(live, stdio, mon
     assert "'project'" in str(status.value) and "project_id" in str(status.value), str(status.value)
     assert "root_path" in str(status.value)  # the valid arguments are listed
     with pytest.raises(ToolError) as close:
-        call("close_session", project="application-source", open_work=["x"])
-    assert "'open_work'" in str(close.value) and "'project'" in str(close.value) and "todos_open" in str(close.value)
+        # close_session itself takes project and open_work since F17 (tests/crew/test_fs_close_declared_work.py),
+        # so the refusal is shown with two names it still does not have
+        call("close_session", repo="application-source", open_items=["x"])
+    assert "'open_items'" in str(close.value) and "'repo'" in str(close.value) and "todos_open" in str(close.value)
+    assert "open_work" in str(close.value) and "project_id" in str(close.value)  # the valid arguments are listed
     with pytest.raises(ToolError):
         call("crew_say", body="hi", message="hi")
     assert sessions(live, configured) == [] and handoff_of(live, configured) is None
