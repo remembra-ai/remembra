@@ -5,6 +5,65 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Fixes from the fault survey of 0.17.5 and 0.17.6. No route, MCP tool name or stored schema is removed.**
+
+### Fixed
+- **Claims lookup.** Release, handover and adopt find the claims a session really holds, including resource
+  locks and paths with brackets, groups or spaces; a zone name stops at the zone's excludes, releasing one file
+  no longer releases a wider claim, and an adopt that hits the rate limit says what is limited and keeps what
+  it adopted (F1, F24, F26, F40).
+- **Agent identity.** An MCP server that runs outside the agent's process takes no claims beside the agent's
+  hook session, and the inbox tools say which agent the connection is when the hooks run as another (F2, F8).
+- **Crew gate and start.** Remembra's own crew tools are no longer gated as file writes, and a slow `crewd`
+  start is told apart from a dead one (F3, F35).
+- **Claim caps.** Caps count areas, the refusal names the cap and its holders, a session that holds nothing is
+  never starved, a directory claim is its own area, and a temporary auto-derived zone claims the file, not the
+  folder (F4, F10).
+- **Project choice.** A folder or a named call no longer lands work in the configured project by accident;
+  crew writes name their project and never follow another conversation's choice (F5, F6).
+- **MCP crew seat.** A stdio crew seat survives a server restart, parallel first calls share one resumed seat,
+  and waits stay under the client's timeout (F11).
+- **Crew messages.** Message bodies are readable through `crew_status`, `crew_say` reports who the message
+  reached, a wait holds one MCP call for at most 45 s and always returns the id, and the inbox has an accepted
+  state and a checked `in_reply_to` (F7, F20, F50, F53).
+- **Close and checkpoint facts.** A milestone close keeps the crew seat and its claims, close and checkpoint
+  read each other's shapes for the same facts, and declared work reaches the handoff under the names agents
+  use (F12, F16, F17).
+- **Handoff grading.** The grader stops flagging honest handoffs, a failing or unrelated command is not listed
+  under tests passing, server-written handoffs are described as what they are, an MCP close reads this
+  session's commits, and idle heartbeat closes no longer fill a project's brief (F18, F31, F44, F45).
+- **Collisions.** A collision drains when the overlap is over, checkpoints stop replaying dead ones, a breach
+  follows the zone to its new holder, and commit attribution ignores arrival order (F13).
+- **Outages and errors.** A gateway 503 reads as an outage, not as crew mode off; an outage costs one failing
+  request and a close it met is queued and delivered; a request with no answer in time is a typed error; a
+  failed tool call is flagged `isError` (F14, F21, F23, F56).
+- **Crew block wording.** The last line of the crew block is about the reader, and an MCP reader's baton line
+  names no CLI command (F15).
+- **Doctor, health check and secrets.** Crew hooks count as hooks and a crew fix names the agents it rewrites;
+  `health_check` tests the API key; API keys and OAuth tokens stay out of config and token reprs (F19, F54,
+  F55).
+- **Tool arguments.** Guessed argument names are accepted, a project or an undeclared argument is never
+  dropped silently, argument failures are MCP errors in one format, and off-repo work can be claimed as any
+  `kind:name` resource (F22, F25, F39).
+- **Redaction and handoff trust.** Redaction stops eating test counts, run ids, URLs and paths while card,
+  account, phone, URL-token and password redaction stay; markup in a handoff no longer blocks it as prompt
+  injection, and a phrase split by an inline tag still does (F29, F30).
+- **Result size.** `session_brief`, `recall_memories` and `timeline` stay inside a client's result limit, each
+  tool result is sent once, and the start after a compaction is short (F32, F47).
+- **Queued handoffs.** A queued handoff is sent in the background, a refused one is held and can be dropped or
+  sent by hand, a firewall's 403 is retried, the outbox flush no longer brings back a record its owner
+  removed, and status keeps an agent's last result and its history (F33, F38, F42, F51).
+- **Sessions without git traces or a crew.** Work that leaves no git or file trace is handed off, a slow git
+  probe no longer hides commits and push state, sessions outside a crew get mid-session messages and a rolling
+  checkpoint, and the per-prompt message check holds a prompt for 2 s at most (F34, F36, F43).
+- **Inbox ageing and pickup counts.** An abandoned untagged message is no longer unread in every project,
+  accepted messages are never aged out, and a re-closed handoff is not reported as picked up by a reader of
+  its old version (F46, F48).
+- **Task reports.** A refused task report names the task's state and the next step, and stalled-task guidance
+  goes through `crew_status` and names a live owner correctly (F49).
+
 ## [0.17.6] - 2026-10-25
 
 **Security updates and a green CI.**
