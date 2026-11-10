@@ -20,6 +20,7 @@ Pure functions; everything that ends up stored first goes through
 
 from __future__ import annotations
 
+import difflib
 import functools
 import json
 import re
@@ -690,6 +691,23 @@ def end_reason_note(reason: Any) -> str | None:
     return None
 
 
+# End reasons an agent gives for a run that changed nothing (an idle or heartbeat check). Such a close
+# is not a handoff when it records no work: the MCP tool stores nothing for it and a brief never shows it.
+NO_CHANGE_REASONS = frozenset({"no_change", "no-change", "nochange", "idle", "heartbeat"})
+
+
+def is_no_change_reason(reason: Any) -> bool:
+    return str(reason or "").strip().lower() in NO_CHANGE_REASONS
+
+
+def records_no_work(sections: dict[str, Any]) -> bool:
+    """True when the sections hold no evidence of work: nothing done, nothing failing, and nothing
+    open except todos (no uncommitted files, unpushed commits or unknown git state)."""
+    if sections.get("done") or sections.get("failing"):
+        return False
+    return all(isinstance(item, str) and item.startswith(("TODO: ", "(+")) for item in sections.get("not_done") or [])
+
+
 def sections_have_substance(sections: dict[str, Any], *, summary: Any = None, notes: Any = None, end_reason: Any = None) -> bool:
     """True when a handoff records anything for the next agent.
 
@@ -699,8 +717,13 @@ def sections_have_substance(sections: dict[str, Any], *, summary: Any = None, no
     work stopped rather than finished (a usage or billing limit, see
     :data:`STOP_REASONS`, or a close written before context compaction): that
     notice is the whole point of such a close. A session that recorded none of
-    these (an idle or automated run) left nothing to pick up.
+    these (an idle or automated run) left nothing to pick up. Neither did a
+    close its agent marked as a run that changed nothing
+    (:data:`NO_CHANGE_REASONS`) and that records no work: its todos, next step
+    and notes only carry forward what an earlier handoff holds.
     """
+    if is_no_change_reason(end_reason) and records_no_work(sections):
+        return False
     if any(sections.get(name) for name in ("done", "not_done", "failing")):
         return True
     if str(sections.get("next") or "").strip():
@@ -727,6 +750,88 @@ def handoff_has_substance(memory: dict[str, Any] | None) -> bool:
     summary_given = (relay.get("grounding") or {}).get("status") not in (None, "none")
     notes = recorded_notes(content)
     return sections_have_substance(relay, summary=summary_given or None, notes=notes or None, end_reason=relay.get("end_reason"))
+
+
+# Two idle closes say the same thing when their open items read this much alike (0..1). A
+# heartbeat's wording drifts from run to run ("Await X" / "Refresh status; await X"); a new
+# open item reads differently.
+REPEAT_SIMILARITY = 0.8
+_REPEAT_TEXTS_KEPT = 50  # distinct earlier wordings compared per agent and place
+_NOT_LETTERS_RE = re.compile(r"[^a-z]+")
+
+
+def _idle_close(memory: dict[str, Any] | None) -> tuple[tuple[Any, ...], str] | None:
+    """``(who and where, what it says)`` for a relay handoff that records no work, else None.
+
+    No work: nothing done, nothing failing, only todos open (:func:`records_no_work`), no
+    summary and no stop notice. "Who and where" is the agent (and whether its key verified it),
+    the recorded location and the branch and HEAD: a close from another checkout, or after HEAD
+    moved, is not the same idle thread. "What it says" is its open todos and next step (its notes when it has neither),
+    reduced to lower-case words so that times, counters and ids in it do not matter.
+    """
+    relay = _relay_meta(memory)
+    if not memory or relay is None or not records_no_work(relay):
+        return None
+    if (relay.get("grounding") or {}).get("status") not in (None, "none"):
+        return None  # the agent wrote a summary: a statement of its own
+    if end_reason_note(relay.get("end_reason")) is not None:
+        return None
+    location = relay.get("location")
+    keys = location.get("fingerprints") if isinstance(location, dict) else None
+    place = tuple(sorted(str(k) for k in keys)) if isinstance(keys, list) else ()
+    who = str(relay.get("agent_id") or memory.get("agent_id") or "")
+    # A key-verified close and a self-declared one under the same name are not known to be one agent.
+    verified = relay.get("agent_verified") is True
+    signature = (who, verified, place, str(relay.get("branch") or ""), str(relay.get("head_commit") or ""))
+    items = [str(item) for item in relay.get("not_done") or [] if isinstance(item, str)]
+    text = " | ".join([*items, str(relay.get("next") or "")])
+    words = _NOT_LETTERS_RE.sub(" ", text.lower()).strip()
+    if not words:
+        words = _NOT_LETTERS_RE.sub(" ", (recorded_notes(memory.get("content")) or "").lower()).strip()
+    return signature, words
+
+
+def is_idle_close(memory: dict[str, Any] | None) -> bool:
+    """True for a relay handoff that records no work (it may repeat an earlier one, see :func:`repeated_idle_closes`)."""
+    return _idle_close(memory) is not None
+
+
+def _reads_alike(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return (
+        matcher.real_quick_ratio() >= REPEAT_SIMILARITY
+        and matcher.quick_ratio() >= REPEAT_SIMILARITY
+        and matcher.ratio() >= REPEAT_SIMILARITY
+    )
+
+
+def repeated_idle_closes(handoffs: list[dict[str, Any]]) -> set[str]:
+    """Ids of the handoffs (given newest first) that record no work and repeat an older one.
+
+    A repeat is an idle close (:func:`is_idle_close`) whose open items read like those of an
+    older idle close by the same agent in the same place (:data:`REPEAT_SIMILARITY`): an
+    automation that closes on every idle run, or a session that only carries a todo forward.
+    The oldest of such a run is not a repeat (it is where the open item was first recorded), and
+    neither is a close with a new open item, a summary, recorded work, or from another place.
+    """
+    repeats: set[str] = set()
+    seen: dict[tuple[Any, ...], list[str]] = {}
+    for memory in reversed(handoffs):
+        idle = _idle_close(memory)
+        if idle is None:
+            continue
+        signature, words = idle
+        earlier = seen.setdefault(signature, [])
+        if any(_reads_alike(words, other) for other in reversed(earlier)):
+            repeats.add(str(memory.get("id")))
+        if words not in earlier:
+            earlier.append(words)
+            del earlier[:-_REPEAT_TEXTS_KEPT]
+    return repeats
 
 
 def recorded_notes(content: Any) -> str | None:
@@ -1430,7 +1535,8 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     """Compact text brief: handoff health, last session, inbox, status, linked projects, the recent trail.
 
     "Last session" is the newest handoff that recorded any work (the service
-    skips empty ones and the brief says how many, ``handoffs_skipped``). A
+    skips empty ones and the brief says how many, ``handoffs_skipped``; and
+    idle closes that only repeat an earlier one, ``handoffs_repeated``). A
     reader outside a git repository (``reader.git_repo`` false) gets one line
     saying so and naming where the last session worked, and a preamble that
     does not point at a repository; a reader in another repository than the
@@ -1466,14 +1572,22 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     where = location_line(handoff, reader, allowed)
     data: list[str] = [where] if where else []
     skipped = brief.get("handoffs_skipped")
-    if handoff is None and isinstance(skipped, int) and skipped > 0:
+    skipped = skipped if isinstance(skipped, int) and skipped > 0 else 0
+    repeated = brief.get("handoffs_repeated")
+    repeated = repeated if isinstance(repeated, int) and repeated > 0 else 0
+    if handoff is None and (skipped or repeated):
         data.append("Last session: none that recorded any work in this project.")
     else:
         data.extend(render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n"))
-    if isinstance(skipped, int) and skipped > 0:
+    if skipped:
         data.append(
             f"Skipped {skipped} newer session{'s' if skipped != 1 else ''} that recorded nothing (no commits, changes,"
-            " tests, errors, todos, next step or summary: idle or automated runs)."
+            " tests, errors, todos, next step or summary, or closed as a run that changed nothing: idle or automated runs)."
+        )
+    if repeated:
+        data.append(
+            f"Skipped {repeated} newer close{'s' if repeated != 1 else ''} that recorded no work and repeated open items"
+            " an earlier close already recorded (idle or heartbeat runs)."
         )
 
     inbox = brief.get("inbox")
@@ -1501,7 +1615,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     recent_lines = [_recent_line(mem, now, allowed) for mem in brief.get("recent") or []]
 
     tail = [f"Note: {clip(w, 300)}" for w in (brief.get("warnings") or [])[:4]]
-    tail.append("Before you finish: run `remembra-relay close` or call close_session so the next agent can pick up.")
+    tail.append(
+        "Before you finish: run `remembra-relay close` or call close_session so the next agent can pick up"
+        ' (a run that changed nothing: close_session(end_reason="no_change"), nothing is stored).'
+    )
     top = [header, *([health] if health else [])]
 
     def data_body(recent: list[str]) -> str:

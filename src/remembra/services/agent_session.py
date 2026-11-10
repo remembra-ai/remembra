@@ -33,7 +33,7 @@ import structlog
 from remembra.core.time import utcnow
 from remembra.inbox.manager import reply_link, sender_label
 from remembra.models.memory import StoreRequest
-from remembra.relay.handoff import assess_text, handoff_has_substance
+from remembra.relay.handoff import assess_text, handoff_has_substance, is_idle_close, repeated_idle_closes
 from remembra.security.secrets import scrub, scrub_value
 from remembra.storage.database import ENTITY_NAME_MATCH
 
@@ -323,36 +323,79 @@ class AgentSessionService:
     async def pickup_handoff(
         self, user_id: str, project_id: str | None, scan: int = PICKUP_SCAN_LIMIT
     ) -> tuple[dict[str, Any] | None, int]:
-        """The newest handoff that records something, and how many newer ones were skipped.
+        """The newest handoff that records something, and how many newer empty ones were skipped.
 
-        Ordered like :meth:`latest_handoff` (when the session ended). A handoff
-        with nothing in it (no commits, changes, tests, errors, todos, next step,
-        summary or notes: an idle or automated session) is skipped and counted,
-        so it never buries the last session that did work. Looks at the newest
-        ``scan`` handoffs; returns ``(None, skipped)`` when none of them has substance.
+        :meth:`pickup` without the count of repeated idle closes (they are skipped too).
+        """
+        picked = await self.pickup(user_id, project_id, scan)
+        return picked["handoff"], picked["skipped"]
+
+    async def pickup(self, user_id: str, project_id: str | None, scan: int = PICKUP_SCAN_LIMIT) -> dict[str, Any]:
+        """The handoff to pick up: ``{"handoff", "skipped", "repeated"}``.
+
+        Ordered like :meth:`latest_handoff` (when the session ended). Two kinds
+        of newer handoffs are passed over and counted, so they never bury the
+        last session that did work:
+
+        * ``skipped``: a handoff with nothing in it (no commits, changes, tests,
+          errors, todos, next step, summary or notes, or closed as a run that
+          changed nothing: an idle or automated session);
+        * ``repeated``: a handoff that records no work and repeats the open
+          items of an older one by the same agent in the same place
+          (:func:`~remembra.relay.handoff.repeated_idle_closes`: a heartbeat
+          automation closing on every idle run).
+
+        Looks at the newest ``scan`` handoffs; ``handoff`` is None when none of
+        them qualifies. Only when the newest candidate records no work is the
+        whole window read (to find what it may repeat); otherwise one page.
         """
         where, params = self._active_clause(user_id)
         where += " AND memory_type = 'handoff'"
         if project_id:
             where += " AND project_id = ?"
             params.append(project_id)
-        skipped = 0
+        scan = max(scan, 1)
         page = 25
-        for offset in range(0, max(scan, 1), page):
+        window: list[dict[str, Any]] = []
+        exhausted = False
+
+        async def read_page() -> None:
+            nonlocal exhausted
+            limit = min(page, scan - len(window))
             cursor = await self.db.conn.execute(
                 f"SELECT {_ROW_COLUMNS} FROM memories WHERE {where} "
                 f"ORDER BY {HANDOFF_ENDED_JD} DESC, julianday(created_at) DESC, id DESC LIMIT ? OFFSET ?",
-                [*params, min(page, scan - offset), offset],
+                [*params, limit, len(window)],
             )
             rows = await cursor.fetchall()
-            for row in rows:
-                memory = serialize_memory_row(dict(row))
-                if handoff_has_substance(memory):
-                    return memory, skipped
+            window.extend(serialize_memory_row(dict(row)) for row in rows)
+            exhausted = len(rows) < limit or len(window) >= scan
+
+        skipped = repeated = 0
+        repeats: set[str] | None = None
+        index = 0
+        while True:
+            if index >= len(window):
+                if exhausted:
+                    break
+                await read_page()
+                continue
+            memory = window[index]
+            index += 1
+            if not handoff_has_substance(memory):
                 skipped += 1
-            if len(rows) < page:
-                break
-        return None, skipped
+                continue
+            if repeats is None:
+                if not is_idle_close(memory):
+                    return {"handoff": memory, "skipped": skipped, "repeated": repeated}
+                while not exhausted:
+                    await read_page()
+                repeats = repeated_idle_closes(window)
+            if memory["id"] in repeats:
+                repeated += 1
+                continue
+            return {"handoff": memory, "skipped": skipped, "repeated": repeated}
+        return {"handoff": None, "skipped": skipped, "repeated": repeated}
 
     async def relay_recent(
         self, user_id: str, project_id: str | None, limit: int, exclude_ids: set[str] | None = None
@@ -362,28 +405,40 @@ class AgentSessionService:
         Only relay records of this one project: general memories of the
         namespace (facts, notes from other work) are never listed, so they
         cannot be read as this project's status. Nothing without a project.
+        Idle closes that repeat an earlier one are left out like empty ones
+        (see :meth:`pickup`); when they crowd the newest rows, older rows are
+        read (up to :data:`PICKUP_SCAN_LIMIT`) so the list still fills.
         """
         if not project_id or limit <= 0:
             return []
-        rows = (
-            await self.timeline(
-                user_id=user_id,
-                project_id=project_id,
-                memory_types=["handoff", "checkpoint"],
-                limit=max(limit * 4, 20),
-                newest_first=True,
-            )
-        )["memories"]
+        page = max(limit * 4, 20)
+        rows: list[dict[str, Any]] = []
         out: list[dict[str, Any]] = []
-        for memory in rows:
-            if memory["id"] in (exclude_ids or set()):
-                continue
-            if memory.get("memory_type") == "handoff" and not handoff_has_substance(memory):
-                continue
-            out.append(memory)
-            if len(out) >= limit:
-                break
-        return out
+        while True:
+            batch = (
+                await self.timeline(
+                    user_id=user_id,
+                    project_id=project_id,
+                    memory_types=["handoff", "checkpoint"],
+                    limit=page,
+                    offset=len(rows),
+                    newest_first=True,
+                )
+            )["memories"]
+            rows.extend(batch)
+            handoffs = [m for m in rows if m.get("memory_type") == "handoff"]
+            repeats = repeated_idle_closes(handoffs) if any(is_idle_close(m) for m in handoffs) else set()
+            out = []
+            for memory in rows:
+                if memory["id"] in (exclude_ids or set()):
+                    continue
+                if memory.get("memory_type") == "handoff" and (not handoff_has_substance(memory) or memory["id"] in repeats):
+                    continue
+                out.append(memory)
+                if len(out) >= limit:
+                    break
+            if len(out) >= limit or len(batch) < page or len(rows) >= PICKUP_SCAN_LIMIT:
+                return out
 
     async def _current_status_rows(self, user_id: str, project_id: str, key: str | None = None) -> list[dict[str, Any]]:
         where, params = self._active_clause(user_id)
@@ -682,7 +737,8 @@ class AgentSessionService:
         warnings: list[str] = []
         agent = (agent_id or "").strip() or None
 
-        handoff, skipped = await self.pickup_handoff(user_id, project_id)
+        picked = await self.pickup(user_id, project_id)
+        handoff, skipped = picked["handoff"], picked["skipped"]
         status_items = await self.list_status(user_id, project_id) if project_id else []
         if not project_id:
             warnings.append("No project_id given: the recent trail and status items are omitted.")
@@ -712,6 +768,7 @@ class AgentSessionService:
             "generated_at": datetime.now(UTC).isoformat(),
             "handoff": handoff,
             "handoffs_skipped": skipped,
+            "handoffs_repeated": picked["repeated"],
             "inbox": inbox,
             "status_items": status_items,
             "recent": recent,

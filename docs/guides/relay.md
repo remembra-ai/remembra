@@ -536,7 +536,11 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 - **Last session.** The newest handoff that recorded any work: commits, changed or uncommitted files,
   tests, errors, todos, a next step, a summary or notes, or a stop (`stopped: rate_limit`). Newer
   handoffs with none of that (idle sessions, automated runs, clients older than 0.16.1) are skipped, and
-  the brief says how many (`Skipped 3 newer sessions that recorded nothing …`). The agent's notes and
+  the brief says how many (`Skipped 3 newer sessions that recorded nothing …`). So is a newer close that
+  records no work and only repeats the open items an older close of the same agent in the same place
+  already recorded (a heartbeat automation closing on every idle run: `Skipped 24 newer closes that
+  recorded no work and repeated open items …`), and a close sent with `end_reason="no_change"` that
+  records no work (the MCP `close_session` tool stores nothing for it). The agent's notes and
   summary follow on their own lines (`Notes from codex (unverified): …`, `Summary from codex
   [unverified narrative; …]: …`).
 - **Recent.** At most five of this project's latest handoffs and checkpoints, newest first. Other
@@ -560,8 +564,11 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 - **Health.** The line above the block is the server's grade of the last handoff, computed from its
   facts with no language model: *Ready*, *Ready with warnings* (unpushed or unrecorded push state,
   uncommitted files, open todos, tests not run on changed work, errors, failed commands),
-  *Incomplete* (git timed out, or no git state recorded), *Conflicted* (the agent's summary
-  contradicts the facts) or *Blocked* (a test run's latest result failed, or the handoff is withheld
+  *Incomplete* (git timed out, no git state recorded, or the session ended without a close and the
+  server wrote the handoff from its last crew checkpoint), *Conflicted* (the agent's summary
+  contradicts a recorded fact: commits recorded as not pushed, a failed test run, recorded errors; a
+  commit, file or test run the facts merely do not hold is *not checkable*, never a contradiction) or
+  *Blocked* (a test run's latest result failed, or the handoff is withheld
   for low trust), followed by what is missing. Git probes that did not finish are named only when
   they are the collector's own (`log`, `status`, `diff`, `upstream`); any other name is shown as
   *other*. `POST /session/close` returns the same `health`, the trail shows it as a badge, and
@@ -608,7 +615,7 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 | POST | `/api/v1/projects/split/undo` | `{batch_id?, apply?}` → what moves back (`moves_back`; `since_split` marks what the repository wrote in its new project after the split), what changed since (`left`) and what stays in the new projects (`written_since`). Dry run by default |
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
-| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoff_location`; records a pickup when it serves another agent's handoff |
+| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoffs_repeated` + `handoff_location`; records a pickup when it serves another agent's handoff |
 | GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections. Page with `before` (+ `before_id`), the oldest entry's `created_at` (and `id`): only older entries come back and `total` counts them, so new handoffs never shift a page |
 | GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |
