@@ -66,6 +66,9 @@ HTTP_GRACE_S: Final = 15.0
 # then restart the server process, so a longer hold loses the answer and the crew seat with it.
 MCP_HOLD_MAX_S: Final = 45
 MCP_HOLD_GRACE_S: Final = 10.0
+# After a waited POST got no answer, the one re-post that fetches the message id gets this long at
+# most, so the whole call (hold + grace + this) still ends under 60 s.
+MCP_RECOVER_S: Final = 3.0
 MCP_HOLD_ENV: Final = "REMEMBRA_MCP_WAIT_MAX_S"
 # The default of CrewBridge.max_wait_s, which the server sets from REMEMBRA_MCP_MAX_WAIT_S: the same hold.
 # With the HTTP grace on top a call still answers inside the client's 60 s.
@@ -86,9 +89,10 @@ MCP_FOOTER: Final = (
 )
 CORRECTIVE: Final = "Do not modify these files further. Tell @{who} or @mani with crew_say."
 # Message bodies as an agent reads them (inside the data block, under the trust policy): a listed
-# message or a mention's message up to MESSAGE_CLIP, the one asked for by id up to the event limit.
+# message or a mention's message up to MESSAGE_CLIP, the one asked for by id up to the largest body
+# the server stores (so it is read to its end).
 MESSAGE_CLIP: Final = 1000
-MESSAGE_FULL_CLIP: Final = S.MAX_MESSAGE_BODY_IN_EVENT
+MESSAGE_FULL_CLIP: Final = S.MAX_MESSAGE_BYTES
 MESSAGE_PREFIX_ROOM: Final = 200
 THREAD_CONTEXT_MAX: Final = 12
 VERBOSE_MESSAGES: Final = 5
@@ -137,6 +141,14 @@ def _hold(wait_s: int, started: float, cap: int | None = None) -> int:
     return max(0, min(int(wait_s), int(round(left))))
 
 
+def _recover_timeout(started: float, cap: int | None = None) -> float:
+    """The HTTP timeout of the id-recovery re-post: what is left of hold + grace + :data:`MCP_RECOVER_S`
+    since the tool call's entry, between 1 s and :data:`MCP_RECOVER_S`."""
+    hold = mcp_hold_max_s() if cap is None else cap
+    left = hold + MCP_HOLD_GRACE_S + MCP_RECOVER_S - (time.monotonic() - started)
+    return max(1.0, min(MCP_RECOVER_S, left))
+
+
 def _held_note(wait_s: int, cap: int | None = None) -> str:
     """Said when less than the asked ``wait_s`` was held (server template, no agent text)."""
     return f" of the {wait_s} asked: one MCP call holds at most {mcp_hold_max_s() if cap is None else cap}s"
@@ -151,6 +163,13 @@ class CrewApiError(Exception):
         self.error = error
         self.message = message
         self.body: dict[str, Any] = dict(body or {})
+
+
+def no_answer(e: CrewApiError) -> bool:
+    """True when a request may have reached the server although no answer came back: an HTTP timeout,
+    or status 0 "unreachable" (what the local crew daemon reports for a silent daemon and for its own
+    upstream timeout alike, and a direct call for a connection that broke)."""
+    return e.status == 0 and e.error in ("timeout", "unreachable")
 
 
 class CrewUsageError(Exception):
@@ -625,17 +644,28 @@ class WideItem(str):
     :data:`remembra.crew.schemas.DATA_ITEM_CLIP` that fits ids, titles and paths."""
 
     limit: int = S.DATA_ITEM_CLIP
+    cut: int = 0  # characters of the body that are not shown (0: the body is whole)
 
-    def __new__(cls, text: str, limit: int) -> WideItem:
+    def __new__(cls, text: str, limit: int, cut: int = 0) -> WideItem:
         item = super().__new__(cls, text)
         item.limit = max(int(limit), S.DATA_ITEM_CLIP)
+        item.cut = max(int(cut), 0)
         return item
 
 
 def message_item(message: Mapping[str, Any], clip: int = MESSAGE_CLIP) -> WideItem:
     """One crew message as a data-block item: a server-template prefix (id, kind, author) and the body
     under the brief's trust policy with the server's stored score (as a ``crew_say`` reply is shown):
-    low-trust text becomes the fixed withheld note, commands are flagged, the body is clipped to ``clip``."""
+    low-trust text becomes the fixed withheld note, commands are flagged, the body is clipped to ``clip``
+    (the item's ``cut`` then says how many characters are not shown)."""
+    cut = 0
+
+    def clip_body(text: str) -> str:
+        nonlocal cut
+        whole = len(S.clip_item(text, len(text) + 1))  # its length as shown: flattened, tags neutralised
+        cut = whole - (clip - 1) if whole > clip else 0
+        return S.clip_item(text, clip)
+
     who = message.get("author_callsign") or message.get("author_label") or "someone"
     prefix = f"message {_safe(message.get('id')) or '(no id)'} ({_safe(message.get('kind')) or 'chat'}) from "
     prefix += f"{S.clip_item(str(who), 60)}: "
@@ -645,9 +675,9 @@ def message_item(message: Mapping[str, Any], clip: int = MESSAGE_CLIP) -> WideIt
         body = police_item(
             str(message.get("body") or ""),
             stored_trust=message.get("trust_score"),
-            clip_body=lambda text: S.clip_item(text, clip),
+            clip_body=clip_body,
         )
-    return WideItem(prefix + body, clip + MESSAGE_PREFIX_ROOM)
+    return WideItem(prefix + body, clip + MESSAGE_PREFIX_ROOM, cut)
 
 
 def data_block(items: Sequence[str]) -> str:
@@ -1428,9 +1458,12 @@ class CrewBridge:
                     # the body could not be fetched: the item stays in the queue, so it is shown again
                     lines.append(f'{title} · body unavailable right now: crew_status(message="{ref}") reads it')
                     continue
+                shown_msg = message_item(msg) if msg is not None else None
+                if shown_msg is not None and shown_msg.cut:
+                    title += f' · cut at {MESSAGE_CLIP} characters: crew_status(message="{ref}") reads it in full'
                 lines.append(title)
-                if msg is not None:
-                    data.append(message_item(msg))
+                if shown_msg is not None:
+                    data.append(shown_msg)
                 shown.append(item)
         deltas = self._deltas(http, seat)
         lines.extend(deltas)
@@ -1499,8 +1532,18 @@ class CrewBridge:
                 "crew_status(verbose=True) lists the latest messages."
             )
         root = _safe(msg.get("thread_root_id")) or message_id
-        _, body, _ = http.call("GET", f"/crews/{seat.crew_id}/messages", token=seat.token, params={"thread": root, "limit": 200})
+        # ``before`` makes the server take the thread's newest rows (returned oldest first); without it
+        # a long thread would be read from its first rows. One row more than shown tells whether older
+        # messages exist, and one more covers the asked message being among them.
+        asked = THREAD_CONTEXT_MAX + 2
+        _, body, _ = http.call(
+            "GET",
+            f"/crews/{seat.crew_id}/messages",
+            token=seat.token,
+            params={"thread": root, "limit": asked, "before": S.SEQ_MAX},
+        )
         thread = [m for m in ((body or {}).get("items") or [] if isinstance(body, dict) else []) if isinstance(m, dict)]
+        older = len(thread) >= asked  # the thread has (or may have) messages before the ones fetched
         others = [m for m in thread if m.get("id") != message_id]
         who = msg.get("author_callsign") or msg.get("author_label") or "someone"
         head = f"MESSAGE {message_id} ({_safe(msg.get('kind')) or 'chat'}) from {_safe(who) or 'someone'}"
@@ -1509,16 +1552,37 @@ class CrewBridge:
         if root != message_id:
             head += f" · reply in thread {root}"
         lines = [head]
-        data: list[str] = [message_item(msg, MESSAGE_FULL_CLIP)]
-        if others:
-            kept = others[-THREAD_CONTEXT_MAX:]
-            if root != message_id and all(m.get("id") != root for m in kept):
-                kept = [*[m for m in others if m.get("id") == root], *kept[1:]]  # a reply is read with its root
-            note = f" (the latest {len(kept)} of {len(others)})" if len(kept) < len(others) else ""
-            lines.append(f"THREAD {root}: {len(others)} other message(s){note}, oldest first, below it in the data.")
-            data.extend(message_item(m) for m in kept)
+        full = message_item(msg, MESSAGE_FULL_CLIP)
+        if full.cut:
+            lines.append(f"The body is cut: the first {MESSAGE_FULL_CLIP - 1} characters are shown, {full.cut} more are not.")
+        data: list[str] = [full]
+        kept = others[-THREAD_CONTEXT_MAX:]
+        with_root = False
+        if root != message_id and all(m.get("id") != root for m in kept):
+            # a reply is read with its root, which a long thread's newest rows do not include
+            root_msg = next((m for m in others if m.get("id") == root), None)
+            if root_msg is None:
+                try:
+                    root_msg = self._message(http, seat, root)
+                except CrewApiError:
+                    root_msg = None
+            if root_msg is not None:
+                kept = [root_msg, *kept[len(kept) - (THREAD_CONTEXT_MAX - 1) :]] if THREAD_CONTEXT_MAX > 1 else [root_msg]
+                with_root = True
+        if kept and (older or len(kept) < len(others)):
+            latest = len(kept) - 1 if with_root else len(kept)
+            what = f"the root and the latest {latest}" if with_root else f"the latest {latest}"
+            lines.append(
+                f"THREAD {root}: {what} other message{'s' if latest != 1 else ''} (older ones are not shown), "
+                "oldest first, below it in the data."
+            )
+        elif kept:
+            lines.append(
+                f"THREAD {root}: {len(kept)} other message{'s' if len(kept) != 1 else ''}, oldest first, below it in the data."
+            )
         else:
             lines.append("No other message in its thread yet.")
+        data.extend(message_item(m) for m in kept)
         lines.append(f'Answer in the thread with crew_say(thread="{root}", kind="answer", body=…).')
         return join_text(lines, data)
 
@@ -2770,13 +2834,20 @@ class CrewBridge:
                 timeout=(held + MCP_HOLD_GRACE_S) if held > 0 else None,
             )
         except CrewApiError as e:
-            if held <= 0 or e.status != 0 or e.error != "timeout":
+            if held <= 0 or not no_answer(e):
                 raise
             # The server commits the message before it starts waiting, so a wait that outlived the HTTP
-            # timeout left it posted. The same client_msg_id returns that row (no second message).
+            # timeout left it posted. The same client_msg_id returns that row (no second message). The
+            # local crew daemon reports the same thing as "unreachable" (:func:`no_answer`).
             payload.pop("wait_s")
             try:
-                _, res, _ = http.call("POST", f"/crews/{seat.crew_id}/messages", token=seat.token, json=payload)
+                _, res, _ = http.call(
+                    "POST",
+                    f"/crews/{seat.crew_id}/messages",
+                    token=seat.token,
+                    json=payload,
+                    timeout=_recover_timeout(started, cap),
+                )
             except CrewApiError:
                 raise CrewApiError(
                     0,
