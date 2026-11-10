@@ -15,6 +15,8 @@ Every MCP test goes through ``FastMCP.call_tool`` into the real MCP server modul
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import remembra.mcp.server as server
@@ -22,6 +24,7 @@ from remembra.crew import schemas as S
 from remembra.crew.tasks import Caller, CrewServiceError
 from remembra.mcp import crew as crew_mod
 from remembra.mcp.crew import CrewBridge
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import live_server
 from tests.crew.test_crew_reports import Env
 from tests.crew.test_mcp_crew import (
@@ -40,6 +43,13 @@ from tests.crew.test_mcp_crew import (
 from tests.crew.wp6_support import CREW, open_db, seed_crew, seed_session
 
 REFUSED = "REPORT NOT ACCEPTED for T-1: Only the session that owns T-1 reports on it."
+
+
+def _said(text: str) -> str:
+    """A crew write's answer above its last line, which must be the crew tag of one of this file's crews (F6)."""
+    tag = re.fullmatch(r"\(in CREW (f49[a-z]+\d+) as [a-z][a-z0-9-]*\)", text.rpartition("\n")[2])
+    assert tag, text
+    return untagged(text, tag.group(1))
 
 
 @pytest.fixture(scope="module")
@@ -70,7 +80,7 @@ def _owner_left(live, prefix: str) -> tuple[str, str]:
     use(a)
     a_sign = callsign_in(call("crew_status", project_id=project))
     assert call("crew_task", action="create", title="Places route").startswith("CREATED T-1")
-    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-1")) == "STARTED T-1 (in_progress)."
     closed = as_json(call("close_session", summary="handing over", end_reason="handoff", project_id=project))
     assert closed["crew"]["tasks_stalled"] == 1 and closed["crew"]["claims_reserved"] == 0, closed
     use(b)
@@ -110,7 +120,7 @@ def test_the_way_forward_the_refusal_names_works(live, clock):
     # the adopt it names is refused for a task with nothing reserved, exactly as the text warned
     assert call("crew_claim", action="adopt", task="T-1").startswith("NOT ADOPTED T-1:")
     assert call("crew_task", action="create", title="Places route, continued").startswith("CREATED T-2")
-    assert call("crew_task", action="start", task="T-2") == "STARTED T-2 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-2")) == "STARTED T-2 (in_progress)."
     out = call("crew_report", task="T-2", sections={"done": ["route works"]}, summary="continued from T-1")
     assert out.startswith("REPORT rpt_") and "for T-2: verdict" in out, out
 
@@ -153,7 +163,7 @@ def test_a_ready_task_nobody_owns_says_start_it(live, clock):
     out = call("crew_report", task="T-1", sections={"done": ["x"]})
     assert out.startswith(REFUSED), out
     assert 'T-1 is ready and has no owner: crew_task(action="start", task="T-1") makes it yours' in out, out
-    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-1")) == "STARTED T-1 (in_progress)."
     assert call("crew_report", task="T-1", sections={"done": ["x"]}).startswith("REPORT rpt_")
 
 
@@ -197,7 +207,7 @@ def test_the_owner_of_a_released_task_is_told_to_take_it_back_and_that_works(liv
     use(a)
     call("crew_task", action="create", title="Invoice PDF", zones=["pos"])
     call("crew_task", action="start", task="T-1")
-    assert call("crew_task", action="release", task="T-1") == "RELEASED T-1: now stalled."
+    assert _said(call("crew_task", action="release", task="T-1")) == "RELEASED T-1: now stalled."
     out = call("crew_report", task="T-1", sections={"done": ["x"]})
     assert out.startswith("REPORT NOT ACCEPTED for T-1: T-1 is stalled"), out
     assert "start it before reporting" not in out, out  # start refuses a stalled task
@@ -299,7 +309,7 @@ def test_a_successor_that_was_already_live_is_sent_through_crew_status_and_the_s
     project, a, a_sign, b, _ = _two_agents(live, "f49reserved")
     use(a)
     assert call("crew_task", action="create", title="Places route").startswith("CREATED T-1")
-    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-1")) == "STARTED T-1 (in_progress)."
     assert call("crew_claim", paths=["app/x.ts"], task="T-1").startswith("GRANTED path app/x.ts")
     closed = as_json(call("close_session", summary="handing over", end_reason="handoff", project_id=project))
     assert closed["crew"]["tasks_stalled"] == 1 and closed["crew"]["claims_reserved"] == 1, closed
@@ -315,7 +325,7 @@ def test_a_successor_that_was_already_live_is_sent_through_crew_status_and_the_s
     status = call("crew_status")
     assert "YOUR BATON (offered to you): T-1" in status, status
     assert call("crew_claim", action="adopt", task="T-1").startswith("ADOPTED T-1"), out
-    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-1")) == "STARTED T-1 (in_progress)."
     assert call("crew_report", task="T-1", sections={"done": ["x"]}).startswith("REPORT rpt_")
 
 
@@ -338,7 +348,7 @@ def test_a_task_its_live_owner_released_is_not_described_as_left(live, clock):
     assert f"T-1 is stalled: its owner {a_sign} let it go and is still in the crew." in tagged, tagged
     call("crew_status")
     assert call("crew_claim", action="adopt", task="T-1").startswith("ADOPTED T-1")
-    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert _said(call("crew_task", action="start", task="T-1")) == "STARTED T-1 (in_progress)."
     assert call("crew_report", task="T-1", sections={"done": ["x"]}).startswith("REPORT rpt_")
 
 
