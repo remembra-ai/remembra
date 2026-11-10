@@ -903,6 +903,24 @@ def _hook_ack(adapter: Adapter) -> None:
         print("{}", flush=True)
 
 
+# What a session that already got its brief reads at a start after a compaction (source "compact"), in
+# place of a second copy: the relay's own words only, so it needs no data block.
+COMPACT_POINTER = (
+    "Remembra: the context was compacted, so the session brief printed at the start is no longer in it. "
+    "Call session_brief for the last handoff and your inbox before you rely on either.\n"
+    "Before you finish: run `remembra-relay close` or call close_session so the next agent can pick up."
+)
+
+
+def _compacted_with_brief(args: argparse.Namespace, source: Any, home: Path, key: str, session: str | None) -> bool:
+    """A start hook after a compaction, in a session whose brief was printed before (a fresh marker).
+
+    Then the hook prints :data:`COMPACT_POINTER` and fetches nothing. Without a marker (the session never
+    got a brief, or the marker expired) the caller prints the whole brief, as for any other start.
+    """
+    return source == "compact" and not args.once and bool(session) and brief_delivered(home, key, str(session))
+
+
 def _brief_needed(args: argparse.Namespace, spec: AdapterSpec, source: Any, home: Path, key: str, session: str | None) -> bool:
     """Whether this hook may print the session's brief at all; False when the session has it already.
 
@@ -971,6 +989,10 @@ def cmd_brief(args: argparse.Namespace) -> int:
         event = fields.get("event") or event
         hook_session = fields.get("session_id") or args.session_id
         once_key = _once_key(args, adapter)
+        if adapter and _compacted_with_brief(args, payload.get("source"), _home(), once_key, hook_session):
+            pointer = {"rendered": COMPACT_POINTER, "compacted": True}
+            _emit_brief(args.format or adapter.spec.output, COMPACT_POINTER, pointer, event=event)
+            return 0
         if adapter:
             if not _brief_needed(args, adapter.spec, payload.get("source"), _home(), once_key, hook_session):
                 return 0

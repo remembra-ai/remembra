@@ -185,7 +185,9 @@ def test_remote_transport_answers_local_only(monkeypatch: pytest.MonkeyPatch) ->
 
     def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = asyncio.run(server.mcp.call_tool(name, args))
-        return json.loads(result[0][0].text)  # type: ignore[index]
+        # text only since F47: call_tool returns the content blocks, or (blocks, structured) for a structured tool
+        blocks = result[0] if isinstance(result, tuple) else result
+        return json.loads(blocks[0].text)  # type: ignore[index,union-attr]
 
     for name, args in (("remembra_doctor", {}), ("remembra_setup", {"agents": ["codex"]})):
         payload = call(name, args)

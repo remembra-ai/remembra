@@ -113,7 +113,9 @@ def test_the_cli_and_the_mcp_tool_change_nothing(
 
     monkeypatch.setattr(server, "REMEMBRA_MCP_TRANSPORT", "stdio")
     result = asyncio.run(server.mcp.call_tool("remembra_doctor", {"check_server": False}))
-    payload = json.loads(result[0][0].text)  # type: ignore[index]
+    # text only since F47: call_tool returns the content blocks, or (blocks, structured) for a structured tool
+    blocks = result[0] if isinstance(result, tuple) else result
+    payload = json.loads(blocks[0].text)  # type: ignore[index,union-attr]
     assert payload["status"] == "ok" and payload["changed_nothing"] is True
     asyncio.run(server.mcp.call_tool("remembra_setup", {}))
     assert tree_digest(busy.root) == before

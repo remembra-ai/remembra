@@ -85,6 +85,11 @@ LATE_JOIN_FIELDS: Final = (
     "githook_state",
 )
 CREW_EXISTS_TIMEOUT_S: Final = 5.0
+# A start after a compaction (Claude Code runs SessionStart with source "compact"): the session is already
+# in its crew, so the hook asks crewd one local question and prints a reminder of at most this many
+# characters instead of joining again and fetching the whole brief.
+COMPACT_ALIVE_TIMEOUT_S: Final = 1.0
+START_COMPACT_CAP: Final = 400
 MIN_STEP_S: Final = 0.3
 HOOK_OUTPUT: Final[Mapping[str, str]] = {
     "claude-code": "hook-json",
@@ -450,6 +455,50 @@ def relay_close_event(adapter: str, payload: Mapping[str, Any]) -> bool:
     return False
 
 
+def compact_reminder(sess: Mapping[str, Any]) -> str:
+    """What a session reads after a compaction instead of the whole brief (at most ``START_COMPACT_CAP``).
+
+    Only the callsign and crew id come from the session record (both issued by the server); nothing other
+    agents recorded is quoted, so the line needs no data block. The brief changes between compactions, so
+    the reminder says where the current state is rather than repeating the old one.
+    """
+    callsign = S.clip_item(str(sess.get("callsign") or ""), 24)
+    crew_id = S.clip_item(str(sess.get("crew_id") or ""), 40)
+    who = f"you are still {callsign} in crew {crew_id}" if callsign and crew_id else "this session is still in its crew"
+    lines = [
+        f"Crew: {who}. The context was compacted, so the session brief is no longer in it.",
+        "Crew mode is automatic: claims, checkpoints and reports happen by hook.",
+        "For the crew's current state call crew_status; for the handoff and inbox call session_brief.",
+    ]
+    if sess.get("observe_only"):
+        lines.append("This session is observe-only (plan limit): it cannot claim zones.")
+    return "\n".join(lines)[:START_COMPACT_CAP]
+
+
+def compact_start(adapter: str, sid: str, layout: Layout, *, timeout: float) -> bool:
+    """The short start after a compaction; True when it printed the reminder and the start is done.
+
+    Taken only for a session crewd already holds: a local session record that is this session's, in a
+    crew and not ended, and crewd confirming it over the socket. The confirmation is the gate's
+    ``activity`` op with phase ``blocked``: it marks the session active (so its lane stays live) without
+    opening a tool window or counting a tool call, and crewd refuses it for a session it does not hold.
+    False for anything else (no record, an ended session, crewd down, restarted or slow), so the caller
+    goes on to the full start, which joins.
+    """
+    key = session_key(adapter, sid)
+    sess = read_json(layout.session_file(key))
+    if not isinstance(sess, dict) or sess.get("ended") or not sess.get("crew_id") or sess.get("key") != key:
+        return False
+    if timeout < MIN_STEP_S:
+        return False
+    alive = rpc(layout, "activity", {"key": key, "phase": "blocked", "tool": "SessionStart", "verb": "compact"}, timeout=timeout)
+    if not alive or not alive.get("ok"):
+        return False
+    _env_file(sess)
+    _emit_start(adapter, compact_reminder(sess))
+    return True
+
+
 def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
     from remembra.relay.crew.crewd import find_agent_pid
 
@@ -471,6 +520,12 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
         cwd = payload.get("cwd") or args.cwd or os.getcwd()
         if not sid:
             _emit_start(adapter, "Remembra crew: no session id in the hook payload; crew rules are not active for this session.")
+            return 0
+        # A compaction of a session that is already in its crew: no join (it would rebuild the session
+        # record and take seconds against the server) and no brief; a reminder that says where to look.
+        if payload.get("source") == "compact" and compact_start(
+            adapter, str(sid), layout, timeout=min(COMPACT_ALIVE_TIMEOUT_S, left())
+        ):
             return 0
         agent_pid = args.agent_pid or find_agent_pid(os.getpid(), adapter) or os.getppid()
         plain = payload or {"session_id": sid, "cwd": str(cwd)}

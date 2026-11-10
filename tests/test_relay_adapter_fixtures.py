@@ -803,11 +803,13 @@ def test_a_gemini_start_after_its_prompt_hook_prints_nothing(server, home, tmp_p
         assert late.returncode == 0 and late.stdout == "" and late.stderr == ""
         assert len(proxy.briefs()) == 1  # and asked nothing
 
-        # Claude Code waits for its start hook: a start there always prints (a compaction may have dropped it).
+        # Claude Code waits for its start hook: a start there always prints. After a compaction (F47) a
+        # session that has its brief gets the pointer to it, not a second copy.
         claude = {"session_id": startup["session_id"], "cwd": str(repo), "hook_event_name": "SessionStart"}
         for source in ("startup", "compact", "resume"):
             out = relay(home, proxy.url, "brief", "--hook", "claude-code", stdin=json.dumps({**claude, "source": source}))
-            assert out.stdout.startswith("# Remembra brief"), (source, out.stdout, out.stderr)
+            expected = cli.COMPACT_POINTER if source == "compact" else "# Remembra brief"
+            assert out.stdout.startswith(expected), (source, out.stdout, out.stderr)
 
 
 def _run(home: Path, url: str, payload: dict[str, Any], *extra: str) -> subprocess.Popen[str]:
