@@ -38,7 +38,9 @@ through the `session_brief` and `close_session` MCP tools in any other MCP agent
    "Last session" is the newest handoff that recorded any work. The line is followed by your unread inbox,
    status values, linked projects' latest handoffs, and this project's recent handoffs and checkpoints.
    The brief's text is capped at 6,000 characters (about 1,500 tokens). The `session_brief` MCP tool returns
-   only that text with `compact=true`; by default it also returns the structured JSON, which is larger. See
+   only that text with `compact=true`; by default it also returns the structured JSON, which is larger
+   (cut to about 20,000 characters). After a context compaction (a start with source `compact`), a session
+   that already has its brief gets a two-line pointer to it instead of a second copy. See
    [Reading the brief](#reading-the-brief).
 
 ## Setup
