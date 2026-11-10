@@ -12,8 +12,10 @@ holder of the zone). Kinds and severities come from ``schemas.COLLISION_SEVERITY
 * ``same_worktree_file`` (critical): the same file dirty in two live sessions of one worktree;
 * ``foreign_checkout_write`` (critical): a write into another live session's worktree;
 * ``exclusive_breach`` (high): a write into a zone another principal holds exclusively or has
-  reserved. A ``probable`` breach goes to the dashboard and the holder but never triggers a
-  Stop block or any agent-facing corrective text (the collision row carries the attribution);
+  reserved, or into a file another principal holds through an exclusive file claim (``path_glob``;
+  the claims handed out inside temporary folder zones, F10). A ``probable`` breach goes to the
+  dashboard and the holder but never triggers a Stop block or any agent-facing corrective text
+  (the collision row carries the attribution);
 * ``stale_epoch_write`` (high): written under an older claim epoch than the zone's current
   holder, or after the writer's own lease horizon (fenced);
 * ``same_file`` (medium), ``same_zone_shared`` (low), ``merge_conflict_risk`` (medium, from
@@ -50,7 +52,7 @@ import aiosqlite
 from remembra.crew import schemas as S
 from remembra.crew.claims import FENCE_MARGIN_S, is_fenced
 from remembra.crew.events import Actor, CrewEventLog, EventTx
-from remembra.crew.gatecore import normalize_rel
+from remembra.crew.gatecore import glob_match, normalize_rel
 from remembra.crew.store import dumps, loads, new_id, now_iso
 from remembra.crew.zones import (
     CrewOpError,
@@ -341,6 +343,7 @@ async def record_footprints(
         raise CrewOpError(422, "too_many_footprints", f"At most {MAX_FOOTPRINTS_PER_CALL} footprints per call.")
     conn = tx.conn
     idx = await zone_index(conn, crew_id)
+    file_claims = await _exclusive_file_claims(conn, crew_id)
     now = now_iso()
     opened: list[dict[str, Any]] = []
     touched: list[str] = []
@@ -396,7 +399,11 @@ async def record_footprints(
             (crew_id, session["id"], path),
         )
         attr = str(stored["attribution"]) if stored else attribution
-        opened.extend(await _detect(ops, tx, crew_id, session, path, state, attr, wt, epoch, zones, written_at=written_at))
+        opened.extend(
+            await _detect(
+                ops, tx, crew_id, session, path, state, attr, wt, epoch, zones, written_at=written_at, file_claims=file_claims
+            )
+        )
     await resolve_attributed_commits(tx, crew_id, [fp.get("last_commit") for fp in footprints])
     await auto_resolve(ops, tx, crew_id, paths=touched, session_id=str(session["id"]))
     return opened
@@ -415,6 +422,7 @@ async def _detect(
     zones: Sequence[Mapping[str, Any]],
     *,
     written_at: datetime | None = None,
+    file_claims: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     conn = tx.conn
     me = str(session["id"])
@@ -449,6 +457,27 @@ async def _detect(
             await add(kind="same_worktree_file", session_b=str(osess["id"]))
         elif not same_wt:
             await add(kind="same_file", session_b=str(osess["id"]))
+    # file claims held by others (inside a temporary folder zone the file is claimed, not the zone: F10).
+    # The row names the folder zone the file is in, when there is one, as the whole-zone breach did:
+    # the Stop gate and the dashboard name a breach by its zone.
+    home = next((str(z["id"]) for z in zones if z.get("is_leaf", True)), None)
+    for c in file_claims:
+        glob = str(c["path_glob"])
+        if (c["holder_kind"] == "session" and c.get("holder_session_id") == me) or not _file_claim_covers(glob, path):
+            continue
+        if (
+            isinstance(epoch, int)
+            and written_at is not None
+            and await _written_while_held(conn, crew_id, None, me, epoch, written_at, path_glob=glob)
+        ):
+            continue  # E2E-f, as for a zone below: this session's own write from when it held the file
+        await add(
+            kind="exclusive_breach",
+            session_b=c.get("holder_session_id"),
+            zone_id=home,
+            claim_id=c["id"],
+            evidence={"holder_kind": c["holder_kind"], "path_glob": clip(glob, 512)},
+        )
     # zone claims held by others; epochs
     zone_ids = [str(z["id"]) for z in zones]
     if not zone_ids:
@@ -502,6 +531,35 @@ async def _detect(
     return out
 
 
+async def _exclusive_file_claims(conn: aiosqlite.Connection, crew_id: str) -> list[dict[str, Any]]:
+    """The crew's live exclusive file claims (``path_glob``, no zone): the claims a write can breach.
+
+    Live means what it means for a zone claim (active, offered or reserved, whatever became of
+    the holder's session: the claim decides, and it ends with the session's leases). A serialize
+    micro-lease on a commons file orders writes; it is not a claim of work and is never breached.
+    """
+    return await fetchall(
+        conn,
+        "SELECT * FROM crew_claims WHERE crew_id = ? AND zone_id IS NULL AND path_glob IS NOT NULL AND mode = 'exclusive'"
+        f" AND source != 'micro_lease' AND state IN ({','.join('?' for _ in LIVE_CLAIM_STATES)})",
+        (crew_id, *LIVE_CLAIM_STATES),
+    )
+
+
+def _file_claim_covers(glob: str, path: str) -> bool:
+    """Whether a file claim on ``glob`` covers ``path``, as the gate reads it (``gatecore._file_claim_facts``).
+
+    Equality first: a claim is the literal file path, and one with brackets (a ``[id]`` route)
+    reads as a character class to the glob engine.
+    """
+    if not glob:
+        return False
+    try:
+        return glob == path or glob_match(glob, path)
+    except (ValueError, re.error):
+        return False
+
+
 # holding windows are read from the claim events of the zone (lease renewals are never events, so the
 # window of a session that stopped renewing ends at its reservation: lease_expires_at − 60 s)
 _HOLD_EVENT_TYPES: Final = (
@@ -518,9 +576,19 @@ _HOLD_EVENT_TYPES: Final = (
 
 
 async def _written_while_held(
-    conn: aiosqlite.Connection, crew_id: str, zone_id: str, session_id: str, epoch: int, written_at: datetime
+    conn: aiosqlite.Connection,
+    crew_id: str,
+    zone_id: str | None,
+    session_id: str,
+    epoch: int,
+    written_at: datetime,
+    *,
+    path_glob: str | None = None,
 ) -> bool:
     """Whether ``session_id`` held ``zone_id`` exclusively at claim ``epoch`` when it wrote at ``written_at``.
+
+    With ``path_glob`` (and no zone) the same question about a file claim: its events carry no
+    zone, so they are found by the claim's ``path_glob`` in the event payload.
 
     The window opens at the event that made the session the active holder at that epoch and
     closes at the first event after which it no longer was (another holder, another epoch, or no
@@ -529,17 +597,30 @@ async def _written_while_held(
     """
     from remembra.crew.store import parse_iso
 
-    rows = await fetchall(
-        conn,
-        f"SELECT ts, payload FROM crew_events WHERE crew_id = ? AND zone_id = ? AND type IN"
-        f" ({','.join('?' for _ in _HOLD_EVENT_TYPES)}) ORDER BY seq DESC LIMIT 500",
-        (crew_id, zone_id, *_HOLD_EVENT_TYPES),
-    )
+    types = ",".join("?" for _ in _HOLD_EVENT_TYPES)
+    if path_glob is not None:
+        # plain paths are narrowed in SQL; one that JSON would escape is matched on the decoded payload only
+        plain = path_glob.isascii() and path_glob.isprintable() and not any(ch in path_glob for ch in '"\\')
+        rows = await fetchall(
+            conn,
+            f"SELECT ts, payload FROM crew_events WHERE crew_id = ? AND zone_id IS NULL AND type IN ({types})"
+            " AND (? = '' OR instr(payload, ?) > 0) ORDER BY seq DESC LIMIT 500",
+            (crew_id, *_HOLD_EVENT_TYPES, path_glob if plain else "", path_glob),
+        )
+    else:
+        rows = await fetchall(
+            conn,
+            f"SELECT ts, payload FROM crew_events WHERE crew_id = ? AND zone_id = ? AND type IN ({types})"
+            " ORDER BY seq DESC LIMIT 500",
+            (crew_id, zone_id, *_HOLD_EVENT_TYPES),
+        )
     windows: list[tuple[datetime, datetime | None]] = []
     start: datetime | None = None
     for row in reversed(rows):
         claim = (loads(row["payload"]) or {}).get("claim")
         if not isinstance(claim, dict) or claim.get("mode") != "exclusive":
+            continue
+        if path_glob is not None and (claim.get("zone_id") or claim.get("path_glob") != path_glob):
             continue
         ts = parse_iso(str(row["ts"]))
         mine = claim.get("holder_session_id") == session_id and int(claim.get("epoch") or 0) == epoch
