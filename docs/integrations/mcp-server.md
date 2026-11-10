@@ -60,7 +60,7 @@ Store information in persistent memory.
 | `content` | string | ✅ | Text content to memorize |
 | `metadata` | object | ❌ | Key-value metadata (e.g., `{"source": "meeting"}`) |
 | `ttl` | string | ❌ | Time-to-live: a number and a unit, e.g. `24h`, `7d`, `30d`, `1y` ([TTL formats](../guides/temporal.md#ttl-formats)); a value the server cannot read is refused. Omit for permanent |
-| `project_id` | string | ❌ | Project to store into. Default: the project your `session_brief` resolved, else the configured one. Required once this MCP server was briefed on more than one project ([one server, several conversations](#one-server-several-conversations)) |
+| `project_id` | string | ❌ | Project to store into. Default: the project your `session_brief` resolved, else the configured one. Required once this MCP server was used for more than one project ([one server, several conversations](#one-server-several-conversations)) |
 
 **Example:**
 ```
@@ -599,11 +599,13 @@ desktop app can start a single process for all its conversations, which then sha
   and does not change which project later calls default to.
 - The answer of every crew write ends with the crew it used and your callsign there, for example
   `(in CREW my-project as cd-1)`.
-- Once a server has been used for more than one project, a crew write, `store_memory` or `close_session`
-  that names no project is refused with a message asking for `project_id` (for `close_session`, `root_path`
-  or `git_remote` also work). Nothing is written. Before, such a call followed the project chosen last,
-  which could be another conversation's.
-- `close_session` ends the crew session of the project it closes, not the one used last.
+- Once a server has been used for more than one project (through `session_brief`, `crew_status` or a crew
+  write), a crew write, `store_memory` or `close_session` that names no project is refused with a message
+  asking for `project_id` (for `close_session`, `root_path` or `git_remote` also work). Nothing is written.
+  Before, such a call followed the project chosen last, which could be another conversation's.
+- The answer of `store_memory` carries `project_id`: the project the memory went into.
+- `close_session` ends the crew session of the project it closes, not the one used last. With no brief and
+  one crew seat, a `close_session` that names no project closes that seat's project.
 - A server that crewd recognises as part of one agent's process tree (the agent has crew hooks) serves one
   conversation, so there the project chosen last is still the default.
 - `crew_status` without a project still shows the project chosen last; its first line names the crew.
@@ -620,8 +622,9 @@ in `crew_status`. Set `REMEMBRA_MCP_MAX_WAIT_S` only for a client with a longer 
 
 A stdio server keeps each crew seat's session token in `~/.remembra/mcp/seats/` (directory `0700`, files
 `0600`; a crew session token, never the API key). When the client replaces the server process, the new
-process re-joins as the same crew session: the same callsign, with the claims and tasks it held. `crew_status`
-then says `RESUMED`.
+process re-joins as the same crew session: the same callsign, with the claims and tasks it held. The call
+that does it says `RESUMED`: `crew_status` on its YOU line, a crew write on the line before its crew tag
+(the next `crew_status` then says it once more, with what the seat holds).
 
 - A seat is taken over only when the process that used it is gone (it holds a file lock while it lives), and
   only for the same server, API key, agent and project.
@@ -630,6 +633,9 @@ then says `RESUMED`.
 - Otherwise (a desktop app's server knows no conversation) the seat of this agent's previous server process
   on this machine is resumed, for up to 55 minutes after its last call. After that the server has marked the
   session lost and offers its work as a baton, and the new process joins as a new seat.
+- Tool calls that arrive together after a restart share the one resumed seat.
+- A stored seat is discarded only when the server refuses its token or the session has ended. A failing
+  API key, a refused request or an unreachable server leaves it for the next call.
 - `close_session` removes the stored seat. `REMEMBRA_MCP_SEAT_STORE=0` turns the store off. A remote
   (`sse`, `streamable-http`) server never writes one.
 

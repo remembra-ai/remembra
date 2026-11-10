@@ -62,8 +62,12 @@ HTTP_GRACE_S: Final = 15.0
 # The longest one crew call waits on the server (wait_s). An MCP client gives a tool call about 60 s; a call
 # that runs longer is dropped and the client may replace the stdio server, which costs the session its seat.
 MAX_WAIT_S: Final = 40
-# Join answers that mean a stored seat can never be used again (anything else may be a passing failure).
-_SEAT_GONE_STATUSES: Final = frozenset({400, 401, 403, 404, 409, 410, 422})
+# Join answers that mean a stored seat can never be used again: the server refuses its token (409
+# session_exists) or the session has ended (409 session_ended, 410). Anything else is about the request,
+# the API key or the server (401, 403, 404, 422, 5xx) and says nothing about the seat, which is kept.
+_SEAT_GONE_STATUSES: Final = frozenset({409, 410})
+# Joins are serialised per (MCP session, project) over this many locks (see CrewBridge.seat).
+_JOIN_STRIPES: Final = 64
 MAX_SCOPES: Final = 1000
 # Session-queue kinds delivered immediately (server-generated collisions, human overrides and pause, §7).
 URGENT_KINDS: Final = frozenset({"collision_notice", "override_notice"})
@@ -423,6 +427,10 @@ class Seat:
     notice_etag: str | None = None
     pending: list[dict[str, Any]] = field(default_factory=list)
     current_task_id: str | None = None
+    # How this seat was taken over from an earlier server process ("conversation" or "agent"), until the
+    # agent has been told: once on the first crew write's answer and once on the next crew_status.
+    resumed_write: str | None = None
+    resumed_status: str | None = None
     # set when this seat IS the agent's crew-hook session (see LocalCrew): calls go through crewd
     local: LocalCrew | None = None
     cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
@@ -625,6 +633,15 @@ def error_text(e: CrewApiError, what: str) -> str:
     return f"CREW ERROR ({what}: {e.status} {S.clip_item(e.error, 64)}): {e.message}"
 
 
+def resumed_text(kind: str, *, on_write: bool = False) -> str:
+    """The RESUMED note for a seat taken over from an earlier server process (``kind``: whose seat it was)."""
+    if kind == "conversation":
+        text = "RESUMED after an MCP server restart (this conversation's seat: it keeps what it held"
+        return text + ("; crew_status shows it)" if on_write else ")")
+    text = "RESUMED the seat this agent's previous MCP server process held on this machine (it keeps what that seat held: "
+    return text + ("call crew_status to see it, and " if on_write else "") + "release what is not yours to continue)"
+
+
 def crew_tag(seat: Seat) -> str:
     """Which crew a write went to and as whom: the last line of every crew write's answer."""
     return f"(in CREW {_safe(seat.project_id) or 'this project'} as {_safe(seat.callsign) or 'this session'})"
@@ -651,7 +668,13 @@ def _names_crew(fn: _F) -> _F:
                 raise
             raise CrewUsageError(f"{e} {crew_tag(seat)}") from None
         seat = getattr(self._written, "seat", None)
-        return f"{text}\n{crew_tag(seat)}" if seat is not None else text
+        if seat is None:
+            return text
+        with seat.lock:  # a write (not crew_status) took this seat over from an earlier process: say so, once
+            resumed, seat.resumed_write = seat.resumed_write, None
+        if resumed:
+            text = f"{text}\n{resumed_text(resumed, on_write=True)}"
+        return f"{text}\n{crew_tag(seat)}"
 
     return cast(_F, wrapper)
 
@@ -670,6 +693,7 @@ class CrewBridge:
         # set for a stdio server only (remembra.mcp.server.main): seats then survive a process restart
         self.seat_store: SeatStore | None = None
         self._lock = threading.RLock()
+        self._join_locks = tuple(threading.Lock() for _ in range(_JOIN_STRIPES))
         self._seats: dict[tuple[str, str], dict[str, Seat]] = {}
         self._current: dict[tuple[str, str], str] = {}
         self._used = threading.local()
@@ -936,6 +960,30 @@ class CrewBridge:
                     self._current[scope] = project
                     self._point(scope, project)
             return existing, None
+        # One join at a time per (MCP session, project): tool calls arrive in parallel, and without this each
+        # first call after a restart would join (or resume) for itself and leave several callsigns behind.
+        with self._join_locks[hash((scope, project)) % _JOIN_STRIPES]:
+            with self._lock:
+                existing = self._seats.get(scope, {}).get(project)
+            if existing is not None and not existing.left:  # a parallel call joined while this one waited
+                with self._lock:
+                    if sticky:
+                        self._current[scope] = project
+                    self._point(scope, project)
+                return existing, None
+            return self._join(caller, scope, project, existing, checkout, sticky=sticky)
+
+    def _join(
+        self,
+        caller: CallerInfo,
+        scope: tuple[str, str],
+        project: str,
+        existing: Seat | None,
+        checkout: Mapping[str, Any] | None,
+        *,
+        sticky: bool,
+    ) -> tuple[Seat, dict[str, Any] | None]:
+        """Join ``project``: re-join a seat that left, else resume a stored seat, else a new crew session."""
         http = CrewHttp(caller.client)
         if existing is not None:
             _, body, _ = http.call(
@@ -1072,6 +1120,7 @@ class CrewBridge:
             )
             if seat.session_id == record.session_id:
                 body["resumed_seat"] = "conversation" if store.anchor else "agent"
+                seat.resumed_write = seat.resumed_status = body["resumed_seat"]
             self._store_seat(caller, seat)
             return seat, body
         return None
@@ -1249,7 +1298,10 @@ class CrewBridge:
             return self._look(caller, project_id)
         seat, joined = self.seat(caller, project_id, checkout)
         http = self._http(caller, seat)
-        rejoin = joined or self.touch(caller, seat, force=True) or {}
+        rejoin = dict(joined or self.touch(caller, seat, force=True) or {})
+        with seat.lock:  # taken over from an earlier process by a crew write: this status still has to say so
+            if seat.resumed_status:
+                rejoin["resumed_seat"] = seat.resumed_status
         lines: list[str] = []
         data: list[str] = []
         brief = self._crew_block(http, caller, seat)
@@ -1282,6 +1334,7 @@ class CrewBridge:
             seat.pending.clear()
             seat.notice_cursor = max(seat.notice_cursor, seat.status_cursor)
             seat.last_notice = self._clock()
+            seat.resumed_write = seat.resumed_status = None  # the YOU line above said it
         return join_text(lines, data)
 
     def _look(self, caller: CallerInfo, project_id: str | None) -> str:
@@ -1341,13 +1394,8 @@ class CrewBridge:
         state = _safe(session.get("state")) or "active"
         verified = "key-verified" if seat.verified else "self-declared"
         parts = [f"YOU: {seat.callsign} ({seat.session_id}) · mcp, advisory · {verified} · {state}"]
-        if rejoin.get("resumed_seat") == "conversation":
-            parts.append("RESUMED after an MCP server restart (this conversation's seat: it keeps what it held)")
-        elif rejoin.get("resumed_seat"):
-            parts.append(
-                "RESUMED the seat this agent's previous MCP server process held on this machine "
-                "(it keeps what that seat held: release what is not yours to continue)"
-            )
+        if rejoin.get("resumed_seat"):
+            parts.append(resumed_text(str(rejoin["resumed_seat"])))
         if seat.observe_only:
             parts.append("OBSERVE-ONLY (plan limit: you cannot claim)")
         my_tasks = [t for t in rejoin.get("my_tasks") or [] if isinstance(t, dict)]

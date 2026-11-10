@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -558,3 +559,163 @@ def test_a_killed_stdio_server_is_replaced_by_one_with_the_same_callsign(live, t
         assert callsign_in(fresh) != me and "RESUMED" not in fresh, fresh
     finally:
         third.kill()
+
+
+# ---------------------------------------------------------------------------
+# Review findings: parallel first calls, a resume done by a write, passing join failures
+# ---------------------------------------------------------------------------
+
+
+def _together(n: int, fn) -> list[str]:
+    """Run ``fn`` in ``n`` threads released at the same moment (an MCP client sends tool calls in parallel)."""
+    gate = threading.Barrier(n)
+    outs: list[str] = []
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            gate.wait(timeout=10)
+            outs.append(fn())
+        except BaseException as e:  # noqa: BLE001 - reported below
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert not errors, errors
+    return outs
+
+
+def test_parallel_first_calls_after_a_restart_share_the_one_resumed_seat(live, seats):
+    project = project_name("parallel")
+    seats.start()
+    use(agent(live, "claude-desktop", "par-one", project))
+    me = callsign_in(call("crew_status", project_id=project))
+    seats.kill()
+    seats.start()
+    use(agent(live, "claude-desktop", "par-two", project))
+    outs = _together(6, lambda: call("crew_say", body="back", project_id=project))
+    tags = {o.splitlines()[-1] for o in outs}
+    assert tags == {f"(in CREW {project} as {me})"}, sorted(tags)
+    assert [(r["callsign"], r["session_id"]) for r in rows(live, project)] == [(me, "par-one")]
+    assert len(stored(seats.root)) == 1
+
+
+def test_parallel_first_calls_of_a_new_process_join_once(live, seats):
+    project = project_name("parfresh")
+    seats.start()
+    use(agent(live, "claude-desktop", "fresh-one", project))
+    outs = _together(6, lambda: call("crew_say", body="hello", project_id=project))
+    assert len({o.splitlines()[-1] for o in outs}) == 1, outs
+    assert [r["session_id"] for r in rows(live, project)] == ["fresh-one"]
+    assert joins(live, project) == 1
+
+
+def test_a_write_that_resumes_a_seat_says_so_once_and_the_next_status_says_it_too(live, seats, wall):
+    project = project_name("writeresume")
+    seats.start()
+    use(agent(live, "codex", "conv-x", project))
+    me = callsign_in(call("crew_status", project_id=project))
+    add_zone(live, project, "pos", "src/app/pos/**")
+    add_zone(live, project, "reports", "src/app/reports/**")
+    assert call("crew_claim", zone="pos").startswith("GRANTED zone pos")
+    seats.kill()  # the process exits without close_session
+    wall.now += 30 * 60
+    seats.start()
+    use(agent(live, "codex", "conv-y", project))
+    first = call("crew_claim", zone="reports", project_id=project)
+    assert first.startswith("GRANTED zone reports"), first
+    lines = first.splitlines()
+    assert lines[-1] == f"(in CREW {project} as {me})", first
+    assert lines[-2].startswith("RESUMED the seat this agent's previous MCP server process held on this machine"), first
+    assert "release what is not yours to continue" in lines[-2] and "crew_status" in lines[-2], first
+    assert_clean(first)
+    # said once on writes
+    assert "RESUMED" not in call("crew_say", body="working on reports", project_id=project)
+    # the next crew_status says it too (with what the seat holds), then no more
+    status = call("crew_status", project_id=project)
+    assert callsign_in(status) == me
+    assert "RESUMED the seat this agent's previous MCP server process held on this machine" in status, status
+    assert "zone pos" in status and "zone reports" in status, status
+    assert "RESUMED" not in call("crew_status", project_id=project)
+
+
+def test_a_status_that_resumes_does_not_repeat_it_on_the_next_write(live, seats):
+    project = project_name("statusresume")
+    seats.start()
+    use(agent(live, "codex", "sr-one", project))
+    call("crew_status", project_id=project)
+    seats.kill()
+    seats.start()
+    use(agent(live, "codex", "sr-two", project))
+    assert "RESUMED" in call("crew_status", project_id=project)
+    assert "RESUMED" not in call("crew_say", body="hello", project_id=project)
+    assert "RESUMED" not in call("crew_status", project_id=project)
+
+
+def test_an_anchored_write_that_resumes_names_the_conversations_seat(live, seats):
+    project = project_name("anchwrite")
+    seats.start(anchor="conversation-7")
+    use(agent(live, "claude-code", "aw-one", project))
+    me = callsign_in(call("crew_status", project_id=project))
+    seats.kill()
+    seats.start(anchor="conversation-7")
+    use(agent(live, "claude-code", "aw-two", project))
+    said = call("crew_say", body="back", project_id=project)
+    assert said.splitlines()[-1] == f"(in CREW {project} as {me})", said
+    assert said.splitlines()[-2].startswith("RESUMED after an MCP server restart (this conversation's seat"), said
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(401, "unauthorized"), (403, "forbidden"), (422, "validation"), (404, "route_missing"), (500, "http_500")],
+)
+def test_a_join_failure_that_is_not_about_the_seat_keeps_the_stored_seat(live, seats, monkeypatch, status, error):
+    project = project_name(f"keep{status}")
+    seats.start()
+    use(agent(live, "claude-desktop", "keep-one", project))
+    me = callsign_in(call("crew_status", project_id=project))
+    seats.kill()
+    seats.start()
+    use(agent(live, "claude-desktop", "keep-two", project))
+    real = crew_mod.CrewHttp.call
+    failed: list[int] = []
+
+    def flaky(self, method, path, **kw):
+        if path == "/crews/join" and not failed:
+            failed.append(status)
+            raise crew_mod.CrewApiError(status, error, "the request was refused before the seat was looked at")
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(crew_mod.CrewHttp, "call", flaky)
+    first = call("crew_status", project_id=project)
+    assert failed == [status]
+    assert "YOU:" not in first, first  # the failure is reported, nobody joined as a new callsign
+    assert [r["client_session_id"] for r in stored(seats.root)] == ["keep-one"]
+    again = call("crew_status", project_id=project)
+    assert callsign_in(again) == me and "RESUMED" in again, again
+    assert [(r["callsign"], r["session_id"]) for r in rows(live, project)] == [(me, "keep-one")]
+
+
+def test_a_stored_seat_whose_session_has_ended_is_dropped(live, seats, monkeypatch):
+    project = project_name("ended")
+    seats.start()
+    use(agent(live, "codex", "ended-one", project))
+    first = callsign_in(call("crew_status", project_id=project))
+    record = stored(seats.root)[0]
+    seats.kill()
+    real = crew_mod.CrewHttp.call
+
+    def gone(self, method, path, **kw):
+        if path == "/crews/join" and kw.get("token") == record["token"]:
+            raise crew_mod.CrewApiError(410, "session_gone", "this session is gone")
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(crew_mod.CrewHttp, "call", gone)
+    seats.start()
+    use(agent(live, "codex", "ended-two", project))
+    text = call("crew_status", project_id=project)
+    assert callsign_in(text) != first and "RESUMED" not in text, text
+    assert [r["client_session_id"] for r in stored(seats.root)] == ["ended-two"]
