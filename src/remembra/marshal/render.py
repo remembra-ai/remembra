@@ -22,7 +22,7 @@ from typing import Any
 from remembra.marshal import RULESET_VERSION, codex_hooks
 from remembra.marshal import commands as cmd
 from remembra.marshal.rules import Finding, age, scope
-from remembra.marshal.signals import AgentSignals, Signals, clean_text, slot_ts
+from remembra.marshal.signals import TRAIL_WINDOW, AgentSignals, Signals, clean_text, slot_ts, span_words
 
 WIDTH = 76
 FOOTER_END = "Nothing was changed."
@@ -204,10 +204,27 @@ def _trail_line(sig: Signals, agent: AgentSignals) -> str | None:
     if server is None:
         return None
     name = agent.name
-    parts = [f"{server.entries_7d.get(name, 0)} entries in 7d ({server.handoffs_7d.get(name, 0)} handoffs)"]
-    if server.trail_read:
-        picked = server.pickups_by.get(name, 0)
-        parts.append(f"picked up {picked}" + (f", last {age(sig.now - server.last_pickup[name])}" if picked else ""))
+    entries, handoffs = server.entries_7d.get(name, 0), server.handoffs_7d.get(name, 0)
+    counts = server.pickups_7d
+    if counts is not None:
+        # Both directions over the same 7 days, from the server's own count of pickups.
+        parts = [f"{entries} entries in 7d ({handoffs} handoffs, {counts.read_by_others.get(name, 0)} read by another agent)"]
+        read = counts.read.get(name, 0)
+        said = f"read {read} from other agents"
+        if read:
+            said += f", carried on after {counts.continued.get(name, 0)}"
+            if name in counts.last_read:
+                said += f", last {age(sig.now - counts.last_read[name])}"
+        parts.append(said)
+    else:
+        parts = [f"{entries} entries in 7d ({handoffs} handoffs)"]
+        if server.trail_read:
+            # An older server: the count covers one page of the trail, and the line says which.
+            picked = server.pickups_by.get(name, 0)
+            said = f"read {picked} from other agents in the last {TRAIL_WINDOW} rows"
+            if server.window_span is not None and server.window_rows:
+                said += f" ({span_words(server.window_span)})"
+            parts.append(said + (f", last {age(sig.now - server.last_pickup[name])}" if picked else ""))
     last = server.last_active.get(name)
     if last:
         parts.append(f"last entry {age(sig.now - last)}")
@@ -439,7 +456,17 @@ def render_json(sig: Signals, findings: list[Finding], exit_code: int) -> dict[s
             item["trail"] = {
                 "entries_7d": server.entries_7d.get(name, 0),
                 "handoffs_7d": server.handoffs_7d.get(name, 0),
+                # Handoffs of other agents this one was served, in the one trail page read (see pickups_window).
                 "pickups": server.pickups_by.get(name, 0),
+                "pickups_window": {
+                    "rows": server.window_rows,
+                    "crew_rows": server.window_crew_rows,
+                    "span_seconds": round(server.window_span) if server.window_span is not None else None,
+                },
+                # The server's 7-day counts (None from a server older than 0.17.7).
+                "handoffs_read_7d": server.pickups_7d.read.get(name, 0) if server.pickups_7d else None,
+                "continued_7d": server.pickups_7d.continued.get(name, 0) if server.pickups_7d else None,
+                "handoffs_read_by_others_7d": server.pickups_7d.read_by_others.get(name, 0) if server.pickups_7d else None,
                 "last_entry": {"type": last[0], "age": age(sig.now - last[1])} if last else None,
             }
         agents.append(item)

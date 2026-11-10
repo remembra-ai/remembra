@@ -345,6 +345,22 @@ class CloseLog:
 
 
 @dataclass(frozen=True)
+class PickupCounts:
+    """Pickups in the last 7 days as the server counted them (``pickups`` in ``/api/v1/trail/summary``).
+
+    A pickup: a handoff was served as "Last session" in another agent's brief. ``read``: per reader, handoffs of
+    other agents it was served; ``continued``: of those, how many it wrote a handoff or checkpoint after;
+    ``read_by_others``: per author, how many of its handoffs another agent was served.
+    """
+
+    total: int
+    read: Mapping[str, int]
+    continued: Mapping[str, int]
+    last_read: Mapping[str, float]
+    read_by_others: Mapping[str, int]
+
+
+@dataclass(frozen=True)
 class ServerSignals:
     url: str
     entries_7d: Mapping[str, int]
@@ -356,6 +372,12 @@ class ServerSignals:
     last_pickup: Mapping[str, float]
     handoffs: tuple[tuple[str, float, tuple[tuple[str, float], ...]], ...]  # (author, at, pickups), newest first
     handoffs_all: Mapping[str, int] = field(default_factory=dict)  # the summary's all-time handoff count per agent
+    # What the one trail page held: rows returned, crew rows among them (never counted), seconds from oldest to newest.
+    window_rows: int = 0
+    window_crew_rows: int = 0
+    window_span: float | None = None
+    # The server's own 7-day pickup counts (0.17.7+ servers; None from an older one: only the page above is known).
+    pickups_7d: PickupCounts | None = None
 
     @property
     def baton(self) -> tuple[str, float, tuple[tuple[str, float], ...]] | None:
@@ -1088,6 +1110,16 @@ def _source(config: RelayConfig, home: Path) -> str:
     return source_label(config.source, home)
 
 
+# What the slip means by a pickup, said once where the count is.
+PICKUP_MEANS = (
+    'a pickup = the handoff was served as "Last session" in another agent\'s brief; it does not show the work was continued'
+)
+
+
+def _read_by_another(n: int) -> str:
+    return f"{words.plural(n, 'handoff')} read by another agent"
+
+
 def _summary(body: Any) -> tuple[dict[str, int], dict[str, int], dict[str, float], dict[str, int]]:
     """Per agent: entries in the 7 days, handoffs in the 7 days, the newest entry's time, handoffs all-time."""
     entries: dict[str, int] = {}
@@ -1112,17 +1144,73 @@ def _summary(body: Any) -> tuple[dict[str, int], dict[str, int], dict[str, float
     return entries, handoffs, last, all_time
 
 
+def _strict_count(value: Any) -> int | None:
+    """A count the server sent: a non-negative int, else None (the block it came in is not trusted)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _pickup_counts(body: Any) -> PickupCounts | None:
+    """The summary's 7-day ``pickups`` block, or None when the server sent none (older than 0.17.7) or a shape
+    this build does not know: the slip then says what the trail page shows and no more."""
+    block = body.get("pickups") if isinstance(body, dict) else None
+    if not isinstance(block, dict):
+        return None
+    total = _strict_count(block.get("handoffs_read"))
+    readers, authors = block.get("readers"), block.get("authors")
+    if total is None or block.get("days") != 7 or not isinstance(readers, list) or not isinstance(authors, list):
+        return None
+    read: dict[str, int] = {}
+    continued: dict[str, int] = {}
+    last_read: dict[str, float] = {}
+    read_by_others: dict[str, int] = {}
+    for item in readers:
+        label = agent_label(item.get("agent_id")) if isinstance(item, dict) else None
+        count = _strict_count(item.get("handoffs_read")) if isinstance(item, dict) else None
+        if not label or count is None:
+            return None
+        read[label] = read.get(label, 0) + count
+        continued[label] = continued.get(label, 0) + (_strict_count(item.get("continued")) or 0)
+        at = parse_time(item.get("last_read_at"))
+        if at is not None:
+            last_read[label] = max(at, last_read.get(label, 0.0))
+    for item in authors:
+        label = agent_label(item.get("agent_id")) if isinstance(item, dict) else None
+        count = _strict_count(item.get("handoffs_read_by_others")) if isinstance(item, dict) else None
+        if not label or count is None:
+            return None
+        read_by_others[label] = read_by_others.get(label, 0) + count
+    return PickupCounts(total=total, read=read, continued=continued, last_read=last_read, read_by_others=read_by_others)
+
+
+def span_words(seconds: float) -> str:
+    """A length of time ("40m", "4h", "3d"), for the stretch a page of the trail covers."""
+    seconds = max(0.0, seconds)
+    if seconds < 90:
+        return "under 2m"
+    if seconds < 5400:
+        return f"{round(seconds / 60)}m"
+    if seconds < 36 * 3600:
+        return f"{round(seconds / 3600)}h"
+    return f"{round(seconds / 86400)}d"
+
+
 def _trail(items: list[Any]) -> dict[str, Any]:
     last_entry: dict[str, tuple[str, float]] = {}
     pickups_by: dict[str, int] = {}
     last_pickup: dict[str, float] = {}
     handoffs: list[tuple[str, float, list[tuple[str, float]]]] = []
+    crew_rows = 0
+    times: list[float] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         agent = agent_label(item.get("agent_id"))
         kind = item.get("memory_type")
         at = parse_time(item.get("created_at"))
+        if at is not None:
+            times.append(at)
+        if isinstance(kind, str) and kind.startswith("crew_"):
+            crew_rows += 1  # Crew mode's rows share the page; a pickup hangs on a handoff only
         if not agent or kind not in ("handoff", "checkpoint") or at is None:
             continue
         if agent not in last_entry or at > last_entry[agent][1]:
@@ -1145,6 +1233,9 @@ def _trail(items: list[Any]) -> dict[str, Any]:
         "pickups_by": pickups_by,
         "last_pickup": last_pickup,
         "handoffs": tuple((a, at, tuple(sorted(p, key=lambda x: x[1]))) for a, at, p in ordered),
+        "rows": len(items),
+        "crew_rows": crew_rows,
+        "span": max(times) - min(times) if times else None,
     }
 
 
@@ -1320,10 +1411,22 @@ def collect(
             raw_items = trail_answer.body.get("items")
             items = raw_items if isinstance(raw_items, list) else []
         trail = _trail(items)
+        pickups_7d = _pickup_counts(summary_body)
         if trail_ok:
-            pickups = sum(trail["pickups_by"].values())
-            reads.append(Read("trail", f"last {TRAIL_WINDOW} entries: {len(items)} read · {pickups} pickups", trail_answer.ms))
-        else:
+            page_parts = [f"{len(items) - trail['crew_rows']} handoffs and checkpoints"]
+            if trail["crew_rows"]:
+                page_parts.append(words.plural(trail["crew_rows"], "crew row"))
+            covering = f"; covering {span_words(trail['span'])}" if trail["span"] is not None and items else ""
+            reads.append(
+                Read("trail", f"last {TRAIL_WINDOW} rows: {len(items)} read ({', '.join(page_parts)}{covering})", trail_answer.ms)
+            )
+        if pickups_7d is not None:
+            reads.append(Read("pickups", f"7d: {_read_by_another(pickups_7d.total)} · {PICKUP_MEANS}"))
+        elif trail_ok:
+            # An older server counts no pickups itself: only the page above is known, and it says so.
+            picked_handoffs = sum(1 for _, _, picks in trail["handoffs"] if picks)
+            reads.append(Read("pickups", f"in those rows: {_read_by_another(picked_handoffs)} · {PICKUP_MEANS}"))
+        if not trail_ok:
             why = trail_answer.error or f"HTTP {trail_answer.status}: {_detail(trail_answer)}"
             reads.append(Read("trail", f"couldn't read ({why})", trail_answer.ms, ok=False))
             unchecked.append("pickups and last entries (the trail could not be read)")
@@ -1351,6 +1454,10 @@ def collect(
             last_pickup=trail["last_pickup"],
             handoffs=trail["handoffs"],
             handoffs_all=handoffs_all,
+            window_rows=trail["rows"] if trail_ok else 0,
+            window_crew_rows=trail["crew_rows"] if trail_ok else 0,
+            window_span=trail["span"] if trail_ok else None,
+            pickups_7d=pickups_7d,
         )
     elif check_server and primary.api_key:
         unchecked.append("your trail (the server did not accept a read)")

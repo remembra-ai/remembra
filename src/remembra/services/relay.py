@@ -1140,6 +1140,17 @@ class RelayService:
                 if row["agent"]:
                     week_agents.add(str(row["agent"]))
 
+        pickups = await self.pickup_summary(
+            user_id,
+            week_start,
+            allowed,
+            wrote=[
+                (str(row["agent"]), row["project_id"], _from_julian(float(row["jd"])))
+                for row in recent
+                if row["agent"] and row["jd"] is not None
+            ],
+        )
+
         def _finish(bucket: dict[str, Any], set_key: str) -> dict[str, Any]:
             last_jd = bucket.pop("_last_jd")
             bucket["last_active"] = _from_julian(last_jd).isoformat() if last_jd else None
@@ -1165,6 +1176,7 @@ class RelayService:
             },
             "agents": agent_list,
             "projects": project_list,
+            "pickups": pickups,
         }
 
     async def _latest_summary(self, user_id: str, project_id: str) -> dict[str, Any] | None:
@@ -1364,25 +1376,148 @@ class RelayService:
         return inserted
 
     async def pickups_for(self, user_id: str, handoff_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        """First pickup per reader agent for each handoff, oldest first."""
+        """First pickup per reader agent for each handoff, oldest first.
+
+        A session that closes again supersedes its handoff, and a pickup row
+        names the version that was served. Each handoff here therefore also
+        carries the pickups of the versions it superseded (``handoff_id`` says
+        which version the reader was served), so a pickup does not vanish from
+        the trail when the author closes again.
+        """
         if not handoff_ids:
             return {}
         marks = ",".join("?" for _ in handoff_ids)
         cursor = await self.db.conn.execute(
             f"""
-            SELECT handoff_id, reader_agent, MAX(reader_verified), MIN(picked_up_at), MIN(gap_seconds)
-            FROM relay_pickups WHERE user_id = ? AND handoff_id IN ({marks})
-            GROUP BY handoff_id, reader_agent
-            ORDER BY MIN(julianday(picked_up_at))
-            """,  # noqa: S608 - placeholders only; values are bound
-            [user_id, *handoff_ids],
-        )
-        out: dict[str, list[dict[str, Any]]] = {}
-        for handoff_id, agent, verified, at, gap in await cursor.fetchall():
-            out.setdefault(handoff_id, []).append(
-                {"agent_id": agent, "agent_verified": bool(verified), "picked_up_at": at, "gap_seconds": gap}
+            WITH RECURSIVE chain(root, id, depth) AS (
+                SELECT id, id, 0 FROM memories WHERE user_id = ? AND id IN ({marks})
+                UNION ALL
+                SELECT chain.root, m.id, chain.depth + 1
+                FROM memories m JOIN chain ON m.superseded_by = chain.id
+                WHERE m.user_id = ? AND m.memory_type = 'handoff' AND chain.depth < {PICKUP_CHAIN_MAX_DEPTH}
             )
+            SELECT chain.root, p.handoff_id, p.reader_agent, p.reader_verified, p.picked_up_at, p.gap_seconds
+            FROM chain JOIN relay_pickups p ON p.user_id = ? AND p.handoff_id = chain.id
+            """,  # noqa: S608 - placeholders and a module constant only; values are bound
+            [user_id, *handoff_ids, user_id, user_id],
+        )
+        first: dict[tuple[str, str], dict[str, Any]] = {}
+        for root, handoff_id, agent, verified, at, gap in await cursor.fetchall():
+            when = _parse_iso(at)
+            seen = first.get((root, agent))
+            if seen is None:
+                first[(root, agent)] = {
+                    "agent_id": agent,
+                    "agent_verified": bool(verified),
+                    "picked_up_at": at,
+                    "gap_seconds": gap,
+                    "handoff_id": handoff_id,
+                    "_when": when,
+                }
+                continue
+            seen["agent_verified"] = seen["agent_verified"] or bool(verified)
+            if when is not None and (seen["_when"] is None or when < seen["_when"]):
+                seen.update(picked_up_at=at, gap_seconds=gap, handoff_id=handoff_id, _when=when)
+        out: dict[str, list[dict[str, Any]]] = {}
+        floor = datetime.min.replace(tzinfo=UTC)
+        for (root, _agent), pick in sorted(first.items(), key=lambda kv: kv[1]["_when"] or floor):
+            pick.pop("_when")
+            out.setdefault(root, []).append(pick)
         return out
+
+    async def pickup_summary(
+        self,
+        user_id: str,
+        since: datetime,
+        allowed: list[str] | None = None,
+        wrote: list[tuple[str, str | None, datetime]] | None = None,
+        days: int = 7,
+    ) -> dict[str, Any]:
+        """Pickups since ``since`` (the last ``days`` days), counted from ``relay_pickups`` itself (not from a page of the trail).
+
+        ``readers``: per reader agent, how many handoffs of OTHER agents it was
+        served (``handoffs_read``), how many of those it carried on from
+        (``continued``: it wrote a handoff or checkpoint in that project
+        afterwards, from ``wrote`` = (agent, project, time) of current trail
+        entries) and when it last read one. ``authors``: per writing agent, how
+        many of its handoffs another agent was served. A handoff closed again
+        (superseded) counts once, as the session's current handoff, however
+        many of its versions were read. ``allowed`` restricts to those projects.
+        """
+        where = "user_id = ? AND julianday(picked_up_at) >= julianday(?)"
+        params: list[Any] = [user_id, since.astimezone(UTC).replace(tzinfo=None).isoformat()]
+        if allowed:
+            where += f" AND project_id IN ({','.join('?' for _ in allowed)})"
+            params.extend(allowed)
+        cursor = await self.db.conn.execute(
+            f"SELECT handoff_id, handoff_agent, reader_agent, project_id, picked_up_at FROM relay_pickups WHERE {where}",  # noqa: S608 - placeholders only; values are bound
+            params,
+        )
+        rows = [tuple(r) for r in await cursor.fetchall()]
+        cursor = await self.db.conn.execute(
+            f"""
+            WITH RECURSIVE up(start, id, depth) AS (
+                SELECT DISTINCT handoff_id, handoff_id, 0 FROM relay_pickups WHERE {where}
+                UNION ALL
+                SELECT up.start, m.superseded_by, up.depth + 1
+                FROM up JOIN memories m ON m.id = up.id
+                WHERE m.user_id = ? AND m.superseded_by IS NOT NULL AND up.depth < {PICKUP_CHAIN_MAX_DEPTH}
+            )
+            SELECT start, id, depth FROM up
+            """,  # noqa: S608 - placeholders and a module constant only; values are bound
+            [*params, user_id],
+        )
+        current: dict[str, tuple[int, str]] = {}
+        for start, memory_id, depth in await cursor.fetchall():
+            if start not in current or depth > current[start][0]:
+                current[start] = (int(depth), str(memory_id))
+
+        written: dict[tuple[str, str], datetime] = {}  # (agent, project) -> its newest entry
+        for agent, project, at in wrote or []:
+            key = (agent, project or "")
+            if key not in written or at > written[key]:
+                written[key] = at
+
+        readers: dict[str, dict[str, Any]] = {}
+        authors: dict[str, set[str]] = {}
+        handoffs: set[str] = set()
+        for handoff_id, handoff_agent, reader, project, picked_at in rows:
+            if not reader:
+                continue
+            session_handoff = current.get(handoff_id, (0, str(handoff_id)))[1]
+            handoffs.add(session_handoff)
+            when = _parse_iso(picked_at)
+            bucket = readers.setdefault(reader, {"read": set(), "continued": set(), "last": None})
+            bucket["read"].add(session_handoff)
+            if when is not None and (bucket["last"] is None or when > bucket["last"]):
+                bucket["last"] = when
+            later = written.get((reader, project or ""))
+            if when is not None and later is not None and later > when:
+                bucket["continued"].add(session_handoff)
+            if handoff_agent:
+                authors.setdefault(str(handoff_agent), set()).add(session_handoff)
+        return {
+            "days": days,
+            "since": since.isoformat(),
+            "definition": PICKUP_DEFINITION,
+            "handoffs_read": len(handoffs),
+            "readers": sorted(
+                (
+                    {
+                        "agent_id": name,
+                        "handoffs_read": len(b["read"]),
+                        "continued": len(b["continued"]),
+                        "last_read_at": b["last"].isoformat() if b["last"] else None,
+                    }
+                    for name, b in readers.items()
+                ),
+                key=lambda r: (-r["handoffs_read"], r["agent_id"]),
+            ),
+            "authors": sorted(
+                ({"agent_id": name, "handoffs_read_by_others": len(ids)} for name, ids in authors.items()),
+                key=lambda a: (-a["handoffs_read_by_others"], a["agent_id"]),
+            ),
+        }
 
     async def _crew_brief(
         self, user_id: str, project_id: str | None, agent_id: str | None, client_session_id: str | None
@@ -1403,6 +1538,13 @@ class RelayService:
             if session is not None and session["state"] != "ended":
                 viewer = session["id"]
         return await core.brief_data(crew_id, viewer_session_id=viewer, reader_agent_id=agent_id)
+
+
+# A session that closes N times leaves a chain of N superseded handoffs; the walk stops here whatever the data.
+PICKUP_CHAIN_MAX_DEPTH = 2000
+PICKUP_DEFINITION = (
+    'A pickup: the handoff was served as "Last session" in another agent\'s brief. It does not show that the work was continued.'
+)
 
 
 def _parse_iso(value: Any) -> datetime | None:

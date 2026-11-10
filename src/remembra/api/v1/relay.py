@@ -845,6 +845,10 @@ async def session_brief(
     ] = None,
     hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
     git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
+    record: Annotated[
+        bool,
+        Query(description="false: observe only (an audit or a diagnostic): serve the same brief and record no pickup"),
+    ] = True,
 ) -> dict[str, Any]:
     """Latest handoff that recorded any work ("Last session: ..."; newer empty
     ones are skipped and counted in ``handoffs_skipped``), unread inbox,
@@ -867,7 +871,9 @@ async def session_brief(
 
     Records one pickup event when a handoff written by another agent is
     served (per handoff, reader agent and ``session_id``); nothing else is
-    written."""
+    written. ``record=false`` serves the same brief and writes nothing at all.
+    ``pickup_recorded`` says whether this call wrote a new pickup (a server
+    older than 0.17.7 has neither the parameter nor the field)."""
     _require(current_user, "memory:recall")
     notes: list[str] = []
     agent, verified = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
@@ -905,8 +911,9 @@ async def session_brief(
     )
     brief["resolution"] = resolution
     reader_session = (session_id or "").strip()
-    if agent and _AGENT_RE.match(agent) and (not reader_session or _SESSION_RE.match(reader_session)):
-        await service.record_pickup(
+    brief["pickup_recorded"] = False
+    if record and agent and _AGENT_RE.match(agent) and (not reader_session or _SESSION_RE.match(reader_session)):
+        brief["pickup_recorded"] = await service.record_pickup(
             user_id=current_user.user_id,
             project_id=project,
             handoff=brief.get("handoff"),

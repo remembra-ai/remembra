@@ -943,6 +943,7 @@ class Memory:
         locator: dict[str, Any] | None = None,
         branch: str | None = None,
         head_commit: str | None = None,
+        record: bool = True,
     ) -> dict[str, Any]:
         """Session-start brief: last session, unread inbox, status, linked projects, recent-by-time.
 
@@ -955,12 +956,19 @@ class Memory:
                 (git_remote / root_commit / root_path / repo_name / host / hint_project).
             branch, head_commit: The reader's checkout; a handoff recorded on a
                 different branch/commit is flagged as possibly stale.
+            record: A brief that serves another agent's handoff records a
+                pickup ("picked up by ..." on the trail). ``False`` only looks
+                (an audit or a diagnostic) and records nothing. The result's
+                ``pickup_recorded`` says what the server did; a server older
+                than 0.17.7 ignores ``record`` and returns no such field.
         """
         params: dict[str, Any] = {
             "project_id": self._project(project_id),
             "recent_n": recent_n,
             "inbox_limit": inbox_limit,
         }
+        if not record:
+            params["record"] = "false"
         agent = (agent_id or self.agent_id or "").strip()
         if agent:
             params["agent_id"] = agent
