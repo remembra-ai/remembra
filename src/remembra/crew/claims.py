@@ -361,28 +361,137 @@ async def next_epoch(conn: aiosqlite.Connection, crew_id: str, target: Target) -
     return int(row["m"] if row else 0) + 1
 
 
-async def exclusive_counts(conn: aiosqlite.Connection, session: Mapping[str, Any]) -> tuple[int, int]:
-    """(live exclusive claims of this session, live exclusive claims of this agent id) for the §5.1 caps."""
-    a = await fetchone(
+def claim_unit(row: Mapping[str, Any], zones: Sequence[Mapping[str, Any]]) -> str:
+    """The area a claim counts as for the §5.1 caps.
+
+    A zone claim is its zone and a resource is itself. A file claim counts as the zone that covers
+    it (file claims inside a temporary zone) or, outside every zone, as its folder: every file a
+    session holds in one folder is one area, never one slot per file. That is never more than one
+    claim on the folder itself would lock, so the caps still bound how much a session can hold.
+    """
+    if row.get("zone_id"):
+        return f"zone:{row['zone_id']}"
+    if row.get("resource"):
+        return f"resource:{row['resource']}"
+    glob = str(row.get("path_glob") or "")
+    for z in zones:
+        if glob and P.any_overlap([glob], _globs(z)):
+            return f"zone:{z['id']}"
+    return f"dir:{G.claim_folder(glob)}"
+
+
+_CAP_SETTINGS: Final = {"session": "max_exclusive_claims_per_session", "agent": "max_exclusive_claims_per_agent"}
+
+
+async def _cap_rows(conn: aiosqlite.Connection, session: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(this session's counted exclusive claims, this agent id's counted exclusive claims in the crew)."""
+    mine = await fetchall(
         conn,
-        """SELECT COUNT(*) AS n FROM crew_claims WHERE holder_session_id = ? AND mode = 'exclusive' AND source != 'micro_lease'
-             AND (state IN ('active','offered') OR (state = 'reserved' AND reserved_for = ?))""",
+        """SELECT * FROM crew_claims WHERE holder_session_id = ? AND mode = 'exclusive' AND source != 'micro_lease'
+             AND (state IN ('active','offered') OR (state = 'reserved' AND reserved_for = ?)) ORDER BY created_at""",
         (session["id"], session["id"]),
     )
-    b = await fetchone(
+    agent = await fetchall(
         conn,
-        """SELECT COUNT(*) AS n FROM crew_claims WHERE crew_id = ? AND holder_user_id = ? AND holder_agent_id = ?
-             AND holder_kind = 'session' AND mode = 'exclusive' AND source != 'micro_lease' AND state IN ('active','offered')""",
+        """SELECT * FROM crew_claims WHERE crew_id = ? AND holder_user_id = ? AND holder_agent_id = ?
+             AND holder_kind = 'session' AND mode = 'exclusive' AND source != 'micro_lease' AND state IN ('active','offered')
+             ORDER BY created_at""",
         (session["crew_id"], session["user_id"], session["agent_id"]),
     )
-    return int(a["n"] if a else 0), int(b["n"] if b else 0)
+    return mine, agent
 
 
-async def _over_cap(conn: aiosqlite.Connection, session: Mapping[str, Any], settings: Mapping[str, Any], adding: int = 1) -> bool:
-    per_session, per_agent = await exclusive_counts(conn, session)
-    return per_session + adding > int(settings["max_exclusive_claims_per_session"]) or per_agent + adding > int(
-        settings["max_exclusive_claims_per_agent"]
+def _agent_units(rows: Sequence[Mapping[str, Any]], zones: Sequence[Mapping[str, Any]]) -> dict[str, set[str]]:
+    by_session: dict[str, set[str]] = {}
+    for r in rows:
+        by_session.setdefault(str(r.get("holder_session_id") or ""), set()).add(claim_unit(r, zones))
+    return by_session
+
+
+async def exclusive_counts(conn: aiosqlite.Connection, session: Mapping[str, Any]) -> tuple[int, int]:
+    """(live exclusive areas of this session, live exclusive areas of this agent id) for the §5.1 caps.
+
+    Counted in areas (:func:`claim_unit`), per holding session: two sessions with files in the same
+    folder are two areas of the agent id.
+    """
+    zones = await load_zone_rows(conn, str(session["crew_id"]))
+    mine, agent = await _cap_rows(conn, session)
+    return len({claim_unit(r, zones) for r in mine}), sum(len(u) for u in _agent_units(agent, zones).values())
+
+
+def _cap_message(detail: Mapping[str, Any]) -> str:
+    limit, setting = detail["limit"], detail["setting"]
+    if detail["cap"] == "session":
+        held = ", ".join(str(h["target"]) for h in detail["holding"][:6]) or "none listed"
+        return (
+            f"Per-session claim limit reached: you hold {detail['held_by_you']} of {limit} exclusive areas ({held}). "
+            'Release one you no longer need with crew_claim(action="release"), or the owner can raise '
+            f"{setting} in the crew settings. Files in one folder count as one area."
+        )
+    who = ", ".join(f"{h['callsign']} x{h['count']}" for h in detail["holders"][:8]) or "other sessions"
+    return (
+        f"Per-agent claim limit reached: sessions with agent id {detail['agent_id']} hold {detail['held_by_agent']} of "
+        f"{limit} exclusive areas ({who}); you hold {detail['held_by_you']}. Ask a holder to release with crew_say, "
+        f"or the owner can raise {setting} in the crew settings."
     )
+
+
+async def cap_breach(
+    conn: aiosqlite.Connection,
+    session: Mapping[str, Any],
+    settings: Mapping[str, Any],
+    adding: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Which §5.1 cap refuses ``adding`` (claim rows or targets) for ``session``, with numbers; None when neither does.
+
+    Only areas the session does not hold yet use a slot. The per-agent cap is shared by every
+    session of one agent id (a fleet of sub-agents), so it never refuses a session its first
+    area: a session that holds nothing can always start work, and the per-session cap and the
+    seats bound the total.
+    """
+    zones = await load_zone_rows(conn, str(session["crew_id"]))
+    mine, agent = await _cap_rows(conn, session)
+    my_units = {claim_unit(r, zones) for r in mine}
+    new = {claim_unit(r, zones) for r in adding} - my_units
+    if not new:
+        return None
+    by_session = _agent_units(agent, zones)
+    agent_total = sum(len(u) for u in by_session.values())
+    cap_s = int(settings["max_exclusive_claims_per_session"])
+    cap_a = int(settings["max_exclusive_claims_per_agent"])
+    if len(my_units) + len(new) > cap_s:
+        kind, limit = "session", cap_s
+    elif agent_total + len(new) > cap_a and not (not my_units and len(new) == 1):
+        kind, limit = "agent", cap_a
+    else:
+        return None
+    holders: list[dict[str, Any]] = []
+    for sid, units in by_session.items():
+        s = await _session(conn, sid)
+        holders.append(
+            {"session_id": sid or None, "callsign": str(s["callsign"]) if s else "another session", "count": len(units)}
+        )
+    holders.sort(key=lambda h: (-int(h["count"]), str(h["callsign"])))
+    holding = [{"claim_id": r["id"], "target": await _cap_target(conn, r), "state": r["state"]} for r in mine[:10]]
+    detail: dict[str, Any] = {
+        "cap": kind,
+        "setting": _CAP_SETTINGS[kind],
+        "limit": limit,
+        "needed": len(new),
+        "held_by_you": len(my_units),
+        "held_by_agent": agent_total,
+        "agent_id": session["agent_id"],
+        "holders": holders[:10],
+        "holding": holding,
+    }
+    detail["message"] = _cap_message(detail)
+    return detail
+
+
+async def _cap_target(conn: aiosqlite.Connection, row: Mapping[str, Any]) -> str:
+    if row.get("path_glob") and not row.get("zone_id"):
+        return f"path {row['path_glob']}"
+    return await _target_label(conn, row)
 
 
 def _lease(settings: Mapping[str, Any], now: datetime, *, source: str) -> str:
@@ -499,8 +608,9 @@ class ClaimOutcome:
 
     def body(self) -> dict[str, Any]:
         if self.status == "denied":
+            cap = self.extra.get("cap") if self.error == "claim_cap" else None
             msg = (
-                "Claim limit reached: release a claim first."
+                str((cap or {}).get("message") or "Claim limit reached: release a claim first.")
                 if self.error == "claim_cap"
                 else "Refused: another session holds this area. Work elsewhere or ask the holder with crew_say."
             )
@@ -663,20 +773,19 @@ async def request_claim(
             if r["state"] in ("active", "offered"):
                 return ClaimOutcome("existing", r)
             if r["state"] == "reserved" and r.get("reserved_for") in (None, principal.session_id):
+                # re-taking an own baton makes it live again: it uses a slot like any other claim
+                breach = await _retake_breach(conn, session, settings, [r])
+                if breach is not None:
+                    return await _deny_cap(tx, crew_id, principal, target, breach)
                 row = await _retake(ops, tx, crew_id, r, principal, settings, now)
                 return ClaimOutcome("retaken", row, seq=None)
         blockers = await conflicts(conn, crew_id, target, mode, principal)
         if not blockers and session is not None and mode == "exclusive" and source != "micro_lease":
-            if await _over_cap(conn, session, settings):
-                res = await tx.emit(
-                    crew_id=crew_id,
-                    type="claim.denied",
-                    actor=actor,
-                    payload={"claim": None, "blockers": []},
-                    summary=f"{principal.name} refused a claim: claim limit reached",
-                    refs={"zone_id": target.zone_id, "session_id": principal.session_id},
-                )
-                return ClaimOutcome("denied", None, [], "claim_cap", res.seq)
+            breach = await cap_breach(
+                conn, session, settings, [{"zone_id": target.zone_id, "path_glob": target.path_glob, "resource": target.resource}]
+            )
+            if breach is not None:
+                return await _deny_cap(tx, crew_id, principal, target, breach)
         if blockers:
             views = [await blocker_view(conn, b) for b in blockers[:10]]
             target_label = await _target_label(conn, {"zone_id": target.zone_id, "resource": target.resource})
@@ -729,6 +838,28 @@ async def request_claim(
         if session is not None:
             await _hoarding_check(tx, crew_id, session, actor)
         return ClaimOutcome("granted", row, seq=seq)
+
+
+async def _retake_breach(
+    conn: aiosqlite.Connection, session: Mapping[str, Any] | None, settings: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
+) -> dict[str, Any] | None:
+    """The cap that refuses making these own reserved claims live again (None for a human or a non-exclusive claim)."""
+    live = [r for r in rows if r["mode"] == "exclusive" and r.get("source") != "micro_lease"]
+    if session is None or not live:
+        return None
+    return await cap_breach(conn, session, settings, live)
+
+
+async def _deny_cap(tx: EventTx, crew_id: str, principal: Principal, target: Target, breach: Mapping[str, Any]) -> ClaimOutcome:
+    res = await tx.emit(
+        crew_id=crew_id,
+        type="claim.denied",
+        actor=principal.actor(),
+        payload={"claim": None, "blockers": []},
+        summary=f"{principal.name} refused a claim: per-{breach['cap']} claim limit reached ({breach['limit']})",
+        refs={"zone_id": target.zone_id, "session_id": principal.session_id},
+    )
+    return ClaimOutcome("denied", None, [], "claim_cap", res.seq, {"cap": dict(breach)})
 
 
 async def _insert_claim(
@@ -906,7 +1037,7 @@ async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str) -> list[str]:
                 ):
                     blocked = True
                     break
-        if not blocked and session is not None and q["mode"] == "exclusive" and await _over_cap(conn, session, settings):
+        if not blocked and session is not None and q["mode"] == "exclusive" and await cap_breach(conn, session, settings, [q]):
             blocked = True
         if blocked:
             waiting.append(q)
@@ -1179,8 +1310,9 @@ async def accept_handover(ops: CrewOps, claim: Mapping[str, Any], principal: Pri
         await require_seat(tx.conn, crew_id, session, ops.limits)
         await check_taker_zones(tx.conn, [row], session, human_granted=False)
         settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
-        if row["mode"] == "exclusive" and await _over_cap(tx.conn, session, settings):
-            raise CrewOpError(409, "claim_cap", "Claim limit reached: release a claim before accepting.")
+        breach = await cap_breach(tx.conn, session, settings, [row]) if row["mode"] == "exclusive" else None
+        if breach is not None:
+            raise CrewOpError(409, "claim_cap", f"{breach['message']} Then accept this handover.", cap=breach)
         from_session = row.get("holder_session_id")
         fresh = await _take_over(tx, crew_id, row, session, settings, "handover")
         actor = principal.actor()
@@ -1340,6 +1472,9 @@ async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *,
             raise CrewOpError(422, "cross_crew_reference", "The task does not match this baton.")
         settings = load_settings((await crew_row(conn, crew_id))["settings"])
         if row.get("holder_session_id") == session["id"] and row.get("reserved_for") in (None, session["id"]):
+            breach = await _retake_breach(conn, session, settings, [row])
+            if breach is not None:
+                raise CrewOpError(409, "claim_cap", f"{breach['message']} Then adopt this baton.", cap=breach)
             fresh = await _retake(ops, tx, crew_id, row, Principal.for_session(session), settings, utcnow())
             return {"claims": [claim_view(fresh)], "kind": "retake", "baton_id": None}
         group = [row]
@@ -1378,9 +1513,9 @@ async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *,
         # the baton does not bypass the zone: reserve_for, protected (human grant only), frozen, crew-policy
         human_granted = (offer is not None and offer["via"] == "human") or row.get("reserved_for") == session["id"]
         await check_taker_zones(conn, group, session, human_granted=human_granted)
-        exclusive = sum(1 for r in group if r["mode"] == "exclusive")
-        if exclusive and await _over_cap(conn, session, settings, adding=exclusive):
-            raise CrewOpError(409, "claim_cap", "Claim limit reached: release a claim before adopting this baton.")
+        breach = await cap_breach(conn, session, settings, [r for r in group if r["mode"] == "exclusive"])
+        if breach is not None:
+            raise CrewOpError(409, "claim_cap", f"{breach['message']} Then adopt this baton.", cap=breach)
         cross = kind != "same_checkout" and not _same_checkout(session, from_session)
         adopted: list[dict[str, Any]] = []
         for r in group:

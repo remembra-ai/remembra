@@ -848,26 +848,14 @@ class SqlTaskClaims:
                 blockers=blockers[:10],
             )
 
-        new_exclusive = sum(1 for z in zones if z["id"] not in reuse) if mode == "exclusive" else 0
-        if new_exclusive:
-            per_session = await fetchone(
-                conn,
-                "SELECT COUNT(*) AS n FROM crew_claims WHERE crew_id = ? AND holder_session_id = ? AND mode = 'exclusive'"
-                " AND state IN ('active','offered','reserved')",
-                (crew_id, sid),
-            )
-            per_agent = await fetchone(
-                conn,
-                "SELECT COUNT(*) AS n FROM crew_claims WHERE crew_id = ? AND holder_agent_id = ? AND mode = 'exclusive'"
-                " AND state IN ('active','offered','reserved')",
-                (crew_id, session["agent_id"]),
-            )
-            cap_s = int(settings["max_exclusive_claims_per_session"])
-            cap_a = int(settings["max_exclusive_claims_per_agent"])
-            if per_session and int(per_session["n"]) + new_exclusive > cap_s:
-                raise _err(409, "claim_cap", f"At most {cap_s} live exclusive claims per session.")
-            if per_agent and int(per_agent["n"]) + new_exclusive > cap_a:
-                raise _err(409, "claim_cap", f"At most {cap_a} live exclusive claims per agent.")
+        new_zones = [{"zone_id": z["id"]} for z in zones if z["id"] not in reuse] if mode == "exclusive" else []
+        if new_zones:
+            # the same count and the same refusal as a plain claim (which cap, the numbers, who holds what)
+            from remembra.crew.claims import cap_breach
+
+            breach = await cap_breach(conn, session, settings, new_zones)
+            if breach is not None:
+                raise _err(409, "claim_cap", str(breach["message"]), cap=breach)
 
         lease = now_iso(now_dt + timedelta(seconds=int(settings["lease_ttl_s"])))
         out: list[dict[str, Any]] = []

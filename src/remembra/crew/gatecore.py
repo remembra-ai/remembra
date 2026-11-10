@@ -4985,17 +4985,67 @@ def _set_blocker(info: dict[str, Any], zone: Mapping[str, Any] | None, claim: Ma
         info["holder_session_id"] = claim.get("holder_session_id")
 
 
-def _auto_claim_enabled(zone: Mapping[str, Any], ctx: _Ctx) -> tuple[bool, bool]:
-    """(enabled, over_cap): settings.auto_claim and zone.auto_claim and under the per-session exclusive cap."""
+_UNIT_WILDCARDS: Final = frozenset("*?[{")
+
+
+def claim_folder(glob: str) -> str:
+    """The folder a file claim counts under for the exclusive-claim caps (``.`` for a top-level path).
+
+    ``app/portal/a.tsx`` and ``app/portal/**`` are both ``app/portal``: every file claimed in one
+    folder is one area for the caps, not one slot per file.
+    """
+    segs = [seg for seg in str(glob or "").split("/") if seg]
+    literal: list[str] = []
+    for seg in segs:
+        if any(ch in _UNIT_WILDCARDS for ch in seg):
+            break
+        literal.append(seg)
+    if len(literal) == len(segs):
+        literal = literal[:-1]
+    return "/".join(literal) or "."
+
+
+def _claim_unit(claim: Mapping[str, Any], idx: SnapshotIndex) -> str:
+    """The area ``claim`` counts as for the caps (the server's ``claims.claim_unit``)."""
+    if claim.get("zone_id"):
+        return f"zone:{claim['zone_id']}"
+    if claim.get("resource"):
+        return f"resource:{claim['resource']}"
+    glob = str(claim.get("path_glob") or "")
+    if glob and not any(ch in _UNIT_WILDCARDS for ch in glob):
+        zones = idx.zones.match(glob, False)
+        if zones:
+            return f"zone:{zones[0]['id']}"
+    return f"dir:{claim_folder(glob)}"
+
+
+def own_claim_units(idx: SnapshotIndex, caller: str) -> set[str]:
+    """The areas the caller's exclusive claims use against the per-session cap, counted as the server counts
+    them: live claims, and reservations kept for the caller itself (a baton left for anyone uses no slot)."""
+    return {
+        _claim_unit(c, idx)
+        for c in idx.claims
+        if c.get("holder_kind", "session") == "session"
+        and c.get("holder_session_id") == caller
+        and c.get("mode") == "exclusive"
+        and c.get("source") != "micro_lease"
+        and (c.get("state") in LIVE_HOLD_STATES or (c.get("state") == "reserved" and c.get("reserved_for") == caller))
+    }
+
+
+def _auto_claim_enabled(zone: Mapping[str, Any], ctx: _Ctx, unit: str | None = None) -> tuple[bool, bool]:
+    """(enabled, over_cap): settings.auto_claim and zone.auto_claim and under the per-session exclusive cap.
+
+    ``unit`` is the area the auto-claim would count as (default: the zone); an area the caller
+    already holds uses no new slot.
+    """
     settings = ctx.idx.settings
     if not settings.get("auto_claim", True) or not zone.get("auto_claim", True) or zone.get("protected"):
         return False, False
     if zone.get("mode", "exclusive") == "exclusive":
         cap = int(settings.get("max_exclusive_claims_per_session") or 3)
-        held = sum(
-            1 for c in ctx.idx.claims if ctx.is_mine(c) and c.get("mode") == "exclusive" and c.get("state") in BLOCKING_STATES
-        )
-        if held >= cap:
+        held = own_claim_units(ctx.idx, ctx.caller)
+        if (unit or f"zone:{zone['id']}") not in held and len(held) >= cap:
             return False, True
     return True, False
 
@@ -5238,10 +5288,19 @@ def render_deny_reason(
                 f"Do not edit files in zone {slug}. Work elsewhere."
             )
     elif rule in (17, 19) and (variant.endswith("claim_cap") or (variant.endswith("claim_required") and info.get("over_cap"))):
-        text = (
-            f"{head}you already hold the maximum number of exclusive zones. Release one with "
-            f'crew_claim(action="release") before working in zone {slug}.'
-        )
+        limit = int(idx.settings.get("max_exclusive_claims_per_session") or 3)
+        n_held = len(own_claim_units(idx, caller))
+        if n_held >= limit:
+            text = (
+                f"{head}you hold {n_held} of {limit} exclusive claims, the per-session limit. Release one you no longer need "
+                f'with crew_claim(action="release") before working in zone {slug}.'
+            )
+        else:
+            text = (
+                f"{head}the crew's per-agent claim limit is reached by other sessions with your agent id; you hold "
+                f"{n_held} of your {limit}. Ask a holder to release with crew_say, or @{human} can raise "
+                f"max_exclusive_claims_per_agent, before working in zone {slug}."
+            )
     elif rule in (17, 19) and variant.endswith("claim_required"):
         text = f'{head}zone {slug} must be claimed first: call crew_claim(zone="{slug}") or crew_task(action="start").'
     elif rule in (17, 19) and variant.endswith("unconfirmed_pending"):

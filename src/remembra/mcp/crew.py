@@ -510,6 +510,23 @@ def _path_claim_covered(
         return False
 
 
+def _count(value: Any) -> int | None:
+    """A small non-negative count from a server body (None when it is not one)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 100_000 else None
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
+
+
+def _safe_target(value: Any) -> str | None:
+    """``zone pos`` / ``path src/a.ts`` / a resource from a server body, when it is plain tokens."""
+    kind, _, rest = str(value or "").partition(" ")
+    if kind in ("zone", "path") and _safe(rest):
+        return f"{kind} {rest}"
+    return _safe(value)
+
+
 def agent_text(value: Any) -> str:
     """One agent- or repo-authored value under the brief's trust policy (R-14,
     :func:`remembra.relay.handoff.police_item`): low-trust text becomes the fixed withheld note,
@@ -1011,7 +1028,8 @@ class CrewBridge:
         except CrewApiError:
             mine = []
         if mine:
-            parts.append("holding " + ", ".join(self._claim_label(http, seat, c, data) for c in mine[:6]))
+            more = f", +{len(mine) - 6} more" if len(mine) > 6 else ""
+            parts.append("holding " + ", ".join(self._claim_label(http, seat, c, data) for c in mine[:6]) + more)
         else:
             parts.append("holding nothing")
         return " · ".join(parts)
@@ -1402,6 +1420,7 @@ class CrewBridge:
                 return join_text(["NOTHING TO CLAIM:", *[f"- {n}" for n in notes]], data)
             raise CrewUsageError('Name what to claim: zone="pos", paths=["src/app/pos/cart.ts"] or task="T-14".')
         lines: list[str] = []
+        granted = capped = 0
         for label, target in targets:
             body: dict[str, Any] = {
                 **target,
@@ -1425,11 +1444,13 @@ class CrewBridge:
                     timeout=(wait_s + HTTP_GRACE_S) if wait_s > 0 else None,
                 )
             except CrewApiError as e:
+                capped += 1 if e.status == 409 and e.error == "claim_cap" else 0
                 lines.append(self._refused(http, seat, label, e, data))
                 continue
             waited = int(round(time.monotonic() - started))
             claim = (res or {}).get("claim") or {}
             state = claim.get("state")
+            granted += 1 if state == "active" else 0
             if state == "active":
                 note = f" after waiting {waited}s" if wait_s > 0 and waited >= 1 else ""
                 lines.append(f"GRANTED {label} ({claim.get('mode')}, epoch {claim.get('epoch')}, {claim.get('id')}){note}")
@@ -1442,6 +1463,11 @@ class CrewBridge:
                 )
             else:
                 lines.append(f"{str(state or status).upper()} {label} ({claim.get('id')})")
+        if capped and len(targets) > 1:
+            lines.append(
+                f"PARTIAL: {granted} of {len(targets)} granted; the rest hit a claim limit (see above). "
+                "What was granted stays yours: release what you do not need."
+            )
         lines.extend(f"- {n}" for n in notes)
         return join_text(lines, data)
 
@@ -1457,7 +1483,7 @@ class CrewBridge:
     def _refused(self, http: CrewHttp, seat: Seat, label: str, e: CrewApiError, data: list[str]) -> str:
         blockers = e.body.get("blockers") or []
         if e.status == 409 and e.error == "claim_cap":
-            return f"REFUSED: {label}: claim limit reached. Release a claim you no longer need first."
+            return f"REFUSED: {label}: {self._cap_text(http, seat, e)}"
         if e.status == 409 and blockers:
             b = blockers[0]
             holder = _safe(b.get("holder_callsign")) or self._callsign(http, seat, b.get("holder_session_id"))
@@ -1476,6 +1502,76 @@ class CrewBridge:
         if e.status == 423:
             return f"REFUSED: {label}: {e.message} Work elsewhere or ask @mani with crew_say."
         return error_text(e, f"claim {label}")
+
+    def _cap_text(self, http: CrewHttp, seat: Seat, e: CrewApiError) -> str:
+        """Which claim limit refused, with the numbers and the holders (never "release a claim" to a session
+        that holds none). The server's ``cap`` detail when it sends one; a 0.17.5 server sends none, so the
+        same facts are worked out from the crew's claims."""
+        cap = e.body.get("cap")
+        if isinstance(cap, dict) and cap.get("cap") in ("session", "agent") and _count(cap.get("limit")) is not None:
+            limit, mine = _count(cap.get("limit")), _count(cap.get("held_by_you")) or 0
+            if cap["cap"] == "session":
+                held = ", ".join(t for t in (_safe_target(h.get("target")) for h in _dicts(cap.get("holding"))[:6]) if t)
+                return (
+                    f"Per-session claim limit reached: you hold {mine} of {limit} exclusive areas"
+                    + (f" ({held})" if held else "")
+                    + '. Release one you no longer need with crew_claim(action="release"), or the owner can raise '
+                    "max_exclusive_claims_per_session in the crew settings. Files in one folder count as one area."
+                )
+            who = ", ".join(
+                f"{sign} x{n}"
+                for sign, n in ((_safe(h.get("callsign")), _count(h.get("count"))) for h in _dicts(cap.get("holders"))[:8])
+                if sign and n
+            )
+            agent = _safe(cap.get("agent_id")) or "yours"
+            return (
+                f"Per-agent claim limit reached: sessions with agent id {agent} hold {_count(cap.get('held_by_agent')) or 0} "
+                f"of {limit} exclusive areas" + (f" ({who})" if who else "") + f"; you hold {mine}. "
+                "Ask a holder to release with crew_say, or the owner can raise max_exclusive_claims_per_agent "
+                "in the crew settings."
+            )
+        try:
+            claims = [c for c in self._claims(http, seat) if c.get("mode") == "exclusive" and c.get("source") != "micro_lease"]
+        except CrewApiError:
+            return "claim limit reached (the per-session limit, or the per-agent limit shared by sessions with your agent id)."
+        mine_rows = [
+            c
+            for c in claims
+            if c.get("holder_session_id") == seat.session_id
+            and (
+                c.get("state") in ("active", "offered")
+                or (c.get("state") == "reserved" and c.get("reserved_for") == seat.session_id)
+            )
+        ]
+        counts: dict[str, int] = {}
+        for c in claims:
+            sid = c.get("holder_session_id")
+            if (
+                sid
+                and sid != seat.session_id
+                and c.get("holder_agent_id") == seat.agent_id
+                and c.get("state") in ("active", "offered")
+            ):
+                counts[str(sid)] = counts.get(str(sid), 0) + 1
+        who = ", ".join(
+            f"{self._callsign(http, seat, sid) or 'another session'} x{n}"
+            for sid, n in sorted(counts.items(), key=lambda kv: -kv[1])[:8]
+        )
+        others = sum(counts.values())
+        agent = _safe(seat.agent_id) or "yours"
+        if not mine_rows:
+            return (
+                f"claim limit reached, and you hold no exclusive claim: this is the per-agent limit shared by every session "
+                f"with agent id {agent}" + (f" ({who} hold {others})" if who else "") + ". Ask a holder to release with "
+                "crew_say, or the owner can raise max_exclusive_claims_per_agent in the crew settings."
+            )
+        held = ", ".join(self._claim_label(http, seat, c) for c in mine_rows[:6])
+        return (
+            f"claim limit reached. You hold {len(mine_rows)} exclusive claim(s): {held}"
+            + (f"; other sessions with agent id {agent} hold {others} ({who})" if who else "")
+            + '. Release one you no longer need with crew_claim(action="release"), or the owner can raise the '
+            "claim limits in the crew settings."
+        )
 
     def _my_claims(
         self,

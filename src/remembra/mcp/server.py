@@ -2187,6 +2187,9 @@ async def crew_claim(
     paths=["src/app/cart.ts"]. Your own reserved area needs no adopt: a plain claim re-takes
     it. handover: give your claim to to="@codex-1".
     accept/decline: answer a handover offered to you.
+    Limits (defaults; the owner can raise them in the crew settings): 3 exclusive areas per session
+    and 6 for all sessions of one agent id. A zone is one area, and files in one folder count as one area,
+    so a job in one folder needs one slot. A refusal names the limit and who holds what.
 
     Args:
         action: claim | release | adopt | handover | accept | decline.

@@ -485,7 +485,7 @@ def test_over_the_exclusive_cap_no_auto_claim() -> None:
     v = run("Write", WRITE_INVOICE, snap=snap, claim=lambda r: calls.append(r) or "granted")
     assert (v.rule, v.decision, v.variant) == (17, "deny", "claim_required")
     assert calls == []
-    assert "maximum number of exclusive zones" in (v.reason or "")
+    assert "you hold 3 of 3 exclusive claims, the per-session limit" in (v.reason or "")
 
 
 def test_file_claim_policy_claims_the_file() -> None:
