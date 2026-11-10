@@ -1106,6 +1106,8 @@ class Memory:
         from_agent: str | None = None,
         expires_at: str | None = None,
         idempotency_key: str | None = None,
+        in_reply_to: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Send a targeted message to another agent's inbox.
 
@@ -1119,6 +1121,10 @@ class Memory:
             expires_at: Optional ISO-8601 expiry timestamp.
             idempotency_key: Optional key: sending again with the same key returns the first message
                 instead of storing a second one (safe to retry after a lost response).
+            in_reply_to: Optional inbox id this message answers. The server checks that it names a
+                message you can see (a 422 otherwise) and files the reply under that message's
+                project unless ``project_id`` is given. A server older than this field ignores it.
+            project_id: Optional project to file the message under (overrides ``metadata.project_id``).
 
         Returns:
             Dict with `inbox_id`, `status`, and `created_at`.
@@ -1134,6 +1140,10 @@ class Memory:
             payload["from_agent"] = sender
         if expires_at:
             payload["expires_at"] = expires_at
+        if in_reply_to:
+            payload["in_reply_to"] = in_reply_to
+        if project_id:
+            payload["project_id"] = project_id
         if idempotency_key:
             return self._request("POST", "/api/v1/inbox/send", json=payload, headers={"Idempotency-Key": idempotency_key})
         return self._request("POST", "/api/v1/inbox/send", json=payload)
@@ -1148,7 +1158,9 @@ class Memory:
 
         Args:
             agent_id: The logical recipient to fetch for.
-            status: "unread" (default) or "all".
+            status: "unread" (default), "open" (unread, read or accepted: not finished),
+                "accepted" (taken on, not finished) or "all". A server older than "open" and
+                "accepted" answers those two with a 422.
             limit: Max rows to return (1-200).
 
         Returns:
@@ -1172,8 +1184,9 @@ class Memory:
 
         Args:
             inbox_id: The item to ack.
-            result: Optional terminal status — "done", "blocked", or "rejected".
-                    Omit to mark the row as simply "read".
+            result: "accepted" (taken on, not finished: it stays open) or a terminal
+                    status — "done", "blocked", or "rejected". Omit to mark an unread
+                    row as simply "read".
             note: Optional free-text note from the receiving agent.
 
         Returns:

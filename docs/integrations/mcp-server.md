@@ -544,8 +544,9 @@ Recall, timeline and list results include `metadata`, `memory_type`, `source_id`
 named in the returned memories (`entities_total` holds the unfiltered count).
 
 `get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
-`ack_inbox(inbox_id, result?, note?)` marks an inbox item read after you act on it, or `done`, `blocked` or `rejected` with an optional note.
-`send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
+`get_inbox(status=…)` takes `unread` (default), `open` (unread, read or accepted: everything not finished), `accepted` or `all`.
+`ack_inbox(inbox_id, result?, note?)` marks an unread item read, or `accepted` (taken on, not finished: it stays open and your next brief lists it), or `done`, `blocked` or `rejected`, with an optional note. A plain ack never reopens an item that is already accepted or finished.
+`send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`) and `in_reply_to` (the `inbox_id` of the message it answers: the server checks that it names a message you received or sent, and the recipient sees the link in its brief and in `get_inbox`).
 Sending again is safe: if the same sender's identical message (same recipient, subject, body, project and
 `in_reply_to`) is still unread from the last 10 minutes, the server returns that message instead of storing a
 second copy. HTTP clients can also send an `Idempotency-Key` header on `POST /api/v1/inbox/send`: the same key

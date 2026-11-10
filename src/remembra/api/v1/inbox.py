@@ -49,12 +49,14 @@ from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.crew.access import is_human
 from remembra.inbox.manager import (
+    INBOX_ID_RE,
     RESERVED_KINDS,
     TERMINAL_STATUSES,
     InboxManager,
     ReservedSenderError,
     idempotent_inbox_id,
     is_reserved_sender,
+    reply_link,
     same_message,
     sender_label,
 )
@@ -178,6 +180,15 @@ class SendInboxRequest(BaseModel):
         pattern=r"^[a-z][a-z0-9_]{0,31}$",
         description="Message kind. 'override' and 'pause' are server-set only.",
     )
+    in_reply_to: str | None = Field(
+        default=None,
+        max_length=80,
+        description=(
+            "The inbox id this message answers. It must name a message the sender can see (422 otherwise); the reply "
+            "is then filed under that message's project unless project_id is given. Stored as metadata.in_reply_to "
+            "and returned as in_reply_to on every row. (metadata.in_reply_to sent directly is stored unchecked.)"
+        ),
+    )
 
     @field_validator("to_agent", "subject", "from_agent")
     @classmethod
@@ -210,6 +221,10 @@ class InboxRow(BaseModel):
     sender_kind: str = "agent"
     sender_verified: bool = False
     sender_label: str | None = None
+    in_reply_to: str | None = Field(
+        default=None,
+        description="The inbox id this message answers (a well-formed metadata.in_reply_to), else null",
+    )
 
 
 def _inbox_row(row: dict[str, Any]) -> InboxRow:
@@ -218,6 +233,7 @@ def _inbox_row(row: dict[str, Any]) -> InboxRow:
     data["sender_kind"] = row.get("sender_kind") or "agent"
     data["sender_verified"] = bool(row.get("sender_verified"))
     data["sender_label"] = sender_label(row)
+    data["in_reply_to"] = reply_link(row.get("metadata"))
     return InboxRow(**data)
 
 
@@ -228,12 +244,17 @@ class SendInboxResponse(BaseModel):
     project_id: str | None = None
     sender_kind: str = "agent"
     sender_verified: bool = False
+    in_reply_to: str | None = None
 
 
 class AckInboxRequest(BaseModel):
-    result: Literal["done", "blocked", "rejected"] | None = Field(
+    result: Literal["accepted", "done", "blocked", "rejected"] | None = Field(
         default=None,
-        description=(f"Terminal ack status. Omit to simply mark the row as 'read'. Allowed: {sorted(TERMINAL_STATUSES)}"),
+        description=(
+            "'accepted' (taken on, not finished: the row stays open) or a terminal status "
+            f"({sorted(TERMINAL_STATUSES)}). Omit to mark an unread row 'read'; a row that is already accepted or "
+            "finished keeps its status."
+        ),
     )
     note: str | None = Field(default=None, max_length=4000)
 
@@ -306,8 +327,40 @@ async def send_to_inbox(
             )
         if payload.kind in RESERVED_KINDS:
             raise _reserved_422(f"kind '{payload.kind}' is reserved for the server")
-    project_id = _send_project(current_user, _requested_project(payload))
+    requested_project = _requested_project(payload)
+    # A reply link sent as the field is checked: it must name a message this caller can see (its account,
+    # its projects and, for a key bound to one agent, a message that agent sent or received).
+    in_reply_to = (payload.in_reply_to or "").strip() or None
+    if in_reply_to is not None:
+        if not INBOX_ID_RE.fullmatch(in_reply_to):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "in_reply_to_invalid",
+                    "message": "in_reply_to must be an inbox id (inbox_ followed by hex digits), as get_inbox returns it.",
+                },
+            )
+        original = await inbox.get_one(current_user.user_id, in_reply_to, project_ids=_allowed_projects(current_user))
+        own = _own_agent(current_user)
+        if original is not None and own is not None and own not in (original.get("to_agent"), original.get("from_agent")):
+            original = None
+        if original is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "in_reply_to_not_found",
+                    "message": "in_reply_to names no message you can see: use the inbox_id of a message you received or sent.",
+                },
+            )
+        if not (payload.project_id and payload.project_id.strip()):
+            # filed where the conversation is, unless the body names a project itself
+            requested_project = (
+                original.get("project_id") or (original.get("metadata") or {}).get("project_id") or requested_project
+            )
+    project_id = _send_project(current_user, requested_project)
     metadata = {k: v for k, v in payload.metadata.items() if k != "project_id"}
+    if in_reply_to is not None:
+        metadata["in_reply_to"] = in_reply_to
     # A retried send returns the first message instead of storing a second copy: by Idempotency-Key, or,
     # without one, when the same sender's identical message is still unread from the last few minutes.
     key = request.headers.get("Idempotency-Key")
@@ -351,6 +404,7 @@ async def send_to_inbox(
             project_id=earlier.get("project_id") or (earlier.get("metadata") or {}).get("project_id"),
             sender_kind=earlier.get("sender_kind") or sender_kind,
             sender_verified=bool(earlier.get("sender_verified")),
+            in_reply_to=reply_link(earlier.get("metadata")),
         )
     await relay_guard(request, response, current_user.user_id)
     try:
@@ -400,6 +454,7 @@ async def send_to_inbox(
         project_id=row.get("project_id"),
         sender_kind=row.get("sender_kind") or sender_kind,
         sender_verified=bool(row.get("sender_verified")),
+        in_reply_to=reply_link(row.get("metadata")),
     )
 
 
@@ -418,8 +473,11 @@ async def get_inbox(
     # Aliased to keep the "status" query-param name while avoiding shadowing the
     # `fastapi.status` module — the error handlers below reference status.HTTP_*.
     status_filter: Annotated[
-        Literal["unread", "all"],
-        Query(alias="status", description="'unread' (default) or 'all'."),
+        Literal["unread", "open", "accepted", "all"],
+        Query(
+            alias="status",
+            description="'unread' (default), 'open' (unread, read or accepted: not finished), 'accepted' or 'all'.",
+        ),
     ] = "unread",
     limit: Annotated[int, Query(ge=1, le=200)] = 20,
     project_id: ProjectQuery = None,
@@ -486,8 +544,8 @@ async def list_inbox_messages(
     current_user: CurrentUserDep,
     inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
     status_filter: Annotated[
-        Literal["unread", "open", "all"],
-        Query(alias="status", description="'open' (default: unread or read), 'unread' or 'all'."),
+        Literal["unread", "open", "accepted", "all"],
+        Query(alias="status", description="'open' (default: unread, read or accepted), 'unread', 'accepted' or 'all'."),
     ] = "open",
     agent_id: Annotated[str | None, Query(max_length=128, description="Only messages to or from this agent")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -576,7 +634,7 @@ async def ack_inbox(
     current_user: CurrentUserDep,
     inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
 ) -> AckInboxResponse:
-    """Mark an inbox row read/done/blocked/rejected with an optional note."""
+    """Mark an inbox row read, accepted (taken on, not finished), done, blocked or rejected, with an optional note."""
     try:
         row = await inbox.ack(
             owner_user_id=current_user.user_id,

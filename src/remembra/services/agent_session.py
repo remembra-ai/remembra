@@ -31,7 +31,7 @@ from typing import Any
 import structlog
 
 from remembra.core.time import utcnow
-from remembra.inbox.manager import sender_label
+from remembra.inbox.manager import reply_link, sender_label
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import assess_text, handoff_has_substance
 from remembra.security.secrets import scrub, scrub_value
@@ -43,6 +43,7 @@ STATUS_KEY_FIELD = "status_key"
 STATUS_VALUE_FIELD = "status_value"
 MAX_STATUS_KEY_LEN = 128
 INBOX_PREVIEW_CHARS = 200
+INBOX_ACCEPTED_SHOWN = 5  # accepted (taken on, not finished) messages listed in a brief
 # The brief's "Recent" block: at most this many of the project's latest handoffs and checkpoints.
 MAX_RECENT_IN_BRIEF = 5
 # Handoffs the brief looks through (newest first) for the last one that recorded any work.
@@ -532,7 +533,10 @@ class AgentSessionService:
     ) -> dict[str, Any]:
         """The agent's unread messages for the brief. With ``current_project`` (and no project restriction) it
         lists that project's messages and untagged ones, and counts the rest as ``other_projects_unread``: a
-        message tagged with another project belongs to that project's sessions."""
+        message tagged with another project belongs to that project's sessions.
+
+        Messages the agent accepted (taken on, not finished) are listed apart, under ``accepted_count`` and
+        ``accepted_items``, with the same project rule: a new session of the agent still sees what it owes."""
         now_iso = datetime.now(UTC).isoformat()
         try:
             columns = await self._inbox_columns()
@@ -562,56 +566,78 @@ class AgentSessionService:
             trust_col = "trust_score" if "trust_score" in columns else "NULL"
             # sender provenance (main v5); an older table has no such columns
             provenance = ", sender_kind, sender_verified" if {"sender_kind", "sender_verified"} <= columns else ""
-            cursor = await self.db.conn.execute(
-                f"""
-                SELECT inbox_id, from_agent, subject, body, created_at, {trust_col} AS trust_score{provenance}
+            select_sql = f"""
+                SELECT inbox_id, from_agent, subject, body, created_at, metadata, {trust_col} AS trust_score{provenance}
                 FROM agent_inbox
-                WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
+                WHERE owner_user_id = ? AND to_agent = ? AND status = ?
                   AND (expires_at IS NULL OR expires_at > ?){project_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
                 LIMIT ?
-                """,  # noqa: S608 - placeholders only; values are bound
-                (user_id, agent_id, now_iso, *project_args, limit),
-            )
+                """  # noqa: S608 - placeholders only; values are bound
+            cursor = await self.db.conn.execute(select_sql, (user_id, agent_id, "unread", now_iso, *project_args, limit))
             rows = await cursor.fetchall()
+            cursor = await self.db.conn.execute(
+                f"""
+                SELECT COUNT(*) FROM agent_inbox
+                WHERE owner_user_id = ? AND to_agent = ? AND status = 'accepted'
+                  AND (expires_at IS NULL OR expires_at > ?){project_sql}
+                """,  # noqa: S608 - placeholders only; values are bound
+                (user_id, agent_id, now_iso, *project_args),
+            )
+            accepted_row = await cursor.fetchone()
+            accepted_count = int(accepted_row[0]) if accepted_row else 0
+            accepted_rows: list[Any] = []
+            if accepted_count and limit > 0:
+                cursor = await self.db.conn.execute(
+                    select_sql, (user_id, agent_id, "accepted", now_iso, *project_args, min(limit, INBOX_ACCEPTED_SHOWN))
+                )
+                accepted_rows = list(await cursor.fetchall())
         except Exception as e:  # agent_inbox table absent (inbox disabled)
             log.warning("session_brief_inbox_unavailable", error=str(e))
             return {"available": False, "agent_id": agent_id, "unread_count": 0, "items": []}
 
-        items = []
-        for r in rows:
-            # Messages are scrubbed on send; this covers rows stored before that (SEC-23). The whole
-            # body is scrubbed before it is cut to a preview, so a key cut in half is not shown either.
-            body = scrub(r["body"] or "")
-            subject = scrub(r["subject"] or "")
-            trust = r["trust_score"]
-            if trust is None:
-                # Written before messages were scored (or on a table without the
-                # column): score the whole message now, not just the preview.
-                trust = assess_text(r["from_agent"], subject, body).trust
-            items.append(
-                {
-                    "inbox_id": r["inbox_id"],
-                    "from_agent": r["from_agent"],
-                    "sender_label": sender_label(
-                        {
-                            "from_agent": r["from_agent"],
-                            "sender_kind": r["sender_kind"] if "sender_kind" in r.keys() else "agent",  # noqa: SIM118 - sqlite Row
-                            "sender_verified": r["sender_verified"] if "sender_verified" in r.keys() else 0,  # noqa: SIM118 - sqlite Row
-                        }
-                    ),
-                    "subject": subject,
-                    "created_at": r["created_at"],
-                    "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),
-                    "trust_score": trust,
-                }
-            )
         return {
             "available": True,
             "agent_id": agent_id,
             "unread_count": int(count_row[0]) if count_row else 0,
             "other_projects_unread": other_count,
-            "items": items,
+            "items": [self._inbox_brief_item(r) for r in rows],
+            "accepted_count": accepted_count,
+            "accepted_items": [self._inbox_brief_item(r) for r in accepted_rows],
+        }
+
+    @staticmethod
+    def _inbox_brief_item(r: Any) -> dict[str, Any]:
+        """One inbox row as the brief carries it (scrubbed, scored, with its provenance label and reply link)."""
+        # Messages are scrubbed on send; this covers rows stored before that (SEC-23). The whole
+        # body is scrubbed before it is cut to a preview, so a key cut in half is not shown either.
+        body = scrub(r["body"] or "")
+        subject = scrub(r["subject"] or "")
+        trust = r["trust_score"]
+        if trust is None:
+            # Written before messages were scored (or on a table without the
+            # column): score the whole message now, not just the preview.
+            trust = assess_text(r["from_agent"], subject, body).trust
+        try:
+            metadata = json.loads(r["metadata"] or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        return {
+            "inbox_id": r["inbox_id"],
+            "from_agent": r["from_agent"],
+            "sender_label": sender_label(
+                {
+                    "from_agent": r["from_agent"],
+                    "sender_kind": r["sender_kind"] if "sender_kind" in r.keys() else "agent",  # noqa: SIM118 - sqlite Row
+                    "sender_verified": r["sender_verified"] if "sender_verified" in r.keys() else 0,  # noqa: SIM118 - sqlite Row
+                }
+            ),
+            "subject": subject,
+            "created_at": r["created_at"],
+            "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),
+            "trust_score": trust,
+            # the message this one answers (None when it answers nothing)
+            "in_reply_to": reply_link(metadata),
         }
 
     async def known_agents(self, user_id: str, project_ids: list[str] | None = None) -> list[str]:

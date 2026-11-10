@@ -54,8 +54,15 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_INBOX_STATUSES: set[str] = {"unread", "read", "done", "blocked", "rejected"}
+VALID_INBOX_STATUSES: set[str] = {"unread", "read", "accepted", "done", "blocked", "rejected"}
 TERMINAL_STATUSES: set[str] = {"done", "blocked", "rejected"}
+# Not finished yet: unread, read (seen) and accepted (taken on by the recipient, not finished).
+OPEN_STATUSES: tuple[str, ...] = ("unread", "read", "accepted")
+# What an ack may set: a terminal status, or "accepted". No result is a plain "read".
+ACK_RESULTS: frozenset[str] = frozenset({*TERMINAL_STATUSES, "accepted"})
+_OPEN_SQL = "status IN ('unread', 'read', 'accepted')"
+# An inbox id as this module makes them (``inbox_`` + hex), for a reply link.
+INBOX_ID_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
 SCOPES: frozenset[str] = frozenset({"all", "project", "unscoped"})
 RESERVED_SENDER_NAMES: frozenset[str] = frozenset({"mani", "human", "system", "remembra"})
 RESERVED_KINDS: frozenset[str] = frozenset({"override", "pause"})
@@ -170,6 +177,15 @@ def _recipient_sql(recipient: str | None) -> tuple[str, list[Any]]:
     if recipient is None:
         return "", []
     return " AND to_agent = ?", [recipient]
+
+
+def reply_link(metadata: Any) -> str | None:
+    """The inbox id a message answers: ``metadata.in_reply_to`` when it is a well-formed inbox id.
+
+    The API checks the id when it is sent as the ``in_reply_to`` field; older clients put it in the
+    metadata themselves, unchecked, so anything that is not an inbox id reads as "no link"."""
+    value = metadata.get("in_reply_to") if isinstance(metadata, dict) else None
+    return value if isinstance(value, str) and INBOX_ID_RE.fullmatch(value) else None
 
 
 def _new_inbox_id() -> str:
@@ -467,7 +483,8 @@ class InboxManager:
         Args:
             owner_user_id: The API-key owner's user_id (tenant scope).
             agent_id: The logical recipient name.
-            status: "unread" (default) or "all".
+            status: "unread" (default), "open" (unread, read or accepted: not
+                finished), "accepted" (taken on, not finished) or "all".
             limit: Max rows to return.
             project_ids: The caller's project allow-list (None = unrestricted).
             project_id / scope: optional narrowing (see :func:`project_filter`).
@@ -478,13 +495,17 @@ class InboxManager:
         if not agent_id:
             raise ValueError("agent_id must not be empty")
 
-        if status not in {"unread", "all"}:
-            raise ValueError(f"status must be 'unread' or 'all', got '{status}'")
+        if status not in {"unread", "open", "accepted", "all"}:
+            raise ValueError(f"status must be 'unread', 'open', 'accepted' or 'all', got '{status}'")
 
         limit = max(1, min(int(limit), 200))
         now_iso = datetime.now(UTC).isoformat()
         scope_sql, scope_params = await self._scope_sql(project_ids, project_id, scope)
-        status_sql = " AND status = 'unread'" if status == "unread" else ""
+        status_sql = {
+            "unread": " AND status = 'unread'",
+            "accepted": " AND status = 'accepted'",
+            "open": f" AND {_OPEN_SQL}",
+        }.get(status, "")
         query = f"""
             SELECT * FROM agent_inbox
             WHERE owner_user_id = ?
@@ -584,8 +605,8 @@ class InboxManager:
 
         Args:
             owner_user_id: Tenant scope.
-            status: "unread", "open" (unread or read: not yet done/blocked/
-                rejected) or "all".
+            status: "unread", "open" (unread, read or accepted: not yet
+                done/blocked/rejected), "accepted" or "all".
             agent_id: Only messages to or from this agent.
             limit: Max rows (1-200). offset: rows to skip.
             project_ids / project_id / scope: project scoping (see :func:`project_filter`).
@@ -594,16 +615,18 @@ class InboxManager:
         Returns ``{"items": [...], "total": N}``, newest first; expired rows
         are skipped.
         """
-        if status not in {"unread", "open", "all"}:
-            raise ValueError(f"status must be 'unread', 'open' or 'all', got '{status}'")
+        if status not in {"unread", "open", "accepted", "all"}:
+            raise ValueError(f"status must be 'unread', 'open', 'accepted' or 'all', got '{status}'")
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         where = "owner_user_id = ? AND (expires_at IS NULL OR expires_at > ?)"
         params: list[Any] = [owner_user_id, datetime.now(UTC).isoformat()]
         if status == "unread":
             where += " AND status = 'unread'"
+        elif status == "accepted":
+            where += " AND status = 'accepted'"
         elif status == "open":
-            where += " AND status IN ('unread', 'read')"
+            where += f" AND {_OPEN_SQL}"
         agent = (agent_id or "").strip()
         if agent:
             where += " AND (to_agent = ? OR from_agent = ?)"
@@ -647,7 +670,7 @@ class InboxManager:
             f"""
             SELECT agent,
                    SUM(is_to * (status = 'unread')) AS unread,
-                   SUM(is_to * (status IN ('unread', 'read'))) AS open,
+                   SUM(is_to * ({_OPEN_SQL})) AS open,
                    SUM(is_to) AS received,
                    SUM(1 - is_to) AS sent,
                    MAX(julianday(created_at)) AS last_jd,
@@ -701,8 +724,11 @@ class InboxManager:
         Args:
             owner_user_id: Tenant scope.
             inbox_id: The inbox row to ack.
-            result: Optional terminal status: "done", "blocked", or "rejected".
-                    If omitted, status becomes "read".
+            result: "accepted" (taken on, not finished: the row stays open) or a
+                    terminal status: "done", "blocked", or "rejected".
+                    If omitted, an unread row becomes "read"; a row that is
+                    already accepted or finished keeps its status (a plain ack
+                    never reopens or downgrades it) and only takes the note.
             note: Optional free-text note from the receiving agent.
             project_ids: The caller's project allow-list; a row outside it is
                 "not found".
@@ -712,25 +738,34 @@ class InboxManager:
         Returns the updated row. Raises ValueError on bad inputs or if the
         row does not exist / is not owned by caller.
         """
-        if result is not None and result not in TERMINAL_STATUSES:
-            raise ValueError(f"result must be one of {sorted(TERMINAL_STATUSES)} or omitted, got '{result}'")
+        if result is not None and result not in ACK_RESULTS:
+            raise ValueError(f"result must be one of {sorted(ACK_RESULTS)} or omitted, got '{result}'")
 
         existing = await self.get_one(owner_user_id, inbox_id, project_ids=project_ids, recipient=recipient)
         if existing is None:
             raise ValueError(f"Inbox item '{inbox_id}' not found")
 
-        new_status = result if result else "read"
         now_iso = datetime.now(UTC).isoformat()
-
-        await self._db.conn.execute(
-            """
-            UPDATE agent_inbox
-               SET status = ?, ack_at = ?, ack_note = ?, ack_result = ?
-             WHERE inbox_id = ? AND owner_user_id = ?
-            """,
-            (new_status, now_iso, note, result, inbox_id, owner_user_id),
-        )
-        await self._db.conn.commit()
+        if result is None and existing.get("status") in ACK_RESULTS:
+            # "Mark read" on a row that is already accepted or finished: its status and result stand.
+            new_status = str(existing["status"])
+            if note is not None:
+                await self._db.conn.execute(
+                    "UPDATE agent_inbox SET ack_at = ?, ack_note = ? WHERE inbox_id = ? AND owner_user_id = ?",
+                    (now_iso, note, inbox_id, owner_user_id),
+                )
+                await self._db.conn.commit()
+        else:
+            new_status = result if result else "read"
+            await self._db.conn.execute(
+                """
+                UPDATE agent_inbox
+                   SET status = ?, ack_at = ?, ack_note = ?, ack_result = ?
+                 WHERE inbox_id = ? AND owner_user_id = ?
+                """,
+                (new_status, now_iso, note, result, inbox_id, owner_user_id),
+            )
+            await self._db.conn.commit()
 
         logger.info(
             "inbox_acked owner=%s id=%s status=%s",

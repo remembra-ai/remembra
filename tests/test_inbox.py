@@ -26,7 +26,8 @@ async def inbox(in_memory_db):
 
 
 def test_valid_statuses_are_well_known():
-    assert set(VALID_INBOX_STATUSES) == {"unread", "read", "done", "blocked", "rejected"}
+    # "accepted" (taken on, not finished) joined the model with F53
+    assert set(VALID_INBOX_STATUSES) == {"unread", "read", "accepted", "done", "blocked", "rejected"}
     assert set(TERMINAL_STATUSES) == {"done", "blocked", "rejected"}
     assert TERMINAL_STATUSES.issubset(VALID_INBOX_STATUSES)
 

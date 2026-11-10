@@ -1094,6 +1094,10 @@ def render_last_session(
 _neutralize = neutralize  # kept for callers of the old private name
 
 
+# An inbox id (the reply link of a brief item): only this shape is shown outside the item's own text.
+_INBOX_REF_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
+
+
 def _inbox_line(item: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -> str:
     sent = relative_time(item.get("created_at"), now)
     verdict = _verdict_for_item([item.get("from_agent"), item.get("subject"), item.get("body_preview")], item, allowed)
@@ -1101,8 +1105,10 @@ def _inbox_line(item: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -
         return f"- [{item.get('inbox_id')}] {sent}: {withheld_note(verdict, item.get('inbox_id'))}"
     # the provenance label, never the bare sender name: "agent X (self-declared)" can't pass for Mani
     sender = item.get("sender_label") or f"agent {item.get('from_agent')} (self-declared)"
+    answers = item.get("in_reply_to")
+    reply = f" (reply to {answers})" if isinstance(answers, str) and _INBOX_REF_RE.fullmatch(answers) else ""
     return (
-        f"- [{item.get('inbox_id')}] from {show_text(sender, limit=90)}, {sent}: "
+        f"- [{item.get('inbox_id')}] from {show_text(sender, limit=90)}, {sent}{reply}: "
         f"{show_text(item.get('subject'), limit=80)} — {show_text(item.get('body_preview'), verdict, 120)}"
     )
 
@@ -1293,6 +1299,13 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         more = f"; {elsewhere} more in other projects" if elsewhere else ""
         data.append(f"Inbox: {inbox.get('unread_count') or 0} unread here{more} (get_inbox for bodies, ack_inbox when done)")
         data.extend(_inbox_line(item, now, allowed) for item in (inbox.get("items") or [])[:5])
+    accepted = (inbox or {}).get("accepted_count")
+    if inbox and inbox.get("available", True) and isinstance(accepted, int) and not isinstance(accepted, bool) and accepted > 0:
+        data.append(
+            f"Inbox: {accepted} accepted (taken on, not finished; ack_inbox result=done when finished, "
+            'get_inbox status="accepted" for bodies)'
+        )
+        data.extend(_inbox_line(item, now, allowed) for item in (inbox.get("accepted_items") or [])[:5])
     status_items = brief.get("status_items") or []
     if status_items:
         data.append("Status:")
