@@ -88,7 +88,8 @@ def use(client: Memory) -> None:
 
 def call(name: str, **args: Any) -> str:
     out = asyncio.run(server.mcp.call_tool(name, args))
-    blocks = out[0] if isinstance(out, tuple) else out
+    # a failure comes back as a CallToolResult (isError set, same text); a success as (content, structured)
+    blocks = out[0] if isinstance(out, tuple) else getattr(out, "content", out)
     return str(blocks[0].text)
 
 

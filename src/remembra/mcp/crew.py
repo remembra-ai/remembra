@@ -180,6 +180,23 @@ class CrewUsageError(Exception):
     """The tool was called with arguments that cannot work (answered as text, no REST call)."""
 
 
+class FailureText(str):
+    """The text of a tool result that reports a failure.
+
+    It is the same text an agent always got (``REFUSED: ...``, ``CREW UNAVAILABLE: ...``, a JSON error
+    envelope); the MCP server sends a result of this type with ``isError`` set, so a client, a script or
+    an audit can tell a failed call from a successful one without parsing the text. ``outage`` marks a
+    failure caused by the server not answering (as opposed to the server refusing the call).
+    """
+
+    outage: bool
+
+    def __new__(cls, text: str, *, outage: bool = False) -> FailureText:
+        self = super().__new__(cls, text)
+        self.outage = outage
+        return self
+
+
 def _clean_message(text: Any, limit: int = 300) -> str:
     return S.clip_item(sanitize_error_message(Exception(str(text or ""))), limit)
 
@@ -767,6 +784,13 @@ def is_outage(e: CrewApiError) -> bool:
 def outage_outcome(e: CrewApiError) -> str:
     """What an outage means for the call that hit it: certainly not carried out, or unknown."""
     return NOT_CARRIED_OUT if e.not_sent or e.status in _NOT_REACHED_STATUSES else OUTCOME_UNKNOWN
+
+
+def _result(text: str, failures: Sequence[CrewApiError]) -> str:
+    """``text``, as a :class:`FailureText` when any part of the call failed."""
+    if not failures:
+        return text
+    return FailureText(text, outage=any(is_outage(e) for e in failures))
 
 
 def error_text(e: CrewApiError, what: str) -> str:
@@ -2110,6 +2134,7 @@ class CrewBridge:
                 return join_text(["NOTHING TO CLAIM:", *[f"- {n}" for n in notes]], data)
             raise CrewUsageError('Name what to claim: zone="pos", paths=["src/app/pos/cart.ts"] or task="T-14".')
         lines: list[str] = []
+        failures: list[CrewApiError] = []
         granted = capped = 0
         widened: dict[str, list[str]] = {}  # zone id -> the paths a whole-zone-only server widened to it
         asked = wait_s
@@ -2153,6 +2178,7 @@ class CrewBridge:
                     continue
                 capped += 1 if e.status == 409 and e.error == "claim_cap" else 0
                 lines.append(self._refused(http, seat, label, e, data))
+                failures.append(e)
                 continue
             waited = int(round(time.monotonic() - posted))
             claim = (res or {}).get("claim") or {}
@@ -2181,7 +2207,8 @@ class CrewBridge:
                 "What was granted stays yours: release what you do not need."
             )
         lines.extend(f"- {n}" for n in notes)
-        return join_text(lines, data)
+        # one target refused or not answered: the caller does not hold everything it asked for
+        return _result(join_text(lines, data), failures)
 
     def _blocker_text(self, http: CrewHttp, seat: Seat, blockers: Sequence[Mapping[str, Any]]) -> str:
         if not blockers:
@@ -2431,6 +2458,7 @@ class CrewBridge:
             return self._no_match(http, seat, "NOTHING RELEASED: you hold no live claim on that.", zone=zone, paths=paths)
         lines = []
         data: list[str] = []
+        failures: list[CrewApiError] = []
         for c in claims:
             label = self._claim_label(http, seat, c, data)
             if c.get("state") == "reserved" and c.get("reserve_reason") == "human_hold":
@@ -2450,6 +2478,7 @@ class CrewBridge:
                 _, res, _ = http.call("POST", f"/claims/{c['id']}/release", token=seat.token, json=body)
             except CrewApiError as e:
                 lines.append(error_text(e, f"release {c['id']}"))
+                failures.append(e)
                 continue
             state = ((res or {}).get("claim") or {}).get("state") or "released"
             line = f"RELEASED {label} → {state}"
@@ -2457,7 +2486,7 @@ class CrewBridge:
             if c.get("state") == "reserved" and re.fullmatch(r"refs/remembra/baton/[A-Za-z0-9_/-]{1,120}", ref):
                 line += f" (the work saved with it is no longer offered; it stays as {ref} in the checkout that saved it)"
             lines.append(line)
-        return join_text(lines, data)
+        return _result(join_text(lines, data), failures)
 
     def _adopt(self, http: CrewHttp, seat: Seat, *, zone: str | None, paths: Sequence[str] | None, task: str | None) -> str:
         if task:
@@ -2616,6 +2645,7 @@ class CrewBridge:
         who = self._callsign(http, seat, target) or target
         lines = []
         data: list[str] = []
+        failures: list[CrewApiError] = []
         for c in claims:
             body: dict[str, Any] = {"to": target}
             if reason:
@@ -2624,9 +2654,10 @@ class CrewBridge:
                 http.call("POST", f"/claims/{c['id']}/handover", token=seat.token, json=body)
             except CrewApiError as e:
                 lines.append(error_text(e, f"handover {c['id']}"))
+                failures.append(e)
                 continue
             lines.append(f"OFFERED {self._claim_label(http, seat, c, data)} to {who} (they accept or decline within 10 min).")
-        return join_text(lines, data)
+        return _result(join_text(lines, data), failures)
 
     def _answer_handover(self, http: CrewHttp, seat: Seat, action: str, *, zone: str | None, task: str | None) -> str:
         claims = [c for c in self._claims(http, seat) if c.get("state") == "offered" and c.get("offered_to") == seat.session_id]
@@ -2641,15 +2672,17 @@ class CrewBridge:
         if not claims:
             return f"NOTHING TO {action.upper()}: no handover is offered to you."
         lines = []
+        failures: list[CrewApiError] = []
         for c in claims:
             label = self._claim_label(http, seat, c)
             try:
                 http.call("POST", f"/claims/{c['id']}/{action}", token=seat.token)
             except CrewApiError as e:
                 lines.append(error_text(e, f"{action} {c['id']}"))
+                failures.append(e)
                 continue
             lines.append(f"{'ACCEPTED' if action == 'accept' else 'DECLINED'} {label}")
-        return "\n".join(lines)
+        return _result("\n".join(lines), failures)
 
     # -- crew_guard ---------------------------------------------------------------------
 

@@ -36,6 +36,7 @@ import dataclasses
 import difflib
 import functools
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -49,7 +50,7 @@ from typing import Annotated, Any, Literal, cast
 import anyio
 import httpx
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
 
 from remembra import __version__
@@ -65,12 +66,14 @@ from remembra.mcp.crew import (
     CrewBridge,
     CrewHttp,
     CrewUsageError,
+    FailureText,
     clean_client_session_id,
     hook_adapter_of,
     local_crew,
 )
 from remembra.mcp.crew import _clean_message as _crew_clean_message
 from remembra.mcp.crew import error_text as crew_error_text
+from remembra.mcp.crew import is_outage as crew_is_outage
 from remembra.mcp.crew import transport_error as _crew_transport_error
 from remembra.relay.declared_facts import normalize_close_facts, normalize_crew_evidence
 from remembra.relay.identity import canonical_git_remote
@@ -296,13 +299,26 @@ def _dump_data(payload: dict[str, Any]) -> str:
     return dump_untrusted(payload)
 
 
+def _fail(payload: dict[str, Any], *, outage: bool = False) -> str:
+    """A JSON error envelope (``{"status": "error"}`` / ``{"ok": false}``) as a result flagged ``isError``."""
+    return FailureText(json.dumps(payload), outage=outage)
+
+
+def _is_outage(e: BaseException) -> bool:
+    """The server did not answer, or a gateway answered for it: nothing this caller did wrong."""
+    if isinstance(e, MemoryTimeoutError | httpx.HTTPError):
+        return True
+    return isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES
+
+
 def _error(e: Exception) -> str:
+    outage = _is_outage(e)
     if isinstance(e, MemoryTimeoutError):
         # no HTTP answer, so no code; "timed_out" tells it from an error the server reported
-        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": None, "timed_out": True})
+        return _fail({"status": "error", "error": sanitize_error_message(e), "code": None, "timed_out": True}, outage=outage)
     if isinstance(e, MemoryError):
-        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
-    return json.dumps({"status": "error", "error": sanitize_error_message(e)})
+        return _fail({"status": "error", "error": sanitize_error_message(e), "code": e.status_code}, outage=outage)
+    return _fail({"status": "error", "error": sanitize_error_message(e)}, outage=outage)
 
 
 def _memory_view(
@@ -477,11 +493,11 @@ def store_memory(
         if effective_type is None and metadata and metadata.get("type") in _STORE_TYPES:
             effective_type = str(metadata["type"])  # ING-25: metadata.type -> memory_type
         if effective_type == "status":
-            return json.dumps(
+            return _fail(
                 {"status": "error", "error": "Use store_status(key, value) for status values so the old value is replaced."}
             )
         if effective_type is not None and effective_type not in _STORE_TYPES:
-            return json.dumps({"status": "error", "error": f"memory_type must be one of {list(_STORE_TYPES)}"})
+            return _fail({"status": "error", "error": f"memory_type must be one of {list(_STORE_TYPES)}"})
 
         client = _get_client()
         # This call's project, else the one this session's session_brief / crew_status resolved.
@@ -489,7 +505,7 @@ def store_memory(
         if not target:
             refusal = _unnamed_project_refusal("store_memory", _chosen_projects())
             if refusal:
-                return json.dumps({"status": "error", "error": refusal})
+                return _fail({"status": "error", "error": refusal})
             target = _session_project().get("project_id")
         stored_in = client._project(target)
         result = client.store(
@@ -582,7 +598,7 @@ def recall_memories(
         and entity search only.
     """
     if not query and not filters:
-        return json.dumps({"status": "error", "error": "Either query or filters (or both) must be provided."})
+        return _fail({"status": "error", "error": "Either query or filters (or both) must be provided."})
 
     try:
         client = _get_client()
@@ -715,7 +731,7 @@ def forget_memories(
     """
     targets = [bool(memory_id), bool(entity), bool(all_memories)]
     if sum(targets) != 1:
-        return json.dumps({"status": "error", "error": "Specify exactly one of memory_id, entity, or all_memories=true"})
+        return _fail({"status": "error", "error": "Specify exactly one of memory_id, entity, or all_memories=true"})
     try:
         client = _get_client()
 
@@ -724,7 +740,7 @@ def forget_memories(
         elif entity:
             name = entity.strip()
             if not name:
-                return json.dumps({"status": "error", "error": "entity must not be blank"})
+                return _fail({"status": "error", "error": "entity must not be blank"})
             project = client._project((project_id or "").strip() or None)
             if dry_run or confirm != f"DELETE MEMORIES ABOUT {name} IN {project}":
                 preview = _forget_entity_preview(client, name, project)
@@ -736,7 +752,7 @@ def forget_memories(
         else:
             project = (project_id or "").strip()
             if not project:
-                return json.dumps(
+                return _fail(
                     {
                         "status": "error",
                         "error": "all_memories requires an explicit project_id. User-wide wipes are not available via MCP.",
@@ -1449,12 +1465,12 @@ def close_session(
             if locator is not None:
                 refused = _folder_fallback_refusal(client, locator, root_path, _session_project().get("project_id"))
                 if refused:
-                    return json.dumps({"status": "error", "error": refused})
+                    return _fail({"status": "error", "error": refused})
                 close_project = _project_for_locator(client, locator)
             else:
                 refusal = _unnamed_project_refusal("close_session", _chosen_projects())
                 if refusal:
-                    return json.dumps({"status": "error", "error": refusal + " (root_path or git_remote also work.)"})
+                    return _fail({"status": "error", "error": refusal + " (root_path or git_remote also work.)"})
                 remembered = _session_project()
                 locator = remembered.get("locator")
                 project_id = None if locator else remembered.get("project_id")
@@ -1488,7 +1504,7 @@ def close_session(
             elif _STDIO_SERVER:
                 project_id, origin = _single_namespace(), "relay-project"  # one namespace, by choice
                 if not project_id:
-                    return json.dumps({"status": "error", "error": _no_project_text("close_session", client)})
+                    return _fail({"status": "error", "error": _no_project_text("close_session", client)})
             else:
                 origin = "configured"
 
@@ -1575,7 +1591,7 @@ def close_session(
     except Exception as e:
         if isinstance(e, MemoryError) and e.status_code == 422:
             # One format for a refused close, with the shape it wanted.
-            return json.dumps(
+            return _fail(
                 {"status": "error", "error": sanitize_error_message(e), "code": 422, "expected_facts": CLOSE_FACTS_EXAMPLE}
             )
         return _error(e)
@@ -2244,7 +2260,7 @@ def timeline(
         JSON with memories, total matches, and the applied range.
     """
     if order not in ("asc", "desc"):
-        return json.dumps({"status": "error", "error": "order must be 'asc' or 'desc'"})
+        return _fail({"status": "error", "error": "order must be 'asc' or 'desc'"})
     try:
         client = _get_client()
         result = client.timeline(
@@ -2495,11 +2511,11 @@ def send_to_inbox(
             sent["in_reply_to"] = reply_to
         return _dump(sent)
     except ValueError as e:
-        return json.dumps({"ok": False, "error": str(e)})
+        return _fail({"ok": False, "error": str(e)})
     except MemoryError as e:
-        return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
+        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
     except Exception as e:
-        return json.dumps({"ok": False, "error": sanitize_error_message(e)})
+        return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
 
 @mcp.tool(
@@ -2585,14 +2601,14 @@ def get_inbox(
             ]
         return _dump_data(out)
     except ValueError as e:
-        return json.dumps({"ok": False, "error": str(e)})
+        return _fail({"ok": False, "error": str(e)})
     except MemoryError as e:
         mismatch = _inbox_identity_mismatch(e, agent_id)
         if mismatch is not None:
-            return json.dumps(mismatch)
-        return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
+            return _fail(mismatch)
+        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
     except Exception as e:
-        return json.dumps({"ok": False, "error": sanitize_error_message(e)})
+        return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
 
 def _own_inbox_agent() -> str:
@@ -2717,10 +2733,10 @@ def ack_inbox(
                     f" The crew hooks on this machine run as {names}, so an id they announced is in the {names} "
                     "inbox. See health_check."
                 )
-            return json.dumps({"ok": False, "error": sanitize_error_message(e) + hint, "code": 404, "this_agent": own})
+            return _fail({"ok": False, "error": sanitize_error_message(e) + hint, "code": 404, "this_agent": own})
         if result == "accepted" and e.status_code == 422:
             # a server older than the accepted state refuses the value
-            return json.dumps(
+            return _fail(
                 {
                     "ok": False,
                     "code": 422,
@@ -2731,9 +2747,9 @@ def ack_inbox(
                     ),
                 }
             )
-        return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
+        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
     except Exception as e:
-        return json.dumps({"ok": False, "error": sanitize_error_message(e)})
+        return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
 
 # ---------------------------------------------------------------------------
@@ -2814,13 +2830,13 @@ def _crew_caller() -> CallerInfo:
 
 def _crew_error(e: Exception) -> str:
     if isinstance(e, CrewUsageError):
-        return f"CREW: {e}"
+        return FailureText(f"CREW: {e}")
     if isinstance(e, CrewApiError):
-        return crew_error_text(e, "crew")
+        return FailureText(crew_error_text(e, "crew"), outage=crew_is_outage(e))
     api_error = _as_crew_api_error(e)
     if api_error is not None:
         text = crew_error_text(api_error, "crew")
-        return f"{text} {NO_SETTINGS_HINT}" if NO_SETTINGS and _is_connect_error(e) else text
+        return FailureText(f"{text} {NO_SETTINGS_HINT}" if NO_SETTINGS and _is_connect_error(e) else text, outage=True)
     return _error(e)
 
 
@@ -2859,7 +2875,7 @@ async def _run_crew(
     """
     errors = crew_schemas.validate_mcp_call(tool, {k: v for k, v in args.items() if v is not None})
     if errors:
-        return "INVALID ARGUMENTS: " + "; ".join(errors[:5])
+        return FailureText("INVALID ARGUMENTS: " + "; ".join(errors[:5]))
     project_arg = str(args.get("project_id") or "").strip()
     path_arg = str(args.get("root_path") or "").strip()
     named = tool != "crew_status" and bool(project_arg or path_arg)
@@ -2870,17 +2886,20 @@ async def _run_crew(
             if named:
                 chosen = _call_project(who.client, project_arg, path_arg, who.chosen_project)
                 who = dataclasses.replace(who, call_project=chosen)
-            out = str(fn(who))
+            got = fn(who)
+            out = got if isinstance(got, str) else str(got)  # a FailureText keeps its type
         except Exception as e:  # every failure is answered as text; the agent keeps working
             out = _crew_error(e)
         used = _crew.used_project()
         if used and _STDIO_SERVER and tool != "crew_status":
-            out = f"{out}\n(project {used})"
+            named_out = f"{out}\n(project {used})"
+            out = FailureText(named_out, outage=out.outage) if isinstance(out, FailureText) else named_out
         return out
 
     try:
         who = caller or _crew_caller()
-        return str(await anyio.to_thread.run_sync(functools.partial(work, who)))
+        result = await anyio.to_thread.run_sync(functools.partial(work, who))
+        return result if isinstance(result, str) else str(result)  # a FailureText keeps its type
     except Exception as e:
         return _crew_error(e)
 
@@ -2973,7 +2992,7 @@ async def crew_status(
     }
     errors = crew_schemas.validate_mcp_call("crew_status", {k: v for k, v in args.items() if v is not None})
     if errors:
-        return "INVALID ARGUMENTS: " + "; ".join(errors[:5])
+        return FailureText("INVALID ARGUMENTS: " + "; ".join(errors[:5]))
     try:
         project, checkout, _ = _crew_project(project_id, git_remote, root_path, remember=join)
         caller = _crew_caller()
@@ -3388,34 +3407,62 @@ def _crew_notice_now() -> tuple[CallerInfo | None, bool]:
     return caller, _crew.seat_for_scope(caller) is not None
 
 
+def _sdk_passes_call_tool_results() -> bool:
+    """Whether this MCP SDK sends a ``CallToolResult`` returned by a tool as it is (the only way to set ``isError``
+    and keep the text unchanged). An SDK that does not would serialize the object into the text instead."""
+    try:
+        from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
+        return "CallToolResult" in inspect.getsource(FuncMetadata.convert_result)
+    except Exception:
+        return False
+
+
+_FLAG_FAILURES = _sdk_passes_call_tool_results()
+
+
+def _finish(result: Any, final: Any) -> Any:
+    """What the tool returns to the SDK: ``final`` (the result, with a crew_notice when there is one), flagged
+    ``isError`` when ``result`` reports a failure (a :class:`FailureText`). The text is the same either way;
+    ``structuredContent`` keeps the ``{"result": text}`` shape of every ``-> str`` tool's output schema."""
+    if not isinstance(result, FailureText) or not isinstance(final, str) or not _FLAG_FAILURES:
+        return final
+    text = str(final)
+    return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent={"result": text}, isError=True)
+
+
 def _install_crew_notice() -> None:
-    """Wrap every registered tool so its result carries the crew_notice (§7 piggyback)."""
+    """Wrap every registered tool: its result carries the crew_notice (§7 piggyback), except for the tools in
+    ``_NO_CREW_NOTICE``, and a result that reports a failure is flagged ``isError`` (:func:`_finish`)."""
     for name, tool in mcp._tool_manager._tools.items():
-        if name in _NO_CREW_NOTICE or getattr(tool.fn, "__crew_notice__", False):
+        if getattr(tool.fn, "__crew_notice__", False) or getattr(tool.fn, "__failure_flag__", False):
             continue
         original = tool.fn
+        with_notice = name not in _NO_CREW_NOTICE
         if tool.is_async:
 
-            async def async_wrapper(*a: Any, __fn: Any = original, **kw: Any) -> Any:
+            async def async_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
                 result = await __fn(*a, **kw)
-                caller, seated = _crew_notice_now()
+                caller, seated = _crew_notice_now() if __notice else (None, False)
                 if caller is None or not seated:
-                    return result
+                    return _finish(result, result)
                 notice = await anyio.to_thread.run_sync(functools.partial(_crew.notice, caller))
-                return _with_crew_notice(result, notice)
+                return _finish(result, _with_crew_notice(result, notice))
 
             wrapper: Any = functools.update_wrapper(cast(Any, async_wrapper), original)
         else:
 
-            def sync_wrapper(*a: Any, __fn: Any = original, **kw: Any) -> Any:
+            def sync_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
                 result = __fn(*a, **kw)
-                caller, seated = _crew_notice_now()
+                caller, seated = _crew_notice_now() if __notice else (None, False)
                 if caller is None or not seated:
-                    return result
-                return _with_crew_notice(result, _crew.notice(caller))
+                    return _finish(result, result)
+                return _finish(result, _with_crew_notice(result, _crew.notice(caller)))
 
             wrapper = functools.update_wrapper(cast(Any, sync_wrapper), original)
-        wrapper.__crew_notice__ = True
+        wrapper.__failure_flag__ = True
+        if with_notice:
+            wrapper.__crew_notice__ = True
         tool.fn = wrapper
 
 

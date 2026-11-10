@@ -41,6 +41,14 @@ it is held that long and the answer says how long was waited. `crew_say` always 
 id; `crew_claim` keeps the queued claim, so calling again continues the wait. The REST routes keep
 their own limits (300 s / 120 s).
 
+**Failures:** a call that failed keeps its text (`REFUSED: …`, `CREW UNAVAILABLE: …`, `CREW ERROR …`,
+`CREW: …`, `INVALID ARGUMENTS: …`, a `{"status": "error"}` or `{"ok": false}` envelope) and is sent with the
+MCP result flag `isError: true`, so a client or a script can tell it from a success without parsing the
+text. A claim of several targets is a failure when any target was refused or not answered; the text
+still lists what was granted. `QUEUED`, `NOTHING RELEASED` and `NOTHING TO CLAIM` are not failures.
+`health_check` and `remembra_doctor` report faults as their result and are never flagged. Never put
+`crew_claim` and an edit in one batched script: read the claim's result first.
+
 **Piggyback:** every Remembra MCP result may get a `crew_notice` suffix ≤300 chars
 (`TEXT_CAPS["piggyback"]`), agent text inside the data block, at most one per 60 s
 (`MCP_PIGGYBACK_MIN_INTERVAL_S`) except server-generated collisions, overrides and pause.
