@@ -1630,10 +1630,12 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     stale = _whole_count((inbox or {}).get("stale_untagged_unread"))
     if inbox and inbox.get("available", True) and (inbox.get("unread_count") or elsewhere or stale):
         more = f"; {elsewhere} more in other projects" if elsewhere else ""
-        data.append(
-            f"Inbox: {inbox.get('unread_count') or 0} unread here{more}"
-            " (get_inbox for bodies; ack_inbox when done, or result=rejected to dismiss one without acting on it)"
-        )
+        counted = bool(inbox.get("unread_count") or elsewhere)
+        if counted:
+            data.append(
+                f"Inbox: {inbox.get('unread_count') or 0} unread here{more}"
+                " (get_inbox for bodies; ack_inbox when done, or result=rejected to dismiss one without acting on it)"
+            )
         data.extend(_inbox_line(item, now, allowed) for item in (inbox.get("items") or [])[:5])
         if stale:
             # Counted, not listed: an untagged message nobody answered is not "unread here" in every project.
@@ -1641,7 +1643,9 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
             sent = f" (sent more than {days} days ago)" if days else ""
             one = stale == 1
             data.append(
-                f"{stale} older unread message{'' if one else 's'} with no project{sent} {'is' if one else 'are'} not listed:"
+                # The only inbox news: one line, with no "0 unread here" above it.
+                f"{'' if counted else 'Inbox: '}{stale} older unread message{'' if one else 's'} with no project{sent}"
+                f" {'is' if one else 'are'} not listed:"
                 f" get_inbox shows {'it' if one else 'them'}; ack_inbox with result=rejected dismisses one."
             )
     accepted = (inbox or {}).get("accepted_count")

@@ -596,6 +596,9 @@ class AgentSessionService:
         message tagged with another project belongs to that project's sessions. An untagged message from an
         agent is listed only while it is fresh (:data:`INBOX_UNTAGGED_FRESH_DAYS`); older ones are counted as
         ``stale_untagged_unread`` and not listed, so an abandoned one is not "unread here" in every project.
+        Without ``current_project`` (no project resolved) or under a project restriction nothing is aged out:
+        the first has no "here" and lists every unread message of the agent, the second never matches an
+        untagged row; ``stale_untagged_unread`` is 0 in both.
 
         Messages the agent accepted (taken on, not finished) are listed apart, under ``accepted_count`` and
         ``accepted_items``, with the same project rule: a new session of the agent still sees what it owes.

@@ -80,9 +80,10 @@ def test_an_old_untagged_message_is_not_unread_here_in_every_project(api):
         assert inbox["stale_untagged_unread"] == 1 and inbox["untagged_fresh_days"] == INBOX_UNTAGGED_FRESH_DAYS
         text = brief["rendered"]
         assert STALE not in text and stale not in text and "Reply with the code" not in text
-        assert "Inbox: 0 unread here" in text
+        assert "unread here" not in text  # one line, not "0 unread here" and then the count
         assert (
-            f"1 older unread message with no project (sent more than {INBOX_UNTAGGED_FRESH_DAYS} days ago) is not listed" in text
+            f"Inbox: 1 older unread message with no project (sent more than {INBOX_UNTAGGED_FRESH_DAYS} days ago) is not listed"
+            in text
         )
         assert "get_inbox shows it" in text and "result=rejected" in text
 
@@ -169,7 +170,8 @@ def test_a_brief_from_an_older_server_renders_as_before():
     assert "older unread message" not in render_brief(brief)
     brief["inbox"].update(stale_untagged_unread=3, unread_count=0, other_projects_unread=0)
     text = render_brief(brief)
-    assert "Inbox: 0 unread here" in text and "3 older unread messages with no project" in text and "are not listed" in text
+    assert "unread here" not in text
+    assert "Inbox: 3 older unread messages with no project" in text and "are not listed" in text
 
 
 # ---------------------------------------------------------------------------
