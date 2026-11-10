@@ -1244,6 +1244,18 @@ class CrewBridge:
             "If you work in one of those repositories, call crew_status(root_path=...) for it first."
         )
 
+    def current_project(self, caller: CallerInfo) -> str | None:
+        """The project a crew call without ``project_id`` acts on now (what :meth:`seat` would pick), without joining."""
+        with self._lock:
+            current = self._current.get((caller.fingerprint, caller.client_session_id))
+        if caller.local:
+            local = local_crew()
+            project = str(local.who.get("project_id") or "") if local is not None else ""
+            chosen = current or caller.chosen_project
+            if project and (not chosen or chosen == project):
+                return project
+        return current or caller.default_project
+
     def _http(self, caller: CallerInfo, seat: Seat) -> CrewHttp:
         """How this seat reaches the server: crewd as the hook session, or the MCP seat's own token."""
         return seat.local.http(caller.client) if seat.local is not None else CrewHttp(caller.client)

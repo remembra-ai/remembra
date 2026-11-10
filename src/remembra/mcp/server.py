@@ -4078,6 +4078,66 @@ _close_tool_arguments()
 _DECLARED_ARGUMENTS: dict[str, tuple[str, ...]] = {}
 
 
+def _shown(value: Any) -> str:
+    """A project id or location an agent passed, safe to repeat outside a data block."""
+    text = "".join(c for c in str(value) if c.isascii() and (c.isalnum() or c in "._:/@~+-"))
+    return text[:120] or "?"
+
+
+def _same_place(a: Any, b: Any) -> bool:
+    """Two locators name one checkout: same root commit, else same remote, else same path."""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    for key in ("root_commit", "git_remote", "root_path"):
+        if a.get(key) and b.get(key):
+            return bool(a[key] == b[key])
+    return False
+
+
+def _crew_scope_refusal(tool: str, scope: dict[str, str], caller: CallerInfo, remembered: dict[str, Any]) -> str | None:
+    """A crew tool was given a project or location: None when that is the crew this session is on.
+
+    Crew tools act on the session's crew (chosen with crew_status or session_brief) and have no
+    project argument. A project named on the call used to be dropped, so a claim or a message
+    could land in another project's crew without a word. Now the call runs only when the named
+    project is the session's crew; otherwise it is refused with the crew_status call that switches.
+    Runs in a worker thread: it may read git and resolve a location on the server (read-only).
+    """
+    current = _crew.current_project(caller)
+    named = {normalize_project_id(scope[k], REMEMBRA_PROJECT_ALIASES) for k in ("project_id", "project") if k in scope}
+    declared = _DECLARED_ARGUMENTS.get(tool, ())
+    if len(named) > 1:
+        return tool_arguments.refusal(tool, declared, ["project and project_id are the same argument and differ: pass one"])
+    wanted = next(iter(named), None)
+    switch: str | None = f'crew_status(project_id="{_shown(wanted)}")' if wanted else None
+    place = "; ".join(f"{k} {_shown(scope[k])}" for k in ("root_path", "git_remote") if k in scope)
+    if wanted is None:
+        locator, _ = _locator(git_remote=scope.get("git_remote"), root_path=scope.get("root_path"))
+        if current and remembered.get("project_id") == current and _same_place(remembered.get("locator"), locator):
+            return None
+        try:
+            brief = caller.client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
+            wanted = str(brief.get("project_id") or "") or None
+        except Exception:
+            wanted = None
+        switch = (
+            f'crew_status(project_id="{_shown(wanted)}")'
+            if wanted
+            else "crew_status(" + ", ".join(f'{k}="{_shown(scope[k])}"' for k in ("root_path", "git_remote") if k in scope) + ")"
+        )
+    if wanted and current and wanted == current:
+        return None
+    if wanted:
+        said = f"you named {_shown(wanted)}" + (f" ({place})" if place else "")
+    else:
+        said = f"the location you named ({place}) did not resolve to a project"
+    here = f"which is {_shown(current)}" if current else "and this session has not joined one"
+    return (
+        f"{tool_arguments.PREFIX}{tool} acts on this session's crew, {here}; {said}. {tool_arguments.NOTHING_DONE} "
+        f"Switch with {switch}, then repeat the call."
+    )
+
+
 def _install_argument_guard() -> None:
     """Put ``remembra.mcp.arguments`` in front of every registered tool.
 
@@ -4102,6 +4162,14 @@ def _install_argument_guard() -> None:
             name, declared, arguments, normalize_project=lambda p: normalize_project_id(p, REMEMBRA_PROJECT_ALIASES)
         )
         text = prepared.refusal
+        if text is None and prepared.scope:
+            try:
+                caller, remembered = _crew_caller(), _session_project()
+                text = await anyio.to_thread.run_sync(
+                    functools.partial(_crew_scope_refusal, name, prepared.scope, caller, remembered)
+                )
+            except Exception as e:  # answered as text, like every crew failure
+                text = _crew_error(e)
         if text is None:
             try:
                 return await dispatch(name, prepared.arguments, context=context, convert_result=convert_result)
