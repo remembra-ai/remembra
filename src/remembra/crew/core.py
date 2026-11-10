@@ -288,11 +288,14 @@ class CrewCore:
         )
         deps = await self.task_deps(crew_id, [t["id"] for t in tasks])
 
+        # the newest rows when over the cap (listed oldest first, as before): an old backlog must never push
+        # a new breach out of what the Stop gate reads (F13)
         collisions = await self.db.fetchall(
             f"SELECT * FROM crew_collisions WHERE crew_id = ? AND state IN ({_marks(schemas.LIVE_COLLISION_STATES)})"
-            " ORDER BY created_at, id LIMIT ?",
+            " ORDER BY created_at DESC, id DESC LIMIT ?",
             (crew_id, *schemas.LIVE_COLLISION_STATES, lim["collisions"]),
         )
+        collisions.reverse()
         decisions = await self.db.fetchall(
             f"SELECT * FROM crew_decisions WHERE crew_id = ? AND state IN ({_marks(schemas.LIVE_DECISION_STATES)})"
             " ORDER BY number LIMIT ?",

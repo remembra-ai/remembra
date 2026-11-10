@@ -143,6 +143,7 @@ class SweepReport:
     lost_closed: int = 0
     stuck: int = 0
     contested: int = 0
+    collisions_resolved: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -155,6 +156,7 @@ class CrewReaper:
     def __init__(self, sessions: CrewSessions) -> None:
         self.sessions = sessions
         self._settings_cache: dict[str, dict[str, Any]] = {}
+        self._collision_cursors: dict[str, str] = {}
 
     @property
     def boot_at(self) -> datetime:
@@ -178,6 +180,7 @@ class CrewReaper:
             self._idle_park,
             self._reservations,
             self._close_lost,
+            self._collisions,
             self._alarms,
         ):
             try:
@@ -471,6 +474,14 @@ class CrewReaper:
                     continue
                 await self.sessions._end_session(tx, fresh, "lost_expired", now, actor=Actor.system())
                 report.lost_closed += 1
+
+    # -- collisions whose overlap is over (F13) ----------------------------------------------------------
+
+    async def _collisions(self, now: datetime, report: SweepReport) -> None:
+        """Close collisions nothing else reaches: both sessions gone, a zone that moved, an aged committed file."""
+        from remembra.crew import collisions
+
+        report.collisions_resolved += await collisions.sweep(self.sessions.log, self._collision_cursors)
 
     # -- loop -------------------------------------------------------------------------------------------------
 

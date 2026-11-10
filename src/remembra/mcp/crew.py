@@ -2966,8 +2966,12 @@ class CrewBridge:
         ]
         if not mine:
             return ["COLLISION CHECK: no overlap with other sessions."]
-        lines = [f"COLLISIONS ({len(mine)}):"]
-        for c in mine[:6]:
+        current, older = self._current_collisions(http, seat, mine)
+        tail = f"{older} older notice{'' if older == 1 else 's'} with sessions that are gone or zones you now hold: nothing to do"
+        if not current:
+            return [f"COLLISION CHECK: no overlap with live sessions ({tail})."]
+        lines = [f"COLLISIONS ({len(current)}):"]
+        for c in current[:6]:
             other_id = c.get("session_b") if c.get("session_a") == seat.session_id else c.get("session_a")
             other = self._callsign(http, seat, other_id) or ("a human" if not other_id else "another session")
             zone = self._zone_label(http, seat, c.get("zone_id"))
@@ -2980,7 +2984,46 @@ class CrewBridge:
             if c.get("session_a") == seat.session_id and c.get("attribution") != "probable":
                 line += " " + CORRECTIVE.format(who=other if _safe(other) and " " not in other else "mani")
             lines.append(line)
+        if older:
+            lines.append(f"(+{tail}.)")
         return lines
+
+    def _current_collisions(self, http: CrewHttp, seat: Seat, mine: Sequence[Mapping[str, Any]]) -> tuple[list[Any], int]:
+        """Split the seat's open collisions into the ones it can still act on and a count of the rest.
+
+        A server before the collision drain (0.17.5) never closes a row, so the list can hold
+        hundreds about sessions that ended days ago or zones the seat has since been granted. A
+        row is current while its claim still stands with the holder it names (whatever that
+        holder's presence: a reserved baton is still not the writer's zone), or, for a row with
+        no claim, while the other session is live. When the lists cannot be read every row
+        counts as current.
+        """
+        try:
+            seat.forget("sessions")  # presence moves; a cached list would keep an ended session "live"
+            live = {s.get("id") for s in self._sessions(http, seat) if s.get("state") in S.LIVE_PRESENCE_STATES}
+            claims = (
+                {c.get("id"): c for c in self._claims(http, seat) if c.get("state") != "queued"}
+                if any(c.get("claim_id") for c in mine)
+                else {}
+            )
+        except CrewApiError:
+            return list(mine), 0
+        current: list[Any] = []
+        for c in mine:
+            writer = c.get("session_a") == seat.session_id
+            other_id = c.get("session_b") if writer else c.get("session_a")
+            if c.get("claim_id"):
+                claim = claims.get(c.get("claim_id"))
+                holder = claim.get("holder_session_id") if claim else None
+                own_fenced_write = writer and other_id is None and c.get("kind") == "stale_epoch_write"
+                expected = seat.session_id if (own_fenced_write or not writer) else other_id
+                if claim is None or holder != expected:
+                    continue  # the claim ended, moved on, or is now the writer's own
+                if writer or other_id is None or other_id in live:
+                    current.append(c)
+            elif other_id is None or other_id in live:
+                current.append(c)
+        return current, len(mine) - len(current)
 
     # -- crew_report ----------------------------------------------------------------------
 

@@ -276,7 +276,20 @@ class CheckpointService:
             )
             if result.created and fresh.get("client_kind") == "mcp":
                 await self._mcp_footprints(tx, crew_id, fresh, facts)
+            await self._drain_collisions(tx, crew_id, fresh, facts)
             return result
+
+    async def _drain_collisions(self, tx: EventTx, crew_id: str, session: Mapping[str, Any], facts: Mapping[str, Any]) -> None:
+        """Every checkpoint (empty and unchanged ones too) closes the caller's collisions whose overlap is gone.
+
+        The commits it names are the session's own, so a notice that took one of them for a
+        human's change closes as well (F13).
+        """
+        from remembra.crew.collisions import auto_resolve, checkpoint_shas, resolve_attributed_commits
+        from remembra.crew.zones import CrewOps
+
+        await resolve_attributed_commits(tx, crew_id, checkpoint_shas(facts))
+        await auto_resolve(CrewOps(self.events), tx, crew_id, session_id=str(session["id"]))
 
     async def _mcp_footprints(self, tx: EventTx, crew_id: str, session: Mapping[str, Any], facts: Mapping[str, Any]) -> None:
         """An MCP-only session has no crewd heartbeat: the files its checkpoint declares are its footprints (§5.3).

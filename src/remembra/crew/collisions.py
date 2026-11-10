@@ -22,8 +22,14 @@ holder of the zone). Kinds and severities come from ``schemas.COLLISION_SEVERITY
 
 Delivery: ``collision.detected`` (a moment for high and critical), a crew inbox item, a session
 queue item for both parties, and a Needs-you item for high and critical kinds. Collisions
-resolve automatically when the overlap disappears (footprint landed or gone, claim ended),
-when an agent resolves them, or when a human dismisses them.
+resolve automatically when the overlap disappears, when an agent resolves them, or when a
+human dismisses them. The overlap is gone when a footprint landed or was removed; when a
+party's session ended, or was lost and last heard from, more than 24 h ago; when a committed
+file, or a file an MCP-only session declared, was last reported more than 24 h ago (file
+against file only); when the claim ended, moved to another holder or is now the writer's own;
+and, for ``unattributed_change``, when a crew session reports that commit as its own. The
+reporting session's rows are checked on every footprint report and checkpoint, and the reaper
+sweeps every crew (:func:`sweep`) for rows whose sessions no longer report at all.
 
 Interface for WP-4 / WP-6 / WP-9: call :func:`record_footprints` in the heartbeat, checkpoint
 or close transaction (the heartbeat does it through :func:`heartbeat_sink`, registered with
@@ -33,7 +39,8 @@ or close transaction (the heartbeat does it through :func:`heartbeat_sink`, regi
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Mapping, MutableMapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Final
 
@@ -41,7 +48,7 @@ import aiosqlite
 
 from remembra.crew import schemas as S
 from remembra.crew.claims import FENCE_MARGIN_S, is_fenced
-from remembra.crew.events import Actor, EventTx
+from remembra.crew.events import Actor, CrewEventLog, EventTx
 from remembra.crew.gatecore import normalize_rel
 from remembra.crew.store import dumps, loads, new_id, now_iso
 from remembra.crew.zones import (
@@ -62,6 +69,17 @@ ESCALATED: Final = frozenset({"high", "critical"})
 MAX_FOOTPRINTS_PER_CALL: Final = 500
 MAX_WRITE_AGE_S: Final = 7 * 24 * 3600
 SYMMETRIC: Final = frozenset({"same_file", "same_worktree_file"})
+# A committed file, and a file an MCP-only session merely declared, stop being an overlap this long
+# after they were last reported: nothing reports "landed" for them, so without a shelf life the
+# collision would stay open for as long as the session lives (F13). A dirty file crewd tracks for
+# a hook session has no shelf life.
+FOOTPRINT_OVERLAP_WITHIN: Final = timedelta(hours=24)
+# Drain bounds: live rows examined for one session per footprint report or checkpoint, and per
+# crew in one reaper pass (the pass keeps a cursor, so a backlog drains over a few passes).
+SWEEP_SESSION_ROWS: Final = 50
+SWEEP_CREW_ROWS: Final = 100
+LIVE_CLAIM_STATES: Final = ("active", "offered", "reserved")
+_SHA_RE: Final = re.compile(S.SHA_PATTERN)
 
 
 def collision_view(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -241,14 +259,41 @@ async def _session(conn: aiosqlite.Connection, session_id: str) -> dict[str, Any
 
 
 def _recent(session: Mapping[str, Any]) -> bool:
+    """Whether a session still counts as a party: live, ended within 24 h, or lost and heard from within 24 h.
+
+    A lost session is never ended while it holds a reserved baton, so "lost" alone has no bound:
+    it counts for 24 h after its last sign of life (heartbeat, call or join), like an ended one.
+    """
     if session["state"] in S.LIVE_PRESENCE_STATES:
         return True
-    ended = session.get("ended_at")
-    if not ended:
-        return bool(session["state"] == "lost")
     from remembra.crew.store import parse_iso
 
-    return bool(parse_iso(str(ended)) >= utcnow() - MATCH_ENDED_WITHIN)
+    ended = session.get("ended_at")
+    if not ended:
+        if session["state"] != "lost":
+            return False
+        ended = session.get("last_heartbeat_at") or session.get("last_seen_at") or session.get("joined_at")
+        if not ended:
+            return False
+    try:
+        return bool(parse_iso(str(ended)) >= utcnow() - MATCH_ENDED_WITHIN)
+    except ValueError:
+        return False
+
+
+def _fp_overlaps(fp: Mapping[str, Any], session: Mapping[str, Any]) -> bool:
+    """Whether a dirty/committed footprint is still overlapping work (see ``FOOTPRINT_OVERLAP_WITHIN``)."""
+    if fp["state"] == "dirty" and session.get("client_kind") != "mcp":
+        return True  # crewd watches the file for this session
+    last = fp.get("last_at")
+    if not last:
+        return True
+    from remembra.crew.store import parse_iso
+
+    try:
+        return bool(parse_iso(str(last)) >= utcnow() - FOOTPRINT_OVERLAP_WITHIN)
+    except ValueError:
+        return True
 
 
 async def record_footprints(
@@ -330,7 +375,8 @@ async def record_footprints(
         )
         attr = str(stored["attribution"]) if stored else attribution
         opened.extend(await _detect(ops, tx, crew_id, session, path, state, attr, wt, epoch, zones, written_at=written_at))
-    await auto_resolve(ops, tx, crew_id, paths=touched)
+    await resolve_attributed_commits(tx, crew_id, [fp.get("last_commit") for fp in footprints])
+    await auto_resolve(ops, tx, crew_id, paths=touched, session_id=str(session["id"]))
     return opened
 
 
@@ -374,7 +420,7 @@ async def _detect(
         (crew_id, path, me),
     ):
         osess = await _session(conn, str(other["session_id"]))
-        if osess is None or not _recent(osess):
+        if osess is None or not _recent(osess) or not _fp_overlaps(other, osess):
             continue
         same_wt = bool(wt) and wt == other.get("worktree_id")
         if same_wt and state == "dirty" and other["state"] == "dirty" and osess["state"] in S.LIVE_PRESENCE_STATES:
@@ -557,9 +603,20 @@ async def set_footprint_state(
 
 
 async def auto_resolve(
-    ops: CrewOps, tx: EventTx, crew_id: str, *, paths: Sequence[str] = (), claim_id: str | None = None
+    ops: CrewOps,
+    tx: EventTx,
+    crew_id: str,
+    *,
+    paths: Sequence[str] = (),
+    claim_id: str | None = None,
+    session_id: str | None = None,
 ) -> list[str]:
-    """Resolve live collisions whose overlap is gone (footprint landed/removed, or the claim ended)."""
+    """Resolve live collisions whose overlap is gone (footprint landed/removed/aged, session gone, claim ended or moved).
+
+    Selects the rows about ``paths``, about ``claim_id`` and, with ``session_id``, the newest
+    ``SWEEP_SESSION_ROWS`` rows that session is a party to (so a session's checkpoint or
+    footprint report drains its own notices, whatever files it names).
+    """
     conn = tx.conn
     rows: list[dict[str, Any]] = []
     if claim_id is not None:
@@ -575,50 +632,206 @@ async def auto_resolve(
             f"SELECT * FROM crew_collisions WHERE crew_id = ? AND subject IN ({marks}) AND state IN ('open','acknowledged')",
             (crew_id, *paths),
         )
+    if session_id:
+        rows += await fetchall(
+            conn,
+            "SELECT * FROM crew_collisions WHERE crew_id = ? AND state IN ('open','acknowledged')"
+            " AND (session_a = ? OR session_b = ?) ORDER BY id DESC LIMIT ?",
+            (crew_id, session_id, session_id, SWEEP_SESSION_ROWS),
+        )
+    return await _resolve_gone(tx, crew_id, rows)
+
+
+async def _resolve_gone(tx: EventTx, crew_id: str, rows: Sequence[Mapping[str, Any]]) -> list[str]:
     done: list[str] = []
     seen: set[str] = set()
     for r in rows:
         if r["id"] in seen:
             continue
         seen.add(str(r["id"]))
-        if not await _still_overlapping(conn, crew_id, r):
+        if not await _still_overlapping(tx.conn, crew_id, r):
             await _close(tx, crew_id, r, "resolved", "auto", "system", Actor.system())
             done.append(str(r["id"]))
     return done
 
 
-async def _live_fp(conn: aiosqlite.Connection, crew_id: str, session_id: str | None, path: str) -> bool:
+async def sweep(log: CrewEventLog, cursors: MutableMapping[str, str]) -> int:
+    """One crew-wide drain pass (the reaper calls it every sweep): close live collisions whose overlap is gone.
+
+    Nothing else reaches a row once both of its sessions have stopped reporting. At most
+    ``SWEEP_CREW_ROWS`` rows per crew are examined per pass, one transaction per crew;
+    ``cursors`` (crew id -> last row id examined) is the caller's, so the next pass continues
+    after rows that are still real and wraps around at the end. Returns how many it closed.
+    """
+    crews = await fetchall(log.db.conn, "SELECT DISTINCT crew_id FROM crew_collisions WHERE state IN ('open','acknowledged')", ())
+    live = {str(c["crew_id"]) for c in crews}
+    for stale in [k for k in cursors if k not in live]:
+        del cursors[stale]
+    closed = 0
+    for crew_id in sorted(live):
+        rows = await fetchall(
+            log.db.conn,
+            "SELECT * FROM crew_collisions WHERE crew_id = ? AND state IN ('open','acknowledged') AND id > ? ORDER BY id LIMIT ?",
+            (crew_id, cursors.get(crew_id, ""), SWEEP_CREW_ROWS),
+        )
+        if len(rows) < SWEEP_CREW_ROWS:
+            cursors.pop(crew_id, None)  # reached the end: the next pass starts over
+        else:
+            cursors[crew_id] = str(rows[-1]["id"])
+        gone = [str(r["id"]) for r in rows if not await _still_overlapping(log.db.conn, crew_id, r)]
+        if not gone:
+            continue  # the usual pass: nothing to close, no write transaction
+        async with log.transaction() as tx:
+            marks = ",".join("?" for _ in gone)
+            fresh = await fetchall(  # re-read under the write lock: a row may have been closed or revived meanwhile
+                tx.conn,
+                f"SELECT * FROM crew_collisions WHERE id IN ({marks}) AND state IN ('open','acknowledged') ORDER BY id",
+                tuple(gone),
+            )
+            closed += len(await _resolve_gone(tx, crew_id, fresh))
+    return closed
+
+
+async def _party_recent(conn: aiosqlite.Connection, session_id: str | None) -> bool:
+    """A named party still counts (``_recent``); a row with no session on that side (a human) always does."""
     if not session_id:
         return True
+    sess = await _session(conn, session_id)
+    return sess is not None and _recent(sess)
+
+
+async def _live_fp(conn: aiosqlite.Connection, crew_id: str, session_id: str | None, path: str, *, aged: bool) -> bool:
+    """Whether the session still has overlapping work on ``path``.
+
+    ``aged`` applies the shelf life of committed and MCP-declared files (file-against-file
+    kinds); a write into someone's zone does not age out while that claim stands.
+    """
+    if not session_id:
+        return True
+    sess = await _session(conn, session_id)
+    if sess is None or not _recent(sess):
+        return False
     row = await fetchone(
         conn,
-        "SELECT 1 FROM crew_footprints WHERE crew_id = ? AND session_id = ? AND path = ? AND state IN ('dirty','committed')",
+        "SELECT state, last_at FROM crew_footprints WHERE crew_id = ? AND session_id = ? AND path = ?"
+        " AND state IN ('dirty','committed')",
         (crew_id, session_id, path),
     )
-    return bool(row is not None)
+    return row is not None and (not aged or _fp_overlaps(row, sess))
+
+
+async def _claim_stands(conn: aiosqlite.Connection, row: Mapping[str, Any]) -> bool:
+    """Whether the claim a collision is about is still live and still held as it was when the row opened.
+
+    The row closes when the claim ended, when the writer itself now holds it (it adopted or was
+    handed the zone it had written into), or when the zone moved to someone other than the
+    holder the row names. A writer's own fenced write (no other party) stays while its claim does.
+    """
+    claim = await fetchone(conn, "SELECT state, holder_session_id FROM crew_claims WHERE id = ?", (row["claim_id"],))
+    if claim is None or claim["state"] not in LIVE_CLAIM_STATES:
+        return False
+    holder = claim.get("holder_session_id")
+    writer, other = row.get("session_a"), row.get("session_b")
+    if writer and holder == writer:
+        return other is None and row["kind"] == "stale_epoch_write"
+    return bool(holder == other)
 
 
 async def _still_overlapping(conn: aiosqlite.Connection, crew_id: str, row: Mapping[str, Any]) -> bool:
     kind = row["kind"]
-    if kind in ("unattributed_change", "merge_conflict_risk", "foreign_checkout_write", "stale_epoch_write"):
-        return True  # only an agent or a human closes these
+    if not await _party_recent(conn, row.get("session_a")):
+        return False  # the writer is gone: nobody is left to act on it
+    if kind in ("merge_conflict_risk", "foreign_checkout_write"):
+        return await _party_recent(conn, row.get("session_b"))  # otherwise only an agent or a human closes these
+    if kind in ("unattributed_change", "stale_epoch_write"):
+        return await _claim_stands(conn, row) if row.get("claim_id") else True
     subject = str(row["subject"])
-    if not await _live_fp(conn, crew_id, row.get("session_a"), subject):
+    if not await _live_fp(conn, crew_id, row.get("session_a"), subject, aged=kind in SYMMETRIC):
         return False
-    if kind in ("same_file", "same_worktree_file"):
-        return await _live_fp(conn, crew_id, row.get("session_b"), subject)
+    if kind in SYMMETRIC:
+        return await _live_fp(conn, crew_id, row.get("session_b"), subject, aged=True)
     if row.get("claim_id"):
-        claim = await fetchone(conn, "SELECT state FROM crew_claims WHERE id = ?", (row["claim_id"],))
-        return claim is not None and claim["state"] in ("active", "offered", "reserved")
+        return await _claim_stands(conn, row)
     return True
+
+
+def _sha(value: Any) -> str | None:
+    """A usable commit id (7 to 40 hex characters, lower case), or None."""
+    text = str(value).strip().lower() if isinstance(value, str) else ""
+    return text if _SHA_RE.fullmatch(text) else None
+
+
+def _same_commit(a: str, b: str) -> bool:
+    return a.startswith(b) or b.startswith(a)
+
+
+def checkpoint_shas(facts: Mapping[str, Any] | None) -> list[str]:
+    """The commit ids a checkpoint's facts declare (``commits: [{sha}]`` or plain strings); unusable ones are dropped."""
+    commits = (facts or {}).get("commits")
+    out: list[str] = []
+    for c in commits if isinstance(commits, list) else []:
+        sha = _sha(c.get("sha") if isinstance(c, Mapping) else c)
+        if sha and sha not in out:
+            out.append(sha)
+    return out
+
+
+async def _crew_commit(conn: aiosqlite.Connection, crew_id: str, sha: str) -> bool:
+    """Whether a crew session already reported ``sha`` as its own (a committed footprint or a checkpoint)."""
+    row = await fetchone(
+        conn,
+        "SELECT 1 FROM crew_footprints WHERE crew_id = ? AND last_commit IS NOT NULL AND length(last_commit) >= 7"
+        " AND (lower(last_commit) LIKE ? OR ? LIKE lower(last_commit) || '%') LIMIT 1",
+        (crew_id, sha + "%", sha),
+    )
+    if row is not None:
+        return True
+    for ckp in await fetchall(
+        conn,
+        "SELECT facts FROM crew_checkpoints WHERE crew_id = ? AND trigger = 'commit' AND facts IS NOT NULL"
+        " ORDER BY created_at DESC LIMIT 100",
+        (crew_id,),
+    ):
+        if any(_same_commit(sha, known) for known in checkpoint_shas(loads(ckp["facts"], {}))):
+            return True
+    return False
+
+
+async def resolve_attributed_commits(tx: EventTx, crew_id: str, shas: Sequence[Any]) -> list[str]:
+    """Close ``unattributed_change`` notices about commits a crew session has now reported as its own.
+
+    crewd reports a commit without a crew trailer the moment it sees it; an agent that committed
+    through its shell names the commit afterwards (footprint ``last_commit`` or checkpoint
+    ``commits``). The notice was about that commit, so it closes.
+    """
+    known = [s for s in (_sha(v) for v in shas) if s]
+    if not known:
+        return []
+    done: list[str] = []
+    for r in await fetchall(
+        tx.conn,
+        "SELECT * FROM crew_collisions WHERE crew_id = ? AND kind = 'unattributed_change' AND state IN ('open','acknowledged')"
+        " ORDER BY id DESC LIMIT 500",
+        (crew_id,),
+    ):
+        commit = _sha(evidence(r).get("commit"))
+        if commit and any(_same_commit(commit, k) for k in known):
+            await _close(tx, crew_id, r, "resolved", "auto", "system", Actor.system())
+            done.append(str(r["id"]))
+    return done
 
 
 async def record_unattributed_change(
     ops: CrewOps, tx: EventTx, crew_id: str, paths: Sequence[str], *, commit: str | None = None
 ) -> list[dict[str, Any]]:
-    """A commit with no crew trailer (probably a human at a terminal) that touches a held zone: a notice."""
+    """A commit with no crew trailer (probably a human at a terminal) that touches a held zone: a notice.
+
+    One notice per held claim for the commit (its first file is the subject, the others are in
+    the evidence), not one per file. A commit a crew session already reported as its own is
+    that session's, not a human's, and raises nothing.
+    """
     idx = await zone_index(tx.conn, crew_id)
-    out: list[dict[str, Any]] = []
+    by_claim: dict[str, tuple[dict[str, Any], list[str]]] = {}
     for raw in paths:
         path = normalize_rel(str(raw))
         zone_ids = [str(z["id"]) for z in idx.match(path, False)]
@@ -632,21 +845,31 @@ async def record_unattributed_change(
             " AND holder_kind = 'session'",
             (crew_id, *zone_ids),
         ):
-            row = await open_collision(
-                ops,
-                tx,
-                crew_id,
-                kind="unattributed_change",
-                subject=path,
-                session_a=None,
-                session_b=c.get("holder_session_id"),
-                attribution="probable",
-                zone_id=c["zone_id"],
-                claim_id=c["id"],
-                evidence={"commit": clip(commit, 40)},
-            )
-            if row is not None:
-                out.append(row)
+            files = by_claim.setdefault(str(c["id"]), (c, []))[1]
+            if path not in files:
+                files.append(path)
+    if not by_claim:
+        return []
+    sha = _sha(commit)
+    if sha and await _crew_commit(tx.conn, crew_id, sha):
+        return []
+    out: list[dict[str, Any]] = []
+    for c, files in by_claim.values():
+        row = await open_collision(
+            ops,
+            tx,
+            crew_id,
+            kind="unattributed_change",
+            subject=files[0],
+            session_a=None,
+            session_b=c.get("holder_session_id"),
+            attribution="probable",
+            zone_id=c["zone_id"],
+            claim_id=c["id"],
+            evidence={"commit": clip(commit, 40), "files": files[:20], "file_count": len(files)},
+        )
+        if row is not None:
+            out.append(row)
     return out
 
 
