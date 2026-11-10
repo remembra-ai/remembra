@@ -39,7 +39,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
-from remembra.security.secrets import redact_secrets
+from remembra.security.secrets import redact_secrets, url_password_spans
 
 PAYLOAD_TYPES: Final = ("event", "presence", "heartbeat", "snapshot", "checkpoint", "report", "stall", "promotion")
 
@@ -141,7 +141,11 @@ _HEADER: Final = re.compile(
     r"(?i)\b(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|cookie|set-cookie)(\s*:\s*)([^'\"\n]+)"
 )
 _BASIC_USER: Final = re.compile(r"(?<![A-Za-z0-9_-])(-u|--user)(\s+|=)([^\s:'\"]+):([^\s'\"]+)")
-_URL_CREDS: Final = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)([^\s:/@]+):([^\s@/]+)@")
+# Every name written straight before an "=" (a letter, digit or "_" run, in any case).
+_ASSIGNED_NAME: Final = re.compile(r"(?i)(?<![A-Za-z0-9_])([A-Za-z0-9_]+)=")
+# The four letters outside ASCII that a case-insensitive pattern reads as "i", "s" and "k".
+_CASELESS: Final = str.maketrans({"\u0130": "i", "\u0131": "i", "\u017f": "s", "\u212a": "k"})
+_FAIL_ENDINGS: Final = ("", "s", "ed", "ure", "ures")
 _REDACTED: Final = "[REDACTED:{kind}]"
 
 Scrubber = Callable[[str], str]
@@ -174,11 +178,26 @@ def _is_secret_word(word: str) -> bool:
     return bool(_ENV_STRONG_WORD.search(word)) and not _ENV_STRONG_PLAIN.search(word)
 
 
-def _env_count_name(name: str, text: str) -> bool:
+class _Assigned:
+    """The names assigned in one text (``NAME=``), lower-cased; read from the text once, on first use."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._names: frozenset[str] | None = None
+
+    def __contains__(self, name: str) -> bool:
+        if self._names is None:
+            found = (m.group(1) for m in _ASSIGNED_NAME.finditer(self._text))
+            self._names = frozenset(n.translate(_CASELESS).lower() for n in found)
+        return name in self._names
+
+
+def _env_count_name(name: str, text: str | _Assigned) -> bool:
     """True when ``name`` reads as a counter: ``PASS``, ``TESTS_PASS``, ``max_tokens``, ``numKeys``.
 
     Every credential word in it is exactly a count word and every other word is a counting word
-    (test, total, max, input…); or it is a ``*_PASS`` with its ``*_FAIL=`` beside it in ``text``.
+    (test, total, max, input…); or it is a ``*_PASS`` with its ``*_FAIL=`` beside it in ``text``
+    (the text itself, or the names assigned in it).
     """
     words = [w.lower() for part in name.split("_") for w in _CAMEL_WORD.findall(part)]
     hits = [w for w in words if _is_secret_word(w)]
@@ -188,12 +207,15 @@ def _env_count_name(name: str, text: str) -> bool:
         return True
     if hits != ["pass"]:
         return False
-    at = name.lower().rindex("pass")
-    sibling = re.escape(name[:at]) + "fail(?:s|ed|ures?)?" + re.escape(name[at + 4 :])
-    return bool(re.search(rf"(?i)(?<![A-Za-z0-9_]){sibling}=", text))
+    # The sibling is the same name with "fail", "fails", "failed", "failure" or "failures" for its
+    # last "pass", in any case, assigned somewhere in the text.
+    lowered = name.lower()
+    at = lowered.rindex("pass")
+    assigned = _Assigned(text) if isinstance(text, str) else text
+    return any(f"{lowered[:at]}fail{ending}{lowered[at + 4 :]}" in assigned for ending in _FAIL_ENDINGS)
 
 
-def _env_secret_name(name: str, value: str, text: str = "") -> bool:
+def _env_secret_name(name: str, value: str, text: str | _Assigned = "") -> bool:
     """True when ``name=value`` assigns a credential: a word of the name is or holds a credential word.
 
     A short number or a literal such as ``None``/``true`` in a name that reads as a counter
@@ -207,11 +229,30 @@ def _env_secret_name(name: str, value: str, text: str = "") -> bool:
     return True
 
 
-def _env_sub(match: re.Match[str]) -> str:
+def _env_sub(match: re.Match[str], assigned: _Assigned | None = None) -> str:
+    """The replacement for one ``NAME=value``. ``assigned`` is the names assigned in ``match.string``."""
     name, value = match.group(1), match.group(2)
-    if value.strip("'\"") and not value.startswith("[REDACTED:") and _env_secret_name(name, value, match.string):
+    if (
+        value.strip("'\"")
+        and not value.startswith("[REDACTED:")
+        and _env_secret_name(name, value, assigned if assigned is not None else match.string)
+    ):
         return f"{name}={_REDACTED.format(kind='env')}"
     return match.group(0)
+
+
+def _redact_url_passwords(text: str) -> str:
+    """``scheme://user:password@host`` with the password replaced."""
+    out: list[str] = []
+    cursor = 0
+    for start, end in url_password_spans(text):
+        out.append(text[cursor:start])
+        out.append(_REDACTED.format(kind="password"))
+        cursor = end
+    if not out:
+        return text
+    out.append(text[cursor:])
+    return "".join(out)
 
 
 def _export_sub(match: re.Match[str]) -> str:
@@ -247,10 +288,11 @@ def redact_text(text: str, *, repo_root: str | None = None, home: str | None = N
     if not text:
         return text
     out = _EXPORT_ASSIGN.sub(_export_sub, text)
-    out = _ENV_ASSIGN.sub(_env_sub, out)
+    assigned = _Assigned(out)  # one reading of the text for every assignment in it
+    out = _ENV_ASSIGN.sub(lambda m: _env_sub(m, assigned), out)
     out = _HEADER.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTED.format(kind='header')}", out)
     out = _BASIC_USER.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}:{_REDACTED.format(kind='password')}", out)
-    out = _URL_CREDS.sub(lambda m: f"{m.group(1)}{m.group(2)}:{_REDACTED.format(kind='password')}@", out)
+    out = _redact_url_passwords(out)
     out = redact_secrets(out).text
     out = _rewrite_paths(out, repo_root, home)
     if pii is not None:

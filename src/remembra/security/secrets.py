@@ -26,11 +26,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import bisect
 import json
 import math
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +46,8 @@ class _Rule:
     pattern: re.Pattern[str]
     group: int = 0  # 0 = whole match; N = only that capture group is secret
     check: Callable[[str], bool] | None = None  # extra plausibility check on the secret part
+    # The spans of the secret part, for a pattern that ``finditer`` cannot run in linear time.
+    finder: Callable[[str], Iterator[tuple[int, int]]] | None = None
 
 
 def _random(value: str) -> bool:
@@ -59,6 +62,30 @@ def _password_like(value: str) -> bool:
 
 def _r(pattern: str, flags: int = 0) -> re.Pattern[str]:
     return re.compile(pattern, flags)
+
+
+_SCHEME_RUN_REVERSED = re.compile(r"(?i)[a-z0-9+.\-]*")
+_SCHEME_START = re.compile(r"(?i)\b[a-z]")
+# "://user:password@" from the "://" on, for a password of at least 1 and of at least 3 characters.
+_URL_USERINFO = {1: re.compile(r"://[^\s:/@]+:([^\s@/]+)@"), 3: re.compile(r"://[^\s:/@]+:([^\s@/]{3,})@")}
+
+
+def url_password_spans(text: str, min_chars: int = 1) -> Iterator[tuple[int, int]]:
+    """The span of each password in a ``scheme://user:password@`` of ``text``.
+
+    The spans group 1 of ``(?i)\\b[a-z][a-z0-9+.\\-]*://[^\\s:/@]+:([^\\s@/]{min_chars,})@`` has
+    under ``finditer``, in time linear in the text. That pattern is tried at every word boundary
+    and each try reads the run of scheme characters to its end, so a long dotted run costs the
+    square of its length. Here each ``://user:password@`` is found from its ``://``, then the
+    scheme is looked for once in the run of scheme characters before it.
+    """
+    floor = 0  # a scheme never reaches back past the "@" that ends the last "://user:password@"
+    for match in _URL_USERINFO[min_chars].finditer(text):
+        colon = match.start()
+        run = _SCHEME_RUN_REVERSED.match(text[floor:colon][::-1])
+        if _SCHEME_START.search(text, colon - (run.end() if run else 0), colon):
+            yield match.span(1)
+        floor = match.end()
 
 
 # Where a credential label may start: at a word start, after "_" or "-" (a vendor-prefixed name such as
@@ -212,6 +239,7 @@ _RULES: tuple[_Rule, ...] = (
         "url_credentials",
         _r(r"(?i)\b[a-z][a-z0-9+.\-]*://[^\s:/@]+:([^\s@/]{3,})@"),
         group=1,
+        finder=lambda text: url_password_spans(text, 3),
     ),
     _Rule("bearer_token", _r(r"(?i)\bbearer\s+([A-Za-z0-9._~+/\-]{20,}=*)"), group=1),
     _Rule(
@@ -368,8 +396,17 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 
 
 _MIN_TOKEN_CHARS = 32
-# A URL up to the token: "https://www.youtube.com/channel/", "www.facebook.com/".
-_URL_HEAD_RE = re.compile(r"(?i)(?:[a-z][a-z0-9+.\-]*://|(?<![A-Za-z0-9.])www\.)[^\s\"'<>]*$")
+# A URL up to the token: "https://www.youtube.com/channel/", "www.facebook.com/". It starts at a
+# scheme or a "www." and runs to the token with no white space, quote or angle bracket, and it is
+# looked for in the _URL_LOOKBACK characters before the token: the pattern
+# (?i)(?:[a-z][a-z0-9+.\-]*://|(?<![A-Za-z0-9.])www\.)[^\s"'<>]*$ searched in that stretch. Run for
+# every token that search costs the square of the text, so _UrlHeads finds the pieces in one pass.
+_URL_BREAK_RE = re.compile(r"[\s\"'<>]")
+_URL_SCHEME_RUN_RE = re.compile(r"(?i)[a-z0-9+.\-]+")
+_URL_SCHEME_LETTER_RE = re.compile(r"(?i)[a-z]")
+_URL_WWW_RE = re.compile(r"(?i)www\.")
+_URL_WWW_START_RE = re.compile(r"(?i)(?<![A-Za-z0-9.])www\.")
+_URL_QUERY_MARK_RE = re.compile(r"[?#]")
 _URL_PART_RE = re.compile(r"[^/=]+")
 # In a query or fragment a value is one part, "/" and all: base64 has "/" in its alphabet.
 _URL_QUERY_PART_RE = re.compile(r"[^=]+")
@@ -387,10 +424,67 @@ _PUBLIC_ID_SEGMENTS = frozenset(
 )
 
 
-def _url_head(text: str, start: int) -> str | None:
-    """The URL so far when the token at ``start`` continues one (``scheme://host/...``, ``www.host/...``)."""
-    head = _URL_HEAD_RE.search(text[max(0, start - _URL_LOOKBACK) : start])
-    return head.group() if head else None
+class _UrlHeads:
+    """Where the URLs of one text start, found in one pass, to ask of each token whether it continues one."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._breaks = [m.start() for m in _URL_BREAK_RE.finditer(text)]
+        self._marks = [m.start() for m in _URL_QUERY_MARK_RE.finditer(text)]
+        self._www = [m.start() for m in _URL_WWW_START_RE.finditer(text)]
+        # Each run of scheme characters that a "://" follows: where the run starts, where its "://"
+        # is, and the first letter in it (a scheme starts with a letter), -1 when it has none.
+        self._runs: list[int] = []
+        self._colons: list[int] = []
+        self._letters: list[int] = []
+        for run in _URL_SCHEME_RUN_RE.finditer(text):
+            if text.startswith("://", run.end()):
+                letter = _URL_SCHEME_LETTER_RE.search(text, run.start(), run.end())
+                self._runs.append(run.start())
+                self._colons.append(run.end())
+                self._letters.append(letter.start() if letter else -1)
+        # For each run, the first run at or after it that has a letter.
+        self._lettered = [len(self._runs)] * (len(self._runs) + 1)
+        for i in range(len(self._runs) - 1, -1, -1):
+            self._lettered[i] = i if self._letters[i] >= 0 else self._lettered[i + 1]
+
+    def start(self, token: int) -> int | None:
+        """Where the URL that the token at ``token`` continues starts; ``None`` when it continues none."""
+        text = self._text
+        window = max(0, token - _URL_LOOKBACK)
+        if token > window and text[token - 1] == "\n":
+            token -= 1  # the pattern's "$" also matches before a newline that ends the stretch
+        b = bisect.bisect_left(self._breaks, token)
+        low = max(window, self._breaks[b - 1] + 1) if b else window
+        best: int | None = None
+        # A "www." with no letter, digit or dot before it; at the start of the window, any "www.".
+        w = bisect.bisect_left(self._www, low)
+        if low == window and _URL_WWW_RE.match(text, low):
+            best = low
+        elif w < len(self._www):
+            best = self._www[w]
+        if best is not None and best + 4 > token:
+            best = None
+        # The first "://" after ``low`` whose run of scheme characters has a letter at or after ``low``.
+        i = bisect.bisect_right(self._colons, low)
+        if i < len(self._colons) and self._runs[i] < low:
+            letter = _URL_SCHEME_LETTER_RE.search(text, low, self._colons[i])
+            scheme = letter.start() if letter else -1
+            if scheme < 0:
+                i = self._lettered[i + 1]
+        else:
+            i = self._lettered[i]
+            scheme = -1
+        if scheme < 0 and i < len(self._colons):
+            scheme = self._letters[i]
+        if scheme >= 0 and self._colons[i] + 3 <= token and (best is None or scheme < best):
+            best = scheme
+        return best
+
+    def in_query(self, start: int, token: int) -> bool:
+        """True when the URL from ``start`` up to the token at ``token`` holds a ``?`` or a ``#``."""
+        m = bisect.bisect_left(self._marks, token)
+        return m > 0 and self._marks[m - 1] >= start
 
 
 def _entropy(value: str) -> float:
@@ -472,9 +566,11 @@ def _is_short_url_token(part: str) -> bool:
     return all(classes) and wordy < _MAX_WORD_SHARE * len(part)
 
 
-def _url_part_spans(head: str, token: str) -> list[tuple[int, int]]:
-    """The parts of ``token`` (a stretch of a URL after ``head``) that are credentials, as offsets in it."""
-    in_query = "?" in head or "#" in head
+def _url_part_spans(in_query: bool, token: str) -> list[tuple[int, int]]:
+    """The parts of ``token`` (a stretch of a URL) that are credentials, as offsets in it.
+
+    ``in_query`` says the URL before the token already holds a ``?`` or a ``#``.
+    """
 
     def credential(value: str, public_id: bool = False) -> bool:
         if len(value) >= _MIN_TOKEN_CHARS:
@@ -635,8 +731,8 @@ def _spans(text: str, decode: bool = True, fallback: bool = True) -> list[tuple[
     decoding only); ``fallback=False`` skips the unlabelled high-entropy fallback."""
     spans: list[tuple[int, int, str]] = []
     for rule in _RULES:
-        for match in rule.pattern.finditer(text):
-            start, end = match.span(rule.group)
+        found = rule.finder(text) if rule.finder else (m.span(rule.group) for m in rule.pattern.finditer(text))
+        for start, end in found:
             if start < 0 or end <= start:
                 continue
             value = text[start:end]
@@ -650,11 +746,13 @@ def _spans(text: str, decode: bool = True, fallback: bool = True) -> list[tuple[
     if decode:
         spans.extend(_encoded_spans(text))
     if fallback:
+        urls: _UrlHeads | None = None
         for match in _TOKEN_RE.finditer(text):
-            head = _url_head(text, match.start())
+            urls = urls or _UrlHeads(text)
+            head = urls.start(match.start())
             if head is not None:
                 # "com/channel/<id>" is not one token: each path segment and query value is its own.
-                for start, end in _url_part_spans(head, match.group()):
+                for start, end in _url_part_spans(urls.in_query(head, match.start()), match.group()):
                     spans.append((match.start() + start, match.start() + end, "high_entropy_token"))
             elif _is_high_entropy_token(match.group()):
                 spans.append((match.start(), match.end(), "high_entropy_token"))

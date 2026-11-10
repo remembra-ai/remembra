@@ -10,8 +10,10 @@ Modes:
 - block: Reject content containing PII
 """
 
+import bisect
 import hashlib
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import structlog
@@ -60,13 +62,43 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "dob": re.compile(r"\b(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}\b"),
 }
 
+_EMAIL_PATTERN = PII_PATTERNS["email"]
+_EMAIL_LOCAL_REVERSED = re.compile(r"[A-Za-z0-9._%+-]*")
+_EMAIL_LOCAL_START = re.compile(r"\b[A-Za-z0-9._%+-]")
+
+
+def _email_matches(content: str) -> Iterator[re.Match[str]]:
+    """The matches ``_EMAIL_PATTERN.finditer(content)`` gives, in time linear in the content.
+
+    ``finditer`` tries the pattern at every word boundary, and each try reads the run of
+    local-part characters to its end: a long dotted run with no ``@`` costs the square of its
+    length. A local part can only end at an ``@``, so each ``@`` is taken once: ``finditer`` would
+    start at the earliest word boundary in the run of local-part characters before it, and what
+    follows the ``@`` does not depend on that start.
+    """
+    cursor = 0  # the end of the last match: the next one starts at or after it
+    floor = 0  # no local part reaches back past the last "@" or into the last match
+    at = content.find("@")
+    while at != -1:
+        run = _EMAIL_LOCAL_REVERSED.match(content[floor:at][::-1])
+        begin = _EMAIL_LOCAL_START.search(content, at - (run.end() if run else 0), at)
+        match = _EMAIL_PATTERN.match(content, begin.start()) if begin else None
+        if match:
+            yield match
+            cursor = match.end()
+        floor = max(cursor, at + 1)
+        at = content.find("@", floor)
+
+
 # A hyphen/dot-joined identifier around a digit run: "629134551556-abc.apps.googleusercontent.com".
-_IDENTIFIER_CHARS = re.compile(r"[A-Za-z0-9._-]")
+_IDENTIFIER_RUN = re.compile(r"[A-Za-z0-9._-]+")
+_ALNUM_RUN = re.compile(r"[A-Za-z0-9]*")
 _UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 # A random-looking part: letters AND digits, at least 6 characters ("8v3kq0abcd", "a1b2c3").
 _MIXED_PART = re.compile(r"(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}")
-# "-<label>.<label>.<tld>...": the digits are the first label of a host name.
-_HOST_TAIL = re.compile(r"-[A-Za-z0-9]+(?:\.[A-Za-z0-9-]+){2,}")
+# "-<label>.<label>.<tld>...": the digits are the first label of a host name. Used as a yes/no test of
+# what follows the digits, so two dotted parts are matched and no more (the rest is not read).
+_HOST_TAIL = re.compile(r"-[A-Za-z0-9]+(?:\.[A-Za-z0-9-]+){2}")
 # An account label shortly before the number means it is one, whatever follows it.
 _ACCOUNT_LABEL = re.compile(r"(?i)(?:\b|_)(?:acct|account|a/c|iban|acc(?:t)?\s*(?:no|num|number|#))(?:\b|_)")
 _LABEL_WINDOW = 24
@@ -91,20 +123,113 @@ _PERSONAL_HINT = re.compile(
 )
 _NAMED_SEGMENT = re.compile(r"[A-Za-z]{2,}")
 _CARD_DIGITS = 16
+_WORD_RUN = re.compile(r"\S+")
+_TRAILING_PUNCTUATION = ".,;:!?)]}>\"'"
+# An account label that starts inside a word is at most 12 characters ("_acctnumber_"): a search
+# that starts this far before the end of the last one misses no label the last one could not see.
+_LABEL_OVERLAP = 16
 
 
-def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
-    """The run of identifier characters (letters, digits, ``.``, ``_``, ``-``) containing [start, end)."""
-    left = start
-    while left > 0 and _IDENTIFIER_CHARS.match(content[left - 1]):
-        left -= 1
-    right = end
-    while right < len(content) and _IDENTIFIER_CHARS.match(content[right]):
-        right += 1
-    return content[left:right], start - left, end - left
+class _Runs:
+    """The maximal runs of one character class in a text, found in one pass on first use."""
+
+    def __init__(self, content: str, pattern: re.Pattern[str]) -> None:
+        self._content = content
+        self._pattern = pattern
+        self._starts: list[int] | None = None
+        self._ends: list[int] = []
+
+    def around(self, start: int, end: int) -> tuple[int, int]:
+        """[start, end) widened to the run that reaches ``start`` from the left and the run at ``end``."""
+        if self._starts is None:
+            spans = [m.span() for m in self._pattern.finditer(self._content)]
+            self._starts = [a for a, _ in spans]
+            self._ends = [b for _, b in spans]
+        left, right = start, end
+        if start > 0:
+            i = bisect.bisect_right(self._starts, start - 1) - 1
+            if i >= 0 and start - 1 < self._ends[i]:
+                left = self._starts[i]
+        if end < len(self._content):
+            i = bisect.bisect_right(self._starts, end) - 1
+            if i >= 0 and end < self._ends[i]:
+                right = self._ends[i]
+        return left, right
 
 
-def is_identifier_fragment(content: str, start: int, end: int) -> bool:
+class _Word:
+    """One whitespace-delimited word, with what the developer-number check asks of it worked out once."""
+
+    __slots__ = ("text", "left", "has_slash", "personal", "is_url", "named", "stripped", "_region", "_origin", "_seen", "_label")
+
+    def __init__(self, content: str, left: int, right: int) -> None:
+        text = content[left:right]
+        self.text = text
+        self.left = left
+        self.has_slash = "/" in text
+        self.personal = self.has_slash and bool(_PERSONAL_HINT.search(text))
+        self.is_url = bool(_URL_START.match(text))
+        # The segments with a name in them. The digits asked about are a segment without one.
+        self.named = sum(1 for seg in text.split("/") if _NAMED_SEGMENT.search(seg)) if self.has_slash else 0
+        self.stripped = len(text.rstrip(_TRAILING_PUNCTUATION))
+        # The label window reaches back from the start of the word: a URL can put the digits far from it.
+        self._origin = max(0, left - _LABEL_WINDOW)
+        self._region = content[self._origin : right]
+        self._seen = 0  # where the last label search ended, in the region
+        self._label = False  # a label that every later (longer) search finds too
+
+    def account_label_before(self, start: int) -> bool:
+        """``_ACCOUNT_LABEL.search(content[word start - window : start])``, each stretch of the word read once.
+
+        The numbers of one word are asked about left to right. A label found short of the end of
+        the text searched is found by every longer search; one that ends the text searched may
+        rest on that end being a word boundary ("account" in "account12345678"), so it is not kept.
+        """
+        end = start - self._origin
+        if end <= self._seen:
+            self._seen, self._label = 0, False
+        if self._label:
+            return True
+        begin = self._seen - _LABEL_OVERLAP
+        if begin < self.left - self._origin:
+            begin = 0  # a label that starts before the word can hold any amount of white space
+        self._seen = end
+        found = _ACCOUNT_LABEL.search(self._region, begin, end)
+        if found is None:
+            return False
+        self._label = found.end() < end or self._region[found.end() - 1] == "_"
+        return True
+
+
+class _ScanContext:
+    """The words and identifier tokens of one text, each worked out once for all the numbers in it."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self._word_runs = _Runs(content, _WORD_RUN)
+        self._token_runs = _Runs(content, _IDENTIFIER_RUN)
+        self._words: dict[tuple[int, int], _Word] = {}
+        self._uuids: dict[tuple[int, int], bool] = {}
+
+    def word(self, start: int, end: int) -> _Word:
+        """The whitespace-delimited word containing [start, end)."""
+        span = self._word_runs.around(start, end)
+        word = self._words.get(span)
+        if word is None:
+            word = self._words[span] = _Word(self.content, *span)
+        return word
+
+    def token(self, start: int, end: int) -> tuple[int, bool]:
+        """Where the run of identifier characters (letters, digits, ``.``, ``_``, ``-``) containing
+        [start, end) ends, and whether the whole run is a UUID."""
+        span = self._token_runs.around(start, end)
+        is_uuid = self._uuids.get(span)
+        if is_uuid is None:
+            is_uuid = self._uuids[span] = bool(_UUID.fullmatch(self.content[span[0] : span[1]].strip("._-")))
+        return span[1], is_uuid
+
+
+def is_identifier_fragment(content: str, start: int, end: int, _context: _ScanContext | None = None) -> bool:
     """True when the digits at [start, end) are one part of a machine identifier, not a number on their own.
 
     Only these shapes (the false positives seen), and never with an account
@@ -121,25 +246,14 @@ def is_identifier_fragment(content: str, start: int, end: int) -> bool:
     """
     if _ACCOUNT_LABEL.search(content[max(0, start - _LABEL_WINDOW) : start]):
         return False
-    token, s, e = _token_around(content, start, end)
-    if _UUID.fullmatch(token.strip("._-")):
+    token_end, is_uuid = (_context or _ScanContext(content)).token(start, end)
+    if is_uuid:
         return True
-    after = token[e:]
-    if not after.startswith("-"):
+    if not content.startswith("-", end, token_end):
         return False
-    following = re.split(r"[-._]", after[1:], maxsplit=1)[0]
-    return bool(_MIXED_PART.fullmatch(following) or _HOST_TAIL.match(after))
-
-
-def _word_around(content: str, start: int, end: int) -> tuple[str, int]:
-    """The whitespace-delimited word containing [start, end), and the offset of ``start`` in it."""
-    left = start
-    while left > 0 and not content[left - 1].isspace():
-        left -= 1
-    right = end
-    while right < len(content) and not content[right].isspace():
-        right += 1
-    return content[left:right], start - left
+    # The part after the "-", up to the next "-", "." or "_" of the token.
+    following = _ALNUM_RUN.match(content, end + 1, token_end)
+    return bool((following and _MIXED_PART.fullmatch(following.group())) or _HOST_TAIL.match(content, end, token_end))
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -152,20 +266,19 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _is_path_segment(word: str, offset: int, length: int) -> bool:
+def _is_path_segment(word: _Word, offset: int, length: int) -> bool:
     """True when the digits are one whole segment of a URL, or of a path with two named segments."""
-    before, after = word[:offset], word[offset + length :].rstrip(".,;:!?)]}>\"'")
-    if "/" not in word or _PERSONAL_HINT.search(word):
+    if not word.has_slash or word.personal:
         return False
-    if _URL_START.match(word):
-        return before.endswith(("/", "=")) and (not after or after[0] in "/?#&")
-    if not ((not before or before.endswith("/")) and (not after or after.startswith("/"))):
-        return False
-    named = [seg for seg in (before + after).split("/") if _NAMED_SEGMENT.search(seg)]
-    return len(named) >= 2
+    # The character before the digits, and the one after them unless only punctuation is left.
+    before = word.text[offset - 1] if offset else ""
+    after = word.text[offset + length] if offset + length < word.stripped else ""
+    if word.is_url:
+        return before in ("/", "=") and after in ("", "/", "?", "#", "&")
+    return before in ("", "/") and after in ("", "/") and word.named >= 2
 
 
-def is_developer_number(content: str, start: int, end: int) -> bool:
+def is_developer_number(content: str, start: int, end: int, _context: _ScanContext | None = None) -> bool:
     """True when the bare digit run at [start, end) is a machine-issued number, not a personal one.
 
     Only these contexts (the false positives seen), and never with an account
@@ -182,13 +295,12 @@ def is_developer_number(content: str, start: int, end: int) -> bool:
     Sixteen digits are the shape of a card number: kept only as a URL segment, and only when the
     number fails the card checksum.
     """
-    word, offset = _word_around(content, start, end)
-    # The label window reaches back from the start of the word: a URL can put the digits far from it.
-    if _ACCOUNT_LABEL.search(content[max(0, start - offset - _LABEL_WINDOW) : start]):
+    word = (_context or _ScanContext(content)).word(start, end)
+    if word.account_label_before(start):
         return False
-    in_path = _is_path_segment(word, offset, end - start)
+    in_path = _is_path_segment(word, start - word.left, end - start)
     if end - start == _CARD_DIGITS:
-        return in_path and bool(_URL_START.match(word)) and not _luhn_valid(content[start:end])
+        return in_path and word.is_url and not _luhn_valid(content[start:end])
     return in_path or bool(_DEVELOPER_LABEL.search(content[max(0, start - 2 * _LABEL_WINDOW) : start]))
 
 
@@ -340,9 +452,13 @@ class PIIDetector:
         matches: list[PIIMatch] = []
         warnings: list[str] = []
 
+        # The words and tokens around the bare digit runs, worked out once for the whole text.
+        context = _ScanContext(content)
+
         # Scan for each PII pattern
         for pii_type, pattern in self.patterns.items():
-            for match in pattern.finditer(content):
+            found = _email_matches(content) if pattern is _EMAIL_PATTERN else pattern.finditer(content)
+            for match in found:
                 # For password pattern, extract just the password value (group 1)
                 if pii_type == "password" and match.lastindex and match.lastindex >= 1:
                     original = match.group(1)
@@ -354,9 +470,9 @@ class PIIDetector:
                 else:
                     original = match.group()
                     start, end = match.start(), match.end()
-                    if pii_type == "bank_account" and is_identifier_fragment(content, start, end):
+                    if pii_type == "bank_account" and is_identifier_fragment(content, start, end, context):
                         continue
-                    if pii_type in _BARE_DIGIT_TYPES and original.isdigit() and is_developer_number(content, start, end):
+                    if pii_type in _BARE_DIGIT_TYPES and original.isdigit() and is_developer_number(content, start, end, context):
                         continue
 
                 severity = PII_SEVERITY.get(pii_type, "medium")
@@ -410,12 +526,15 @@ class PIIDetector:
 
     def _redact_all(self, content: str, matches: list[PIIMatch]) -> str:
         """Replace all PII matches with redaction placeholders."""
-        result = content
-        for start, end, match in reversed(_merge_overlaps(matches, content)):
-            placeholder = f"[REDACTED_{match.type.upper()}]"
-            result = result[:start] + placeholder + result[end:]
-
-        return result
+        # Built left to right in one pass: splicing each placeholder into the text copies it every time.
+        parts: list[str] = []
+        cursor = 0
+        for start, end, match in _merge_overlaps(matches, content):
+            parts.append(content[cursor:start])
+            parts.append(f"[REDACTED_{match.type.upper()}]")
+            cursor = end
+        parts.append(content[cursor:])
+        return "".join(parts)
 
     def redact(self, content: str) -> str:
         """
@@ -441,14 +560,16 @@ class PIIDetector:
         if not result.has_pii:
             return content
 
-        hashed = content
-        for start, end, match in reversed(_merge_overlaps(result.matches, content)):
+        parts: list[str] = []
+        cursor = 0
+        for start, end, match in _merge_overlaps(result.matches, content):
             # Create deterministic hash (of the whole replaced span: overlapping matches are one value)
             hash_value = hashlib.sha256(content[start:end].encode()).hexdigest()[:12]
-            placeholder = f"[HASH_{match.type.upper()}:{hash_value}]"
-            hashed = hashed[:start] + placeholder + hashed[end:]
-
-        return hashed
+            parts.append(content[cursor:start])
+            parts.append(f"[HASH_{match.type.upper()}:{hash_value}]")
+            cursor = end
+        parts.append(content[cursor:])
+        return "".join(parts)
 
 
 # ============================================================================
