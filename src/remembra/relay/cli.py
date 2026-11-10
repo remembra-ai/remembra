@@ -73,6 +73,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -100,12 +101,14 @@ from remembra.relay.adapters import (
 from remembra.relay.adapters.base import OUTPUT_MODES, AdapterSpec, RefusedEdit
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 from remembra.relay.handoff import (
+    CHECKPOINT_REASON,
     CREW_FOOTER,
     CREW_FOOTER_UNJOINED,
     CREW_FOOTER_UNKNOWN,
     build_sections,
     crew_footer_off,
     is_crew_footer,
+    police_item,
     sections_have_substance,
 )
 from remembra.relay.identity import HINT_SCOPE_ALL
@@ -131,6 +134,15 @@ OUTBOX_SEND_SECONDS = 30.0
 DRAIN_ENTRY_SECONDS = 20.0
 DRAIN_PASS_SECONDS = 120.0
 USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usage-limit stop
+# The per-prompt hook (`brief --once`) of a session that has its brief asks the server for new
+# messages at most this often (crewd polls for crew sessions at the same pace), within this budget.
+TURN_POLL_SECONDS = 30.0
+TURN_BUDGET_SECONDS = 4.0
+TURN_INBOX_LIMIT = 50
+TURN_SHOWN_KEPT = 200
+# `close --checkpoint` (run after every turn) saves a session's handoff at most this often. Each one
+# is a relay event on the account, and replaces the session's previous handoff.
+CHECKPOINT_INTERVAL_SECONDS = 600
 DOCTOR_POINTER = " Ask your agent to run remembra_doctor, or run `remembra-relay doctor`."
 
 
@@ -278,6 +290,53 @@ def forget_brief(home: Path, key: str, session_id: str) -> None:
     """Drop this session's brief marker: a resumed session whose restored history lost the brief gets it again."""
     with contextlib.suppress(OSError):
         _brief_marker_path(home, key, session_id).unlink()
+
+
+def _turn_state_path(home: Path, key: str, session_id: str) -> Path:
+    digest = hashlib.sha256(f"turn\x1f{key}\x1f{session_id}".encode()).hexdigest()[:24]
+    return _state_dir(home) / f"turn-{digest}.json"
+
+
+def load_turn_state(home: Path, key: str, session_id: str) -> dict[str, Any]:
+    """What the per-prompt hook knows about this session (a session outside a crew): ``project_id`` (where
+    its brief was resolved), ``shown`` (ids of the messages it was shown) and ``checked_at`` (the last time
+    the server was asked). {} when there is none."""
+    try:
+        data = json.loads(_turn_state_path(home, key, session_id).read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_turn_state(home: Path, key: str, session_id: str, **changes: Any) -> None:
+    """Merge ``changes`` into this session's turn state (written whole, owner-only). Never raises."""
+    path = _turn_state_path(home, key, session_id)
+    state = {**load_turn_state(home, key, session_id), **changes}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(state))
+        os.replace(tmp, path)
+    except OSError as e:
+        _err(f"could not record the turn state ({e.__class__.__name__})")
+
+
+def crew_session(home: Path, adapter: str, session_id: str) -> bool:
+    """True when this session joined a crew on this machine (crewd keeps a session file for it): its
+    per-turn messages and its checkpoints are the crew runtime's, so the relay's own stay out of the way."""
+    try:
+        from remembra.relay.crew.gate import Layout, session_key
+
+        return Layout(home).session_file(session_key(adapter, session_id)).exists()
+    except Exception:
+        return False
+
+
+def _checkpoint_claim_path(home: Path, agent: str, session_id: str) -> Path:
+    digest = hashlib.sha256(f"checkpoint\x1f{agent}\x1f{session_id}".encode()).hexdigest()[:24]
+    return _state_dir(home) / f"checkpoint-{digest}.json"
 
 
 def _claim_marker(path: Path, fresh_for: float, content: str) -> bool:
@@ -844,6 +903,116 @@ def _brief_messages_shown(ctx: Context, hook_session: str | None, rendered: str)
         _err(f"brief: could not record the messages shown ({e.__class__.__name__})")
 
 
+_BRIEF_INBOX_RE = re.compile(r"\[(inbox_[0-9a-f]{8,64})\]")
+_INBOX_ID_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
+TURN_MESSAGES_HEADER = "Remembra: new message(s) for you from another agent, sent after this session's brief."
+
+
+def _record_turn_start(home: Path, key: str, session_id: str, rendered: str, project_id: Any) -> None:
+    """What the brief just printed, for this session's per-prompt hook: the project it was resolved to, the
+    messages it listed (``[inbox_…]``: they count as shown) and when (the next check is ``TURN_POLL_SECONDS`` later)."""
+    known = [str(i) for i in load_turn_state(home, key, session_id).get("shown") or [] if isinstance(i, str)]
+    listed = [i for i in dict.fromkeys(_BRIEF_INBOX_RE.findall(rendered or "")) if i not in known]
+    changes: dict[str, Any] = {"shown": [*known, *listed][-TURN_SHOWN_KEPT:], "checked_at": time.time()}
+    if isinstance(project_id, str) and project_id.strip():
+        changes["project_id"] = project_id.strip()
+    save_turn_state(home, key, session_id, **changes)
+
+
+def render_turn_messages(rows: Any, shown: list[str]) -> tuple[list[str], str]:
+    """``(ids rendered, text)`` for the unread inbox rows not yet shown to this session, oldest first.
+
+    The same lines a crew session's per-turn hook prints (``gate._fresh_messages``): the template line
+    names only the message id, the sender and whether its key vouches for it; the subject is
+    agent-authored, so it passes the brief's trust policy and goes in the untrusted data block. The
+    body is never printed: the agent reads it with ``get_inbox``. A message stays unread until the
+    agent acknowledges it.
+    """
+    from remembra.crew import schemas as S
+    from remembra.relay.crew.gate import _fresh_messages
+
+    items: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not _INBOX_ID_RE.fullmatch(str(row.get("inbox_id") or "")):
+            continue
+        items.append(
+            {
+                "inbox_id": str(row["inbox_id"]),
+                "from_agent": str(row.get("from_agent") or "")[:64],
+                "sender_verified": bool(row.get("sender_verified")),
+                "created_at": str(row.get("created_at") or "")[:40],
+                "subject": police_item(
+                    str(row.get("subject") or ""),
+                    clip_body=lambda t: S.clip_item(t, 140),
+                    stored_trust=row.get("trust_score"),
+                ),
+            }
+        )
+    items.sort(key=lambda i: i["created_at"])
+    ids, lines, data = _fresh_messages({"inbox": {"items": items}}, {"delivered_inbox": list(shown)})
+    if not ids:
+        return [], ""
+    block = S.DATA_OPEN + " · ".join(S.clip_item(d) for d in data if d) + S.DATA_CLOSE
+    return ids, "\n".join([TURN_MESSAGES_HEADER, *lines, block])
+
+
+def turn_messages(args: argparse.Namespace, adapter: Adapter, payload: dict[str, Any], session_id: str, event: str) -> None:
+    """A per-prompt hook of a session outside a crew: print the messages other agents sent since its brief.
+
+    Without this a message that arrives after the start brief waits for the next session. Each
+    message is shown once per session, two a prompt. The server is asked at most every
+    ``TURN_POLL_SECONDS`` (and not within that time of the brief, which lists the unread ones
+    itself), within ``TURN_BUDGET_SECONDS``. A crew session is left to the crew gate's own per-turn
+    hook, which reads what crewd polled. Never raises and prints nothing on any failure: a prompt
+    hook must not get in the way of the prompt.
+    """
+    home = _home()
+    key = _once_key(args, adapter)
+    try:
+        if crew_session(home, adapter.spec.name, session_id):
+            return
+        now = time.time()
+        with contextlib.suppress(OSError):
+            if now - _brief_marker_path(home, key, session_id).stat().st_mtime < TURN_POLL_SECONDS:
+                return  # the brief is being printed, or just was: it lists the unread messages
+        state = load_turn_state(home, key, session_id)
+        last = state.get("checked_at")
+        if isinstance(last, int | float) and 0 <= now - float(last) < TURN_POLL_SECONDS:
+            return
+        save_turn_state(home, key, session_id, checked_at=now)  # before the slow part: one check per interval
+        ctx = Context(args, payload=payload)
+        ctx.deadline = factlib.Deadline(TURN_BUDGET_SECONDS)
+        ctx.http_timeout = TURN_BUDGET_SECONDS
+        if not ctx.config.api_key or not ctx.agent:
+            return
+        project = state.get("project_id")
+        if not isinstance(project, str) or not project:
+            # Briefed by an older release, or the brief failed: resolve this location as the brief does.
+            where = ctx.project_params()
+            project = where.get("project_id")
+            if not project:
+                resolved = ctx.request("POST", "/api/v1/projects/resolve", json={**where, "bind": False})
+                if resolved.status_code >= 400:
+                    return
+                project = (_json_body(resolved) or {}).get("project_id")
+            if not isinstance(project, str) or not project:
+                return
+            save_turn_state(home, key, session_id, project_id=project)
+        params = {"agent_id": ctx.agent, "project_id": project, "status": "unread", "limit": TURN_INBOX_LIMIT}
+        response = ctx.request("GET", "/api/v1/inbox", params=params)
+        if response.status_code >= 400:
+            return
+        shown = [str(i) for i in state.get("shown") or [] if isinstance(i, str)]
+        ids, text = render_turn_messages(_json_body(response), shown)
+        if not ids:
+            return
+        mode = args.format or adapter.spec.output
+        _emit_brief(mode, text, {"rendered": text, "messages": ids}, event=event)
+        save_turn_state(home, key, session_id, shown=[*shown, *ids][-TURN_SHOWN_KEPT:])
+    except Exception as e:
+        _err(f"message check failed: {e.__class__.__name__}")
+
+
 def _emit_brief(
     mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None, event: str = "SessionStart"
 ) -> None:
@@ -1034,6 +1203,9 @@ def cmd_brief(args: argparse.Namespace) -> int:
             return 0
         if adapter:
             if not _brief_needed(args, adapter.spec, payload.get("source"), _home(), once_key, hook_session):
+                if args.once and hook_session:
+                    # The session has its brief: this prompt hook shows what other agents sent since.
+                    turn_messages(args, adapter, payload, hook_session, event)
                 return 0
         elif args.once and (not hook_session or brief_delivered(_home(), once_key, hook_session)):
             return 0
@@ -1106,6 +1278,8 @@ def cmd_brief(args: argparse.Namespace) -> int:
         if _claim_print(home, once_key, hook_session, event, exclusive):
             _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay), event=event)
             _brief_messages_shown(ctx, hook_session, str(brief.get("rendered") or ""))
+            if hook_session:
+                _record_turn_start(ctx.home, once_key, hook_session, str(brief.get("rendered") or ""), brief.get("project_id"))
     except Exception as e:  # never break the agent's session start
         _err(f"brief failed: {e.__class__.__name__}: {e}")
         who = (ctx.agent if ctx is not None else None) or getattr(args, "agent", None) or getattr(args, "hook", None)
@@ -1223,7 +1397,10 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         # The agent's last turn stopped on its plan's usage limit: say so first, so
         # whoever picks up knows the work stopped mid-way, not because it was done.
         facts["errors"] = [f"Stopped on a usage limit: {limit}", *(facts.get("errors") or [])]
-    reason = args.reason or (USAGE_LIMIT_REASON if limit else None) or ctx.hook_fields.get("reason")
+    reason = args.reason or (USAGE_LIMIT_REASON if limit else None)
+    if not reason:
+        # A checkpoint is not an end: whatever the event's payload says, the session is still open.
+        reason = CHECKPOINT_REASON if getattr(args, "checkpoint", False) else ctx.hook_fields.get("reason")
     if reason:
         payload["end_reason"] = reason
     if args.summary:
@@ -1240,6 +1417,9 @@ EMPTY_CLOSE_REASON = (
 def nothing_to_hand_off(payload: dict[str, Any]) -> bool:
     """True when a close would store an empty handoff (an idle or automated session).
 
+    A checkpoint's own end reason (``CHECKPOINT_REASON``) is not a notice worth a handoff: a
+    checkpoint of a session that recorded nothing is empty.
+
     The same rule the brief uses to skip empty handoffs
     (:func:`~remembra.relay.handoff.sections_have_substance`): nothing in Done,
     Not done, Failing or Next, no summary or notes, and an end reason that is
@@ -1249,9 +1429,10 @@ def nothing_to_hand_off(payload: dict[str, Any]) -> bool:
     """
     facts = payload.get("facts") or {}
     sections = build_sections(facts, facts.get("next_step"))
-    return not sections_have_substance(
-        sections, summary=payload.get("summary"), notes=facts.get("notes"), end_reason=payload.get("end_reason")
-    )
+    reason = payload.get("end_reason")
+    if reason == CHECKPOINT_REASON:
+        reason = None
+    return not sections_have_substance(sections, summary=payload.get("summary"), notes=facts.get("notes"), end_reason=reason)
 
 
 def _sent_marker_path(home: Path, agent: str, session_id: str) -> Path:
@@ -1448,6 +1629,39 @@ def _skip_background_close(args: argparse.Namespace, adapter: Adapter, hook_payl
     return skipped is not None
 
 
+def start_checkpoint(args: argparse.Namespace, adapter: Adapter, hook_payload: dict[str, Any]) -> None:
+    """``close --checkpoint`` as a hook runs it (after every turn): hand the work to a detached process, or do nothing.
+
+    Nothing for a hook another agent runs, a payload without a session id, a crew session (crewd
+    keeps its checkpoints) and a session checkpointed within ``CHECKPOINT_INTERVAL_SECONDS``. The
+    hook itself only reads its payload and one marker file, so it returns at once; the detached
+    process gathers the facts and sends them (skipping an empty or unchanged handoff), as a close does.
+    """
+    home = _home()
+    name = adapter.spec.name
+    if hosts.detect_host(adapter, hook_payload, os.environ, home) is not None:
+        return  # that agent's own hooks keep its session; a checkpoint is never filed across agents
+    if any(key in hook_payload for key in adapter.spec.skip_payload_keys):
+        return
+    fields = adapter.spec.payload.extract(hook_payload)
+    session_id = args.session_id or fields.get("session_id")
+    if not session_id:
+        return
+    agent = getattr(args, "agent", None) or name
+    if crew_session(home, name, session_id):
+        outbox.log(home, f"close --hook {name}: checkpoint skipped, {session_id[:40]} is a crew session (crewd keeps its own)")
+        return
+    claim = _checkpoint_claim_path(home, agent, session_id)
+    if not _claim_marker(claim, CHECKPOINT_INTERVAL_SECONDS, json.dumps({"at": datetime.now(UTC).isoformat()})):
+        return  # checkpointed a moment ago: no process, no log line (this runs after every turn)
+    event = fields.get("event") or "no event"
+    if spawn_detached_close(args, hook_payload):
+        outbox.log(home, f"close --hook {name}: checkpoint started ({event}, session {session_id[:40]})")
+    else:
+        with contextlib.suppress(OSError):
+            claim.unlink()  # not started: the next turn tries again
+
+
 def cmd_close(args: argparse.Namespace) -> int:
     ctx: Context | None = None
     payload: dict[str, Any] | None = None
@@ -1461,6 +1675,11 @@ def cmd_close(args: argparse.Namespace) -> int:
             if _skip_background_close(args, adapter, hook_payload):
                 if not args.dry_run:
                     _hook_ack(adapter)
+                return 0
+            if args.checkpoint and not args.dry_run and not args.foreground:
+                # A checkpoint hook runs after every turn: it never does the work itself.
+                _hook_ack(adapter)
+                start_checkpoint(args, adapter, hook_payload)
                 return 0
             live = not args.dry_run and not args.foreground
             if live:  # every hook close leaves a line, so "never fired" and "fired, then stopped" differ
@@ -2489,6 +2708,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_close.add_argument("--todo", action="append", help="An unfinished item (repeatable)")
     p_close.add_argument("--hours", type=float, default=12.0, help="Commit window when the session start is unknown")
     p_close.add_argument("--dry-run", action="store_true", help="Print the payload instead of sending it")
+    p_close.add_argument(
+        "--checkpoint",
+        action="store_true",
+        help="The session goes on: save a 'still open' handoff that its end replaces (for a hook that runs after each turn)",
+    )
     p_close.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)  # set on the detached child
     p_close.set_defaults(func=cmd_close)
 

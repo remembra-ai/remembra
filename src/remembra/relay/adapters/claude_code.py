@@ -14,6 +14,16 @@ supersedes it. The StopFailure payload names the error in ``error`` (seen on
 ``error_type``, so both are read. StopFailure and SessionEnd can arrive in
 either order; both close the same session, and the last one wins.
 
+UserPromptSubmit runs ``brief --once``: plain stdout is added to the prompt's
+context, so a session that missed its start brief gets it, and one that has it
+is shown the messages other agents sent since (a session outside a crew; in a
+crew the gate's own UserPromptSubmit hook does that). Stop (after each turn)
+runs ``close --checkpoint``: a rolling "still open" handoff, spaced and
+detached, so a session killed before SessionEnd still leaves one. The Stop
+payload carries ``session_id``, ``transcript_path``, ``cwd`` and
+``hook_event_name`` like the others; a sub-agent's end is SubagentStop, which
+is not wired.
+
 ``CLAUDE_CONFIG_DIR`` moves ``~/.claude`` (settings and transcripts): the
 recorded payloads above came from a run with it set.
 
@@ -48,16 +58,18 @@ SPEC = AdapterSpec(
     config_path=lambda home: Path(home) / ".claude" / "settings.json",
     start_event="SessionStart",
     end_event="SessionEnd",
+    prompt_event="UserPromptSubmit",
     payload=PayloadMap(error=("error", "error_type"), compact_events=("PreCompact",)),
     output="text",
     transcript_format="claude-jsonl",
     detect_bins=("claude",),
     detect_dirs=(".claude",),
     config_source="claude",
-    hook_timeouts={"start": 15, "end": 15},
+    hook_timeouts={"start": 15, "prompt": 15, "end": 15, "checkpoint": 10},
     home_env="CLAUDE_CONFIG_DIR",
     notes="Verified against Claude Code hook docs and real JSONL transcripts.",
     extra_close_events=(CloseEvent("StopFailure", "|".join(LIMIT_ERRORS)), CloseEvent("PreCompact")),
+    checkpoint_events=(CloseEvent("Stop"),),
 )
 
 
@@ -82,14 +94,19 @@ CREW = CrewSpec(
     hooks=(
         CrewHook("SessionStart", "start", "cli", timeout=15),
         CrewHook("UserPromptSubmit", "turn", "gate", timeout=3),
+        # Not a crew session (the gate exits at once for one): the relay's own prompt, turn-end and
+        # pre-compaction hooks, which `connect` removed. A crew session makes these three exit at once.
+        CrewHook("UserPromptSubmit", "relay", "cli", timeout=15),
         CrewHook("PreToolUse", "pretool", "gate", matcher=CREW_TOOL_MATCHER, timeout=5),
         CrewHook("PostToolUse", "posttool", "gate", matcher=CREW_TOOL_MATCHER, timeout=30, is_async=True),
         CrewHook("Stop", "stop", "gate", timeout=5),
         # S0 (docs/crew/S0-results.md): asyncRewake is L0. The waiter wakes an idle session for a granted
         # queued claim, a human hand-over or a pause; it must exit 0 at once when nothing is queued.
         CrewHook("Stop", "rewake", "gate", timeout=300, async_rewake=True),
+        CrewHook("Stop", "relay", "cli", timeout=10),
         CrewHook("StopFailure", "stall", "cli", timeout=20),
         CrewHook("PreCompact", "precompact", "gate", timeout=10),
+        CrewHook("PreCompact", "relay", "cli", timeout=20),
         CrewHook("SessionEnd", "end", "cli", timeout=20),
     ),
     output="hook-json",

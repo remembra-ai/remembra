@@ -300,7 +300,10 @@ def test_connect_upgrades_an_old_two_event_install_in_place(home):
     data = json.loads(settings.read_text())
     assert data["hooks"]["SessionStart"] == before["hooks"]["SessionStart"]
     assert data["hooks"]["SessionEnd"] == before["hooks"]["SessionEnd"]
-    assert data["hooks"]["Stop"] == before["hooks"]["Stop"] and data["model"] == "opus"
+    # the user's own Stop hook is kept, first; the relay's checkpoint hook is added after it
+    checkpoint = {"type": "command", "command": f"{RELAY_CMD} close --hook claude-code --agent claude-code --checkpoint"}
+    assert data["hooks"]["Stop"] == [*before["hooks"]["Stop"], {"hooks": [{**checkpoint, "timeout": 10}]}]
+    assert data["model"] == "opus"
     assert data["hooks"]["StopFailure"] == [
         {"matcher": "rate_limit|billing_error|account_on_hold|cloud_credential_error", **old_hook("close")}
     ]

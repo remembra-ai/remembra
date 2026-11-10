@@ -20,7 +20,9 @@ Commands have two runners (the interface to WP-9's runtime):
   ``turn``, ``pretool``, ``posttool``, ``stop``, ``precompact`` and, per S0, ``rewake`` for the
   asyncRewake waiter);
 * ``cli``: ``<remembra-crew> <verb> --hook <adapter> --agent <adapter> # remembra-crew``
-  (verbs ``start``, ``stall``, ``end``).
+  (verbs ``start``, ``stall``, ``end``, and ``relay``: next to the gate's entry on the prompt,
+  turn-end and pre-compaction events, it does for a session that is not a crew session what the
+  removed ``remembra-relay`` entry on that event did, and nothing for a crew session).
 
 Hook commands never carry secrets: S0 showed Claude Code prints the full hook
 command line to the model in asyncRewake messages.
@@ -41,7 +43,7 @@ from remembra.relay.adapters.base import _load_json_object, is_relay_command
 
 CREW_MARKER = CREW_HOOK_MARKER
 GATE_VERBS = ("turn", "pretool", "posttool", "stop", "precompact", "rewake")
-CLI_VERBS = ("start", "stall", "end")
+CLI_VERBS = ("start", "stall", "end", "relay")
 KIMI_BEGIN = "# >>> remembra-crew (managed block) >>>"
 KIMI_END = "# <<< remembra-crew (managed block) <<<"
 KIMI_RELAY_BEGIN = "# >>> remembra-relay (managed block) >>>"

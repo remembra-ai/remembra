@@ -35,6 +35,7 @@ Agent-authored text (task titles, messages) is printed only inside the ``<rememb
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import socket
@@ -97,7 +98,7 @@ HOOK_OUTPUT: Final[Mapping[str, str]] = {
     "qwen": "hook-json",
     "cursor": "cursor-json",
 }
-HOOK_COMMANDS: Final = ("start", "end", "stall")
+HOOK_COMMANDS: Final = ("start", "end", "stall", "relay")
 
 
 def _err(message: str) -> None:
@@ -726,6 +727,81 @@ def cmd_stall(args: argparse.Namespace, layout: Layout) -> int:
             _spool_hook(layout, "stall", key, {k: v for k, v in body.items() if k != "key"})
     except Exception as e:
         _err(f"stall failed: {e.__class__.__name__}")
+    return 0
+
+
+def relay_event_action(adapter: str, payload: Mapping[str, Any]) -> str | None:
+    """What the plain relay hooks of ``adapter`` run on this payload's event: ``"prompt"`` (``brief --once``),
+    ``"checkpoint"`` (``close --checkpoint``), ``"close"`` (an early close: PreCompact), or None for an event
+    the relay has no hook on."""
+    try:
+        from remembra.relay.adapters import get_adapter
+
+        spec_adapter = get_adapter(adapter)
+        event = str(payload.get("hook_event_name") or "")
+        if spec_adapter is None or not event:
+            return None
+        spec = spec_adapter.spec
+        if event == spec.prompt_event:
+            return "prompt"
+        if any(extra.event == event for extra in spec.checkpoint_events):
+            return "checkpoint"
+    except Exception:
+        return None
+    return "close" if relay_close_event(adapter, payload) else None
+
+
+def relay_inline(argv: Sequence[str], payload: Mapping[str, Any]) -> None:
+    """Run ``remembra-relay <argv>`` in this process with ``payload`` as its stdin; its stdout is the hook's.
+
+    For the two relay commands that run on every prompt and after every turn and return at once
+    (``brief --once`` for a session that has its brief, ``close --checkpoint``): a second interpreter
+    start would double what each prompt waits for. The relay never raises and never exits non-zero.
+    """
+    from remembra.relay import cli as relay_cli
+
+    stdin = sys.stdin
+    sys.stdin = io.StringIO(json.dumps(dict(payload)))
+    try:
+        relay_cli.main(list(argv))
+    finally:
+        sys.stdin = stdin
+
+
+def cmd_relay(args: argparse.Namespace, layout: Layout) -> int:
+    """UserPromptSubmit, PreCompact and Stop for a session that is NOT a crew session: the plain relay's hook.
+
+    ``remembra-crew connect`` replaces the ``remembra-relay`` hook entries, and the crew gate on these
+    events exits at once for a session without a crew session file. This hook runs next to the gate's
+    and does the opposite: nothing for a crew session (the gate shows its messages, crewd keeps its
+    checkpoints and its handoff), and for any other session what its relay hook would have done:
+
+    * a prompt: ``remembra-relay brief --once`` (the brief if the session has none, else the messages
+      other agents sent since);
+    * the end of a turn: ``remembra-relay close --checkpoint`` (a spaced, detached "still open" handoff);
+    * a context compaction: ``remembra-relay close`` (the handoff written before the context is cut).
+
+    The relay keeps its own order (skip an automation or sub-agent thread, route a hook another agent runs).
+    """
+    try:
+        payload = _hook_payload(args)
+        adapter = args.hook or "claude-code"
+        sid = payload.get("session_id") or args.session_id
+        if not payload or not sid:
+            return 0
+        if layout.session_file(session_key(adapter, str(sid))).exists():
+            return 0  # a crew session: the gate's hook on this event has it
+        action = relay_event_action(adapter, payload)
+        agent = args.agent or adapter
+        if action == "prompt":
+            fmt = {"hook-json": "hook-json", "cursor-json": "cursor-json"}.get(HOOK_OUTPUT.get(adapter, "text"), "text")
+            relay_inline(["brief", "--hook", adapter, "--agent", agent, "--once", "--format", fmt], payload)
+        elif action == "checkpoint":
+            relay_inline(["close", "--hook", adapter, "--agent", agent, "--checkpoint"], payload)
+        elif action == "close":
+            relay_close_passthrough(adapter, agent, payload)
+    except Exception as e:
+        _err(f"relay failed: {e.__class__.__name__}")
     return 0
 
 
@@ -1390,6 +1466,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("stall", help="StopFailure hook")
     hook_opts(sp)
     sp.add_argument("--error")
+    sp = sub.add_parser("relay", help="prompt / turn-end / pre-compaction hook: the plain relay's, for a session outside a crew")
+    hook_opts(sp)
 
     for name, helptext in (
         ("status", "crew status (YOU line, DO NOT TOUCH)"),
@@ -1482,6 +1560,7 @@ COMMANDS: Final = {
     "start": cmd_start,
     "end": cmd_end,
     "stall": cmd_stall,
+    "relay": cmd_relay,
     "status": cmd_status,
     "whereami": cmd_whereami,
     "doctor": cmd_doctor,

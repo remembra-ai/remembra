@@ -19,7 +19,9 @@ GATE = "/home/u/.remembra/crew/bin/crew-gate.py"
 PY_GATE = f"test ! -f {GATE} || exec /usr/bin/python3 -I {GATE}"
 MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*"
 
-# Spec §8.2, entry by entry (plus the S0 asyncRewake waiter on Stop).
+# Spec §8.2, entry by entry (plus the S0 asyncRewake waiter on Stop), and `remembra-crew relay` next to the
+# gate on the prompt, turn-end and pre-compaction events: the plain relay's hook for a session outside a crew.
+RELAY_HOOK = "/opt/bin/remembra-crew relay --hook claude-code --agent claude-code # remembra-crew"
 EXPECTED_CLAUDE = {
     "SessionStart": [
         {
@@ -33,7 +35,8 @@ EXPECTED_CLAUDE = {
         }
     ],
     "UserPromptSubmit": [
-        {"hooks": [{"type": "command", "timeout": 3, "command": f"{PY_GATE} turn --hook claude-code # remembra-crew"}]}
+        {"hooks": [{"type": "command", "timeout": 3, "command": f"{PY_GATE} turn --hook claude-code # remembra-crew"}]},
+        {"hooks": [{"type": "command", "timeout": 15, "command": RELAY_HOOK}]},
     ],
     "PreToolUse": [
         {
@@ -66,6 +69,7 @@ EXPECTED_CLAUDE = {
                 }
             ]
         },
+        {"hooks": [{"type": "command", "timeout": 10, "command": RELAY_HOOK}]},
     ],
     "StopFailure": [
         {
@@ -79,7 +83,8 @@ EXPECTED_CLAUDE = {
         }
     ],
     "PreCompact": [
-        {"hooks": [{"type": "command", "timeout": 10, "command": f"{PY_GATE} precompact --hook claude-code # remembra-crew"}]}
+        {"hooks": [{"type": "command", "timeout": 10, "command": f"{PY_GATE} precompact --hook claude-code # remembra-crew"}]},
+        {"hooks": [{"type": "command", "timeout": 20, "command": RELAY_HOOK}]},
     ],
     "SessionEnd": [
         {
@@ -135,7 +140,7 @@ def _render_claude(before: str | None, remove: bool = False) -> tuple[str, list[
 def test_claude_block_matches_spec_on_an_empty_file():
     text, summary = _render_claude(None)
     assert json.loads(text) == {"hooks": EXPECTED_CLAUDE}
-    assert len(summary) == 9
+    assert len(summary) == 12
 
 
 def test_claude_block_replaces_relay_and_legacy_and_keeps_user_hooks():
@@ -183,7 +188,7 @@ def test_claude_uninstall_removes_only_crew_entries():
         "PreToolUse": USER_SETTINGS["hooks"]["PreToolUse"],
         "Notification": USER_SETTINGS["hooks"]["Notification"],
     }
-    assert len(summary) == 9
+    assert len(summary) == 12
 
 
 def test_every_crew_command_is_a_clean_shell_line_with_the_marker():
@@ -210,7 +215,7 @@ def test_installed_entries_are_protected_by_the_gate(tmp_path):
     settings.parent.mkdir(parents=True)
     text, _ = _render_claude(json.dumps(USER_SETTINGS))
     settings.write_text(text)
-    assert len(gatecore.crew_hook_entries(text)) == 9
+    assert len(gatecore.crew_hook_entries(text)) == 12
 
     vector = json.loads((Path(__file__).parent / "vectors" / "guard" / "concrete.json").read_text())
     snapshot = vector["snapshot"]

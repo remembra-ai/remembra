@@ -692,6 +692,11 @@ STOP_REASONS = frozenset(
     }
 )
 PRE_COMPACT_REASON = "pre-compact"
+# A handoff saved while the session was still working (``remembra-relay close --checkpoint``, run after
+# a turn): the session's end replaces it, and a session killed before its end hook leaves it behind.
+# Kept under the ``pre-compact:`` prefix so a server that does not know it (0.17.5 and older) still
+# reads it as a session that is still open.
+CHECKPOINT_REASON = PRE_COMPACT_REASON + ":checkpoint"
 
 
 def end_reason_note(reason: Any) -> str | None:
@@ -699,6 +704,8 @@ def end_reason_note(reason: Any) -> str | None:
     value = str(reason or "").strip()
     if value in STOP_REASONS:
         return f"stopped: {value}"
+    if value == CHECKPOINT_REASON:
+        return "still open (saved while the session was running)"
     if value == PRE_COMPACT_REASON or value.startswith(PRE_COMPACT_REASON + ":"):
         return "still open (saved before context compaction)"
     return None

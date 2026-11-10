@@ -464,8 +464,16 @@ def test_timeouts_are_written_in_each_agents_unit(tmp_path):
     assert timeouts("qwen") == {"SessionStart": 15, "SessionEnd": 15, "StopFailure": 15, "PreCompact": 15}
     assert timeouts("cursor") == {"sessionStart": 15, "sessionEnd": 15}
     assert timeouts("codex") == {"SessionStart": 15, "UserPromptSubmit": 15, "SessionEnd": 3}  # SessionEnd max is 3 s
-    # StopFailure and PreCompact also run close, with the end hook's timeout.
-    assert timeouts("claude-code") == {"SessionStart": 15, "SessionEnd": 15, "StopFailure": 15, "PreCompact": 15}
+    # StopFailure and PreCompact also run close, with the end hook's timeout. UserPromptSubmit runs
+    # `brief --once` (the brief if missed, else new messages); Stop runs `close --checkpoint`, which detaches.
+    assert timeouts("claude-code") == {
+        "SessionStart": 15,
+        "UserPromptSubmit": 15,
+        "SessionEnd": 15,
+        "StopFailure": 15,
+        "PreCompact": 15,
+        "Stop": 10,
+    }
 
 
 def test_cursor_config_keeps_other_hooks_and_is_idempotent(tmp_path):

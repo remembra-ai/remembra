@@ -98,6 +98,9 @@ CREW = CrewSpec(
     hooks=(
         CrewHook("SessionStart", "start", "cli"),
         CrewHook("UserPromptSubmit", "turn", "gate"),
+        # Not a crew session: the relay's `brief --once` (the brief an auto-restored thread never got at
+        # SessionStart, then the messages sent since), which `connect` removed.
+        CrewHook("UserPromptSubmit", "relay", "cli"),
         CrewHook("PreToolUse", "pretool", "gate"),
         CrewHook("PostToolUse", "posttool", "gate"),
         CrewHook("Stop", "stop", "gate"),

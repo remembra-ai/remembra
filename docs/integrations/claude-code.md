@@ -53,8 +53,10 @@ If `REMEMBRA_AGENT_ID` is missing, `health_check` returns a warning and the serv
 
 ### Load context automatically at session start (Remembra Relay)
 
-`remembra-relay connect --apply` adds a SessionStart hook (`remembra-relay brief`) and
-SessionEnd, StopFailure and PreCompact hooks (`remembra-relay close`) to
+`remembra-relay connect --apply` adds a SessionStart hook (`remembra-relay brief`),
+SessionEnd, StopFailure and PreCompact hooks (`remembra-relay close`), a UserPromptSubmit hook
+(`remembra-relay brief --once`: messages other agents send while the session runs) and a Stop hook
+(`remembra-relay close --checkpoint`: a rolling handoff while the work is still going) to
 `~/.claude/settings.json`. At session start Claude Code gets the pickup brief: what the last
 agent did, what it did not finish, what is failing and its suggested next step, plus your
 unread inbox, status values and this project's recent handoffs and checkpoints. At session end

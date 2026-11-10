@@ -128,8 +128,10 @@ class AdapterSpec:
     # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
     hook_timeouts: dict[str, int] = field(default_factory=dict)
     timeout_unit: str = "s"  # "s" or "ms" (Gemini CLI reads milliseconds: 15 would be 15 ms)
-    # A third event that runs `brief --once`: delivers the brief when the start event did
-    # not fire (Codex does not fire SessionStart when it auto-restores a thread).
+    # A third event that runs `brief --once` on every prompt: it delivers the brief when the start
+    # event did not fire (Codex does not fire SessionStart when it auto-restores a thread), and once
+    # the session has its brief it shows the messages other agents sent since (a session outside a
+    # crew; a crew session's per-turn hook is the crew gate's).
     prompt_event: str | None = None
     # Start ``source`` values whose output the agent throws away (Gemini CLI's /clear):
     # `brief` does nothing then, so the prompt event's `brief --once` delivers it.
@@ -154,6 +156,10 @@ class AdapterSpec:
     # StopFailure on a usage/billing limit, PreCompact). A later close of the
     # same session supersedes it on the server.
     extra_close_events: tuple[CloseEvent, ...] = ()
+    # Events that run ``close --checkpoint`` while the session works (Claude Code: Stop, after each
+    # turn): a rolling "still open" handoff, at most one per ``CHECKPOINT_INTERVAL_SECONDS``, so a
+    # session killed before its end hook still leaves one. The session's end supersedes it.
+    checkpoint_events: tuple[CloseEvent, ...] = ()
     # Environment variable that moves the agent's own directory (the first part of
     # ``config_path`` under home, e.g. ``~/.qwen``); see :meth:`config_file`.
     home_env: str | None = None
@@ -271,7 +277,7 @@ def relay_command() -> str:
 
 
 # Our hook entries end with "<verb> --hook <adapter> --agent <id>", whatever the binary path is.
-_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+(?: --once)?$")
+_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+(?: --once| --checkpoint)?$")
 
 
 def is_relay_command(command: Any) -> bool:
@@ -395,17 +401,21 @@ class Adapter:
         commands = {"start": base.format(verb="brief"), "end": base.format(verb="close")}
         if self.spec.prompt_event:
             commands["prompt"] = base.format(verb="brief") + " --once"
+        if self.spec.checkpoint_events:
+            commands["checkpoint"] = base.format(verb="close") + " --checkpoint"
         return commands
 
     def hook_events(self) -> list[tuple[str, str, str | None]]:
         """``(command key, event, matcher)`` for every hook this adapter installs.
 
         The start, prompt (``brief --once``) and end events, then the extra
-        events that also run ``close`` (with their matcher, if any).
+        events that also run ``close`` (with their matcher, if any) and the
+        ones that run ``close --checkpoint``.
         """
         pairs = [("start", self.spec.start_event), ("prompt", self.spec.prompt_event), ("end", self.spec.end_event)]
         events: list[tuple[str, str, str | None]] = [(key, event, None) for key, event in pairs if event]
         events.extend(("end", extra.event, extra.matcher) for extra in self.spec.extra_close_events)
+        events.extend(("checkpoint", extra.event, extra.matcher) for extra in self.spec.checkpoint_events)
         return events
 
     def events(self) -> list[tuple[str, str]]:

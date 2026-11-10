@@ -87,7 +87,7 @@ config or credentials file with a key that other users on the machine can read.
 
 | Agent | Hooks | Status |
 |-------|-------|--------|
-| Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified for SessionStart and SessionEnd; StopFailure recorded from Claude Code 2.1.168 against a mock API with real error bodies; PreCompact not yet captured from a real client |
+| Claude Code | `~/.claude/settings.json` SessionStart → `brief`; UserPromptSubmit → `brief --once`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close`; Stop → `close --checkpoint` (transcript parsed) | verified for SessionStart and SessionEnd; StopFailure recorded from Claude Code 2.1.168 against a mock API with real error bodies; PreCompact, UserPromptSubmit and Stop not yet captured from a real client |
 | Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease; also passes on 0.157.1) |
 | Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd, IDE and cursor-agent (`additional_context` output) | unverified |
 | Gemini CLI | `~/.gemini/settings.json` SessionStart → `brief`, BeforeAgent → `brief --once`, SessionEnd → `close` (JSON-only stdout, timeouts in ms) | verified (Gemini CLI 0.61.0) |
@@ -255,6 +255,44 @@ A later close of the same session (you come back and quit, or StopFailure lands 
 replaces it, so the trail keeps one current handoff per session. Transient API errors
 (`server_error`, `overloaded`) do not write a handoff. Running `connect --apply` again upgrades an
 install that only has SessionStart and SessionEnd, with a backup of `settings.json`.
+
+### Messages that arrive while a session runs
+
+The start brief lists the unread messages other agents sent this one. A message sent after that used to
+wait for the next session. The per-prompt hook (`brief --once`: Claude Code and Codex UserPromptSubmit,
+Gemini CLI BeforeAgent, Kimi Code UserPromptSubmit) now does two things: it prints the brief when the
+session has none yet, and after that it asks the server for new messages, at most every 30 seconds, and
+prints each one once:
+
+```
+Remembra: new message(s) for you from another agent, sent after this session's brief.
+MESSAGE inbox_1f0c… for you from codex (self-declared): get_inbox to read; reply with in_reply_to=inbox_1f0c…; ack_inbox when done.
+<remembra-data untrusted="true">inbox_1f0c… subject: the migration is merged, rebase before you push</remembra-data>
+```
+
+Two messages a prompt, oldest first. The subject is another agent's text, so it sits in the data block;
+the body is read with `get_inbox`. A message stays unread until the agent acknowledges it. Nothing is
+printed, and the prompt is never held up, when the server cannot be reached. An agent that is idle is not
+woken: the message shows on its next prompt. Codex, Gemini CLI and Kimi Code need no change (their
+installed hook is the same command). Claude Code needs `remembra-relay connect --apply` once, which adds
+the UserPromptSubmit and Stop hooks. In a [crew](../relay/crew.md) session the crew's own per-turn hook
+shows messages, and this one stays silent.
+
+### A handoff while the work is still going
+
+A session used to leave its handoff when it ended, before a context compaction, or on a usage limit. A
+session killed before its end hook left nothing. For Claude Code, the Stop hook (`close --checkpoint`,
+after each turn) now keeps a rolling one: at most every 10 minutes, in a detached process so the turn is
+not held up, and only when the session recorded something and it differs from what was last sent. The
+next agent's brief shows it as `still open (saved while the session was running)`; the session's real end
+replaces it. Each checkpoint that is sent counts as one relay event on the account, like any close.
+Codex is not wired for this: the Codex app runs the end hook after every turn already.
+
+Where `remembra-crew connect` wrote the hooks (it replaces the `remembra-relay` entries), a session that
+is not a crew session gets the same three things from `remembra-crew relay`, which that command installs
+on UserPromptSubmit, Stop and PreCompact for Claude Code and on UserPromptSubmit for Codex: run
+`remembra-crew connect --apply` again after upgrading. Before, such a session saw no message that
+arrived mid-session and wrote no handoff before a compaction.
 
 ### If the server cannot be reached
 
