@@ -235,3 +235,15 @@ def test_mcp_close_outside_git_or_on_a_remote_server_reads_nothing(mcp_env, work
 
     monkeypatch.setattr(server, "REMEMBRA_MCP_TRANSPORT", "streamable-http")
     assert server._close_git_facts(str(work), None) == {}
+
+
+def test_mcp_close_by_project_id_still_reads_the_sessions_commits(mcp_env, work):
+    """A session that names its project by id (and its checkout by root_path) gets the same git facts."""
+    _j(server.session_brief(project_id="widget", root_path=str(work), compact=True))
+    sha = commit(work, "src/widget.py", "x = 1\n", "feat: widget")
+    out = _j(server.close_session(project_id="widget", root_path=str(work)))
+    assert out["project_id"] == "widget"
+    assert f"- {sha[:7]} feat: widget" in out["rendered"] and f"main@{sha[:7]}" in out["rendered"]
+    # Without root_path the remembered checkout belongs to the brief's project only.
+    other = _j(server.close_session(project_id="another", session_id="s-other"))
+    assert "(no git info)" in other["rendered"]

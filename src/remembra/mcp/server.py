@@ -862,7 +862,9 @@ def session_brief(
             head_commit=(checkout or {}).get("head_commit"),
         )
         if brief.get("project_id"):
-            _remember_session_project(brief["project_id"], locator if use_locator else None, checkout)
+            _remember_session_project(
+                brief["project_id"], locator if use_locator else None, checkout, root=(locator or {}).get("root_path")
+            )
         handoff = brief.get("handoff") or {}
         inbox = brief.get("inbox") or {}
         summary = {
@@ -928,7 +930,11 @@ def _session_scope() -> str:
     return f"session:{id(session)}"
 
 
-def _remember_session_project(project_id: str, locator: dict[str, Any] | None, checkout: dict[str, Any] | None = None) -> None:
+def _remember_session_project(
+    project_id: str, locator: dict[str, Any] | None, checkout: dict[str, Any] | None = None, root: str | None = None
+) -> None:
+    """Keep the project (and locator) the brief resolved, and, for a brief that read a checkout
+    (``root`` is its top level, ``checkout`` its branch and HEAD), where that checkout stood."""
     if len(_session_projects) >= _MAX_SESSION_PROJECTS:
         _session_projects.clear()
     scope = _session_scope()
@@ -936,7 +942,7 @@ def _remember_session_project(project_id: str, locator: dict[str, Any] | None, c
     # Where each checkout stood when this session first briefed in it: close_session reads
     # "this session's commits" from there (the first brief wins; a later one is mid-session).
     starts: dict[str, dict[str, Any]] = dict((_session_projects.get(scope) or {}).get("starts") or {})
-    root = (locator or {}).get("root_path")
+    root = root or (locator or {}).get("root_path")
     head = (checkout or {}).get("head_commit")
     if root and head and str(root) not in starts and len(starts) < _MAX_SESSION_STARTS:
         starts[str(root)] = {"head": str(head), "ts": time.time()}
