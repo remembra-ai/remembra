@@ -7,7 +7,11 @@ open todo items are sent, and every string is passed through
 ``redact_secrets`` before it is returned.
 
 Stdlib only. Every subprocess call is bounded by a shared deadline so a close
-hook can never hang the agent.
+hook can never hang the agent. The probes a handoff cannot do without (is this
+a repository, its HEAD, this session's commits, push state, uncommitted files)
+may run past a spent deadline, each for at most ``GIT_PROBE_FLOOR`` seconds and
+together for at most the caller's ``grace`` (``GIT_GRACE_SECONDS`` by default):
+a budget used up before they ran must not turn them into "unknown".
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import socket
 import subprocess
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +57,14 @@ CLOSE_KEEP_NEWEST = frozenset({"commands", "tests", "errors"})
 CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "todos_open", "done", "incomplete"})
 CLOSE_ITEM_CLIP = 1000  # characters per path (or other text item), as the server keeps them
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+# Time the probes a handoff needs may take once the shared deadline is spent: all of them
+# together (the default ``grace`` of :func:`git_facts`), and one of them.
+GIT_GRACE_SECONDS = 2.0
+GIT_PROBE_FLOOR = 1.0
+# ``git diff --numstat HEAD`` reads every changed blob to count lines (about 10 s in a checkout
+# with thousands of deleted binary files). It only feeds the optional diff-stat line, so it runs
+# last and gets this much; the file count then comes from the cheap ``--name-status``.
+DIFF_NUMSTAT_SECONDS = 1.5
 
 _EXIT_RE = re.compile(r"^\s*(?:Error:\s*)?Exit code (\d+)")
 # `git commit` / cherry-pick / revert output: "[branch 1a2b3c4] subject" (or "(root-commit)").
@@ -75,6 +87,7 @@ _KNOWN_GIT_HOSTS = {
     "git.sr.ht",
     "gitee.com",
 }
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 _SCP_REMOTE_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[A-Za-z0-9.\-]+):(?!//)(?P<path>.+)$")
 
 
@@ -113,9 +126,12 @@ def _scrub_clip(value: str, limit: int) -> str:
 
 
 class Git:
-    def __init__(self, cwd: Path, deadline: Deadline) -> None:
+    def __init__(self, cwd: Path, deadline: Deadline, grace: float = 0.0) -> None:
         self.cwd = cwd
         self.deadline = deadline
+        # Seconds the calls that ask for it may run past the deadline, all together (0: never).
+        self.grace = max(0.0, grace)
+        self._grace_end: float | None = None
         self.env = {
             **os.environ,
             "GIT_TERMINAL_PROMPT": "0",
@@ -125,14 +141,28 @@ class Git:
         self.timed_out = False
         self.timeouts = 0
 
-    def run(self, *args: str) -> str | None:
+    def _grace_left(self) -> float:
+        """What is left of the grace; it starts when the deadline ends (or at the first call after that)."""
+        now = time.monotonic()
+        if self._grace_end is None:
+            self._grace_end = max(now, self.deadline.end) + self.grace
+        return max(0.0, self._grace_end - now)
+
+    def run(self, *args: str, cap: float | None = None, grace: bool = False) -> str | None:
         """stdout of ``git -C cwd <args>`` or None on any failure/timeout.
 
         ``timed_out`` tells the two apart for the last call: a probe that ran
         out of time must be reported as unknown, never as "nothing there".
+        ``cap`` bounds this call below what is left of the deadline. With
+        ``grace`` the call gets up to ``GIT_PROBE_FLOOR`` seconds even when
+        less is left, out of this object's grace (see the module docstring).
         """
         self.timed_out = False
         timeout = self.deadline.remaining()
+        if cap is not None:
+            timeout = min(timeout, cap)
+        if grace and self.grace > 0 and timeout < GIT_PROBE_FLOOR:
+            timeout = max(timeout, min(GIT_PROBE_FLOOR, self._grace_left()))
         if timeout <= 0.05:
             self.timed_out = True
             self.timeouts += 1
@@ -155,8 +185,8 @@ class Git:
             return None
         return proc.stdout if proc.returncode == 0 else None
 
-    def line(self, *args: str) -> str | None:
-        out = self.run(*args)
+    def line(self, *args: str, grace: bool = False) -> str | None:
+        out = self.run(*args, grace=grace)
         value = (out or "").strip().splitlines()
         return value[0].strip() if value else None
 
@@ -173,6 +203,8 @@ class RepoInfo:
     # git did not answer in time (the first probe timed out): whether this is a repository is unknown,
     # which is not the same as "not a repository".
     unknown: bool = False
+    # HEAD was not read in time: ``head_commit`` None then means "unknown", not "no commits yet".
+    head_unknown: bool = False
 
     @property
     def git_repo(self) -> bool | None:
@@ -193,12 +225,17 @@ class RepoInfo:
 
 
 def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
-    git = Git(cwd, deadline)
-    toplevel = git.line("rev-parse", "--show-toplevel")
+    return _repo_info(Git(cwd, deadline), deadline)
+
+
+def _repo_info(git: Git, deadline: Deadline) -> RepoInfo:
+    """:func:`repo_info` on ``git``: with a grace, the three probes a close needs (repository, branch, HEAD) use it."""
+    cwd = git.cwd
+    toplevel = git.line("rev-parse", "--show-toplevel", grace=True)
     if not toplevel:
         return RepoInfo(repo_name=cwd.name or None, unknown=git.timed_out)
     info = RepoInfo(toplevel=toplevel, is_git=True)
-    branch = git.line("rev-parse", "--abbrev-ref", "HEAD")
+    branch = git.line("rev-parse", "--abbrev-ref", "HEAD", grace=True)
     remote = _pick_remote(git, branch if branch and branch != "HEAD" else None)
     if remote:
         remote = _absolute_local_remote(_strip_url_credentials(remote), toplevel)
@@ -212,7 +249,8 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
     else:
         info.repo_name = Path(toplevel).name
     info.branch = "(detached)" if branch == "HEAD" else branch
-    info.head_commit = git.line("rev-parse", "HEAD")
+    info.head_commit = git.line("rev-parse", "HEAD", grace=True)
+    info.head_unknown = git.timed_out
     return info
 
 
@@ -306,8 +344,9 @@ def _reachable(git: Git, shas: list[str]) -> list[str]:
     """Full ids of the given (short) commit ids that exist and are ancestors of HEAD."""
     out: list[str] = []
     for sha in dict.fromkeys(shas):
-        full = git.line("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
-        if full and full not in out and git.run("merge-base", "--is-ancestor", full, "HEAD") is not None:
+        # A full id (the reflog's) needs no lookup: merge-base fails for one that does not exist.
+        full = sha if _FULL_SHA_RE.match(sha) else git.line("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", grace=True)
+        if full and full not in out and git.run("merge-base", "--is-ancestor", full, "HEAD", grace=True) is not None:
             out.append(full)
     return out
 
@@ -321,7 +360,7 @@ def _own_commits_since(git: Git, start_head: str, started_at: float | None) -> l
     start HEAD when no start time was recorded. None when the reflog cannot
     be read (the caller falls back to other evidence).
     """
-    out = git.run("reflog", "show", "--date=unix", "--format=%H%x1f%gd%x1f%gs", "HEAD", "--")
+    out = git.run("reflog", "show", "--date=unix", "--format=%H%x1f%gd%x1f%gs", "HEAD", "--", grace=True)
     if not out or not out.strip():
         return None  # no reflog (core.logAllRefUpdates=false, or it was expired): use other evidence
     shas: list[str] = []
@@ -379,16 +418,16 @@ def _session_range(
         if session_commits is not None:
             reachable = _reachable(git, session_commits[-MAX_COMMITS:])
             return (_no_walk(reachable), "transcript-commits") if reachable else ([], "transcript-no-commits")
-        if git.run("merge-base", "--is-ancestor", start_head, "HEAD") is not None:
+        if git.run("merge-base", "--is-ancestor", start_head, "HEAD", grace=True) is not None:
             return [f"{start_head}..HEAD"], "session-start-range"
     if session_commits is not None:
         reachable = _reachable(git, session_commits[-MAX_COMMITS:])
         return (_no_walk(reachable), "transcript-commits") if reachable else ([], "transcript-no-commits")
     window = f"last-{hours:g}h"
     since = ["--since", f"{hours:g} hours ago"]
-    default = git.line("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    default = git.line("symbolic-ref", "--short", "refs/remotes/origin/HEAD", grace=True)
     if default and info.branch and default.split("/", 1)[-1] != info.branch:
-        base = git.line("merge-base", "HEAD", default)
+        base = git.line("merge-base", "HEAD", default, grace=True)
         if base and base != info.head_commit:
             return [*since, f"{base}..HEAD"], f"merge-base:{default}:{window}"
     return [*since, "HEAD"], window
@@ -407,6 +446,25 @@ def _numstat_totals(text: str) -> tuple[set[str], int, int]:
     return files, added, deleted
 
 
+def _name_status_files(text: str) -> set[str]:
+    """Paths from ``git diff --name-status -z``: ``<status> NUL <path> NUL``, a rename or copy has two paths."""
+    files: set[str] = set()
+    fields = text.split("\0")
+    i = 0
+    while i < len(fields) - 1:
+        status = fields[i]
+        if not status:
+            i += 1
+            continue
+        if status[0] in "RC" and i + 2 < len(fields):
+            files.add(fields[i + 2])  # the new path, as --numstat names it after a rename
+            i += 3
+        else:
+            files.add(fields[i + 1])
+            i += 2
+    return files
+
+
 def git_facts(
     cwd: Path,
     deadline: Deadline,
@@ -415,38 +473,58 @@ def git_facts(
     hours: float = 12.0,
     info: RepoInfo | None = None,
     started_at: float | None = None,
+    grace: float = GIT_GRACE_SECONDS,
 ) -> dict[str, Any]:
-    """Branch, head, this session's commits + files, uncommitted files, diff stat, push state.
+    """Branch, head, this session's commits + files, push state, uncommitted files, diff stat.
 
     ``incomplete`` lists the probes that did not finish in time (``log``,
     ``status``, ``diff``, ``upstream``): their facts are unknown, not empty.
     ``repo`` means git did not even say whether this is a repository (the
     first probe timed out): nothing about it is known.
+
+    The probes run in the order of what the next agent needs most: this
+    session's commits, push state, uncommitted files, then the diff stat. A
+    slow probe therefore costs the ones after it, never push state for a diff
+    stat. Each may run for up to ``GIT_PROBE_FLOOR`` seconds past a spent
+    ``deadline``, ``grace`` seconds in all (0: nothing runs past it). The
+    line counts of the working tree (``git diff --numstat``) get
+    ``DIFF_NUMSTAT_SECONDS`` at most; when that is not enough the diff stat
+    names the changed files only (``git diff --name-status``), which is not a gap.
     """
-    info = info or repo_info(cwd, deadline)
+    git = Git(cwd, deadline, grace)
+    info = info or _repo_info(git, deadline)
     facts: dict[str, Any] = {}
     if not info.is_git:
         if info.unknown:
             facts["incomplete"] = ["repo"]
         return facts
-    git = Git(cwd, deadline)
     incomplete: list[str] = []
 
-    def probe(name: str, *args: str) -> str | None:
-        out = git.run(*args)
+    def probe(name: str, *args: str, cap: float | None = None, grace: bool = True) -> str | None:
+        out = git.run(*args, cap=cap, grace=grace)
         if git.timed_out and name not in incomplete:
             incomplete.append(name)
         return out
 
+    if info.head_commit is None and info.head_unknown:
+        # HEAD was not read in time when the repository was looked up: ask again rather than
+        # report a repository with commits as an empty one.
+        head = git.line("rev-parse", "HEAD", grace=True)
+        info = replace(info, head_commit=head, head_unknown=git.timed_out)
+        if info.branch is None and not git.timed_out:
+            branch = git.line("rev-parse", "--abbrev-ref", "HEAD", grace=True)
+            info = replace(info, branch="(detached)" if branch == "HEAD" else branch)
     facts["branch"] = info.branch
     facts["head_commit"] = info.head_commit
 
     commits: list[dict[str, str]] = []
     files: list[str] = []
-    range_args, how = (
-        _session_range(git, info, start_head, session_commits, hours, started_at) if info.head_commit else ([], "empty-repo")
-    )
-    if git.timeouts:
+    timeouts_before = git.timeouts
+    if info.head_commit:
+        range_args, how = _session_range(git, info, start_head, session_commits, hours, started_at)
+    else:
+        range_args, how = [], ("unknown" if info.head_unknown else "empty-repo")
+    if git.timeouts > timeouts_before or info.head_unknown:
         incomplete.append("log")
     facts["commit_range"] = how
     stat_files: set[str] = set()
@@ -467,6 +545,18 @@ def git_facts(
     commits.reverse()  # oldest first
     facts["commits"] = commits
 
+    # Push state before the working tree: two cheap calls, and what a deploy decision rests on.
+    upstream = probe("upstream", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if upstream:
+        upstream = upstream.strip().splitlines()[0] if upstream.strip() else None
+    if upstream:
+        facts["upstream"] = upstream
+        ahead = probe("upstream", "rev-list", "--count", "@{u}..HEAD")
+        if ahead is not None and ahead.strip().isdigit():
+            facts["unpushed_commits"] = int(ahead.strip())
+    elif info.head_commit and info.branch != "(detached)" and "upstream" not in incomplete:
+        facts["no_upstream"] = True
+
     uncommitted: list[str] = []
     status = probe("status", "status", "--porcelain=v1", "-z", "--untracked-files=normal")
     if status:
@@ -484,28 +574,29 @@ def git_facts(
     facts["files_changed"] = sorted(dict.fromkeys(files + uncommitted))
 
     # Diff stat of this session's own commits plus the working tree (summed per
-    # commit, so commits pulled in between are never counted).
+    # commit, so commits pulled in between are never counted). Last, and bounded:
+    # it is one optional line.
+    lines_unknown = False
     if info.head_commit:
-        worktree = probe("diff", "diff", "--numstat", "HEAD")
-        wt_files, wt_added, wt_deleted = _numstat_totals(worktree or "")
-        stat_files |= wt_files
-        added += wt_added
-        deleted += wt_deleted
-    if stat_files:
+        worktree = git.run("diff", "--numstat", "HEAD", cap=DIFF_NUMSTAT_SECONDS)
+        if git.timed_out:
+            # Counting lines did not finish (or there was no time left to start): the names are cheap.
+            names = probe("diff", "diff", "--name-status", "-z", "HEAD")
+            wt_files = _name_status_files(names or "")
+            lines_unknown = bool(wt_files)
+            stat_files |= wt_files
+        else:
+            wt_files, wt_added, wt_deleted = _numstat_totals(worktree or "")
+            stat_files |= wt_files
+            added += wt_added
+            deleted += wt_deleted
+    if stat_files and lines_unknown:
+        facts["diff_stat"] = f"{len(stat_files)} files changed (line counts not read: git diff --numstat did not finish in time)"
+    elif stat_files:
         facts["diff_stat"] = f"{len(stat_files)} files changed, {added} insertions(+), {deleted} deletions(-)"
 
-    upstream = probe("upstream", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if upstream:
-        upstream = upstream.strip().splitlines()[0] if upstream.strip() else None
-    if upstream:
-        facts["upstream"] = upstream
-        ahead = probe("upstream", "rev-list", "--count", "@{u}..HEAD")
-        if ahead is not None and ahead.strip().isdigit():
-            facts["unpushed_commits"] = int(ahead.strip())
-    elif info.head_commit and info.branch != "(detached)" and "upstream" not in incomplete:
-        facts["no_upstream"] = True
     if incomplete:
-        facts["incomplete"] = incomplete
+        facts["incomplete"] = [name for name in ("log", "status", "diff", "upstream") if name in incomplete]
     return facts
 
 

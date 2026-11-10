@@ -411,7 +411,13 @@ transcript (Claude Code, Codex) or from a branch/time window, and the brief labe
 *not necessarily by this agent*. Commands the transcript shows running in another directory (a `cd`
 elsewhere, a subshell, `git -C`, or the shell already sitting in another repository) are not reported
 for this project. If git does not answer in time, the handoff says *unknown (git status did not finish
-in time)* instead of reporting a clean tree.
+in time)* instead of reporting a clean tree. Git is asked in the order of what the next agent needs:
+this session's commits, push state, uncommitted files, then the diff stat, so one slow answer costs only
+what comes after it. Counting changed lines (`git diff --numstat`) gets 1.5 seconds; in a checkout
+where that is not enough the diff stat names the number of changed files and says the line counts were
+not read. When the time for git was used up before it was asked (a long transcript, a busy machine),
+commits, push state and uncommitted files are still read, for at most two more seconds, and `relay.log`
+names any question git did not answer.
 
 Without a session id (the AGENTS.md fallback, manual runs), `brief` starts a new ad-hoc session and a
 `close` in the same place within 12 hours updates it. A `close` with no preceding `brief` gets its own

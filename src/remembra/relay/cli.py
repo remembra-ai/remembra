@@ -113,6 +113,7 @@ from remembra.security.untrusted import neutralize_encoded, strip_controls
 
 TOTAL_BUDGET_SECONDS = 9.5
 GIT_BUDGET_SECONDS = 4.0
+SEND_RESERVE_SECONDS = 2.0  # of the total budget, kept for sending the close after its git facts
 HTTP_TIMEOUT_SECONDS = 8.0
 STDIN_WAIT_SECONDS = 1.0
 STATE_TTL_SECONDS = 14 * 86400
@@ -1137,6 +1138,19 @@ def _adhoc_session(agent: str, ctx: Context) -> tuple[str, dict[str, Any]]:
     return _new_adhoc_session_id(), {}
 
 
+def git_time(left: float) -> tuple[float, float]:
+    """``(budget, grace)`` in seconds for a close's git facts when ``left`` remain of the whole run.
+
+    The budget is at most ``GIT_BUDGET_SECONDS`` and leaves ``SEND_RESERVE_SECONDS`` for sending
+    the handoff. The grace (what the probes a handoff needs may use past a spent budget, see
+    :func:`remembra.relay.facts.git_facts`) comes out of what is left after both, never out of
+    that reserve: a close that gathered its facts late is still sent, not queued.
+    """
+    budget = min(GIT_BUDGET_SECONDS, max(0.5, left - SEND_RESERVE_SECONDS))
+    grace = min(factlib.GIT_GRACE_SECONDS, max(0.0, left - SEND_RESERVE_SECONDS - budget))
+    return budget, grace
+
+
 def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     """Gather facts deterministically and build the ``/session/close`` body."""
     transcript_path = args.transcript or ctx.hook_fields.get("transcript")
@@ -1166,14 +1180,16 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     else:
         session_id, state = _adhoc_session(agent, ctx)
     started_ts = state.get("started_ts")
+    git_budget, git_grace = git_time(ctx.deadline.end - time.monotonic())
     git_facts = factlib.git_facts(
         ctx.cwd,
-        factlib.Deadline(min(GIT_BUDGET_SECONDS, max(0.5, ctx.deadline.end - time.monotonic() - 2.0))),
+        factlib.Deadline(git_budget),
         start_head=state.get("head"),
         session_commits=transcript.commit_shas if transcript else None,
         hours=args.hours,
         info=ctx.repo,
         started_at=float(started_ts) if isinstance(started_ts, int | float) else None,
+        grace=git_grace,
     )
     facts = factlib.merge_facts(git_facts, transcript, ctx.repo.toplevel)
     if ctx.repo.is_git:
@@ -1488,6 +1504,10 @@ def cmd_close(args: argparse.Namespace) -> int:
             elif nothing:
                 _err("close would send an empty handoff: it retires the one this session sent earlier")
             return 0
+        unfinished = [str(name) for name in (payload.get("facts") or {}).get("incomplete") or []]
+        if unfinished:  # the handoff says "unknown" for these: leave a trace of which git probe ran out of time
+            gaps = ", ".join(unfinished)
+            outbox.log(ctx.home, f"close: git did not finish in time for {own[0]} session {own[1][:40]} ({gaps})")
         if empty:
             _skip_empty_close(ctx, payload)
             return 0

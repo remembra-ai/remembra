@@ -39,7 +39,8 @@ FAIL = [{"cmd": "pytest -q", "passed": False, "summary": "1 failed"}]
 
 def _facts(repo: Path, start_head: str | None = None, deadline: float = 10.0) -> dict[str, Any]:
     info = repo_info(repo, Deadline(10.0))
-    facts = git_facts(repo, Deadline(deadline), start_head=start_head, info=info)
+    # grace=0: a spent deadline stands for git itself not answering (nothing may run past it)
+    facts = git_facts(repo, Deadline(deadline), start_head=start_head, info=info, grace=0)
     facts.pop("commit_range", None)
     return facts
 
