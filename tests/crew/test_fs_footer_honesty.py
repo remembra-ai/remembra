@@ -118,6 +118,12 @@ def test_every_footer_is_recognised_as_one():
         assert not H.is_crew_footer(line), line
 
 
+def test_no_hook_session_is_said_only_when_the_crew_has_none_at_all():
+    # hook_live counts every agent's hook sessions: an id the hooks did not use proves nothing about the reader
+    assert _block(viewer=None, hook_live=1, reader_agent="claude").split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
+    assert _block(viewer=None, hook_live=0, reader_agent="claude").split("\n")[-1] == H.crew_footer_no_hook("claude")
+
+
 def test_the_footer_survives_the_pathological_cut_whole():
     long_task = {**BATON, "failing": ["x" * 50] * 3}
     for viewer in (None, MCP, HOOK):
@@ -131,9 +137,12 @@ def test_a_baton_offered_to_an_mcp_reader_leads_with_the_tool_it_can_run():
     lines = _block(viewer=MCP, batons=[BATON]).split("\n")
     assert lines[1].startswith("YOUR BATON (offered to you): T-12 from cc-1")
     assert lines[2].startswith('  To continue T-12: crew_claim(action="adopt", task="T-12")'), lines[2]
-    # the CLI is never the way to continue for a session it cannot find; it is named only as where saved work restores
-    assert "To continue T-12: remembra-crew" not in lines[2]
-    assert "only from a session the crew hooks joined: remembra-crew adopt T-12" in lines[2]
+    # the CLI is never offered to a session it cannot find: the line says where saved work restores, with no command
+    assert lines[2] == (
+        '  To continue T-12: crew_claim(action="adopt", task="T-12")'
+        "   (the saved work is restored only from a session the crew hooks joined)"
+    )
+    assert "remembra-crew adopt" not in "\n".join(lines)
     no_ref = {**BATON, "baton_ref": None, "dirty": 0}
     line = _block(viewer=MCP, batons=[no_ref]).split("\n")[2]
     assert line == '  To continue T-12: crew_claim(action="adopt", task="T-12")'
@@ -142,8 +151,13 @@ def test_a_baton_offered_to_an_mcp_reader_leads_with_the_tool_it_can_run():
     assert line == '  To continue: crew_claim(action="adopt", paths=["art/lls/cover.psd"])'
     zone = {"zones": ["reports"], "from": "cc-1", "baton_ref": "refs/remembra/baton/cs_a/1"}
     line = _block(viewer=MCP, batons=[zone]).split("\n")[2]
-    assert line.startswith('  To continue: crew_claim(action="adopt", zone="reports")')
-    assert "only from a session the crew hooks joined: remembra-crew adopt --zone reports" in line
+    assert line == (
+        '  To continue: crew_claim(action="adopt", zone="reports")'
+        "   (the saved work is restored only from a session the crew hooks joined)"
+    )
+    saved_path = {**path, "baton_ref": "refs/remembra/baton/cs_a/2"}
+    for reader in (MCP, {"client_kind": "cli", "enforcement": "advisory"}):
+        assert "remembra-crew adopt" not in _block(viewer=reader, batons=[BATON, zone, saved_path])
     assert schemas.check_agent_text(_block(viewer=MCP, batons=[BATON, path]), "crew_block") == []
 
 

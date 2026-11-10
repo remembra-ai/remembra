@@ -580,7 +580,9 @@ class CrewCore:
         ``client_kind`` and ``enforcement``) when ``viewer_session_id`` is a
         session of this crew, else None; and, for a reader that is not known,
         ``hook_live``: how many hook-joined sessions that have not ended the crew
-        has for ``reader_agent_id`` (for any agent when it is not given).
+        has, under any agent id (the hooks' agent id and the asking one are free
+        text and can differ, so a count for ``reader_agent_id`` alone would say
+        "none" to a hook-joined reader), and ``reader_agent``, who asked.
         """
         now = now or datetime.now(UTC)
         crew = await self.crew_row(crew_id)
@@ -601,12 +603,10 @@ class CrewCore:
                 }
         hook_live: int | None = None
         if viewer is None:
-            sql = "SELECT COUNT(*) AS n FROM crew_sessions WHERE crew_id = ? AND client_kind = 'hook' AND state != 'ended'"
-            args: tuple[Any, ...] = (crew_id,)
-            if reader_agent_id:
-                sql += " AND agent_id = ?"
-                args = (crew_id, reader_agent_id)
-            counted = await self.db.fetchone(sql, args)
+            counted = await self.db.fetchone(
+                "SELECT COUNT(*) AS n FROM crew_sessions WHERE crew_id = ? AND client_kind = 'hook' AND state != 'ended'",
+                (crew_id,),
+            )
             hook_live = int(counted["n"]) if counted else 0
         zones = {
             z["id"]: z

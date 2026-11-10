@@ -1694,7 +1694,7 @@ _READER_KINDS = ("hook", "mcp", "cli")
 
 
 def crew_footer_no_hook(agent: str | None) -> str:
-    """The crew block's last line when no hook-joined session of the asking agent is live in the crew."""
+    """The crew block's last line when no hook-joined session of the crew is live (``agent`` is who asked)."""
     name = _SAFE_ID_RE.sub("_", agent)[:64] if isinstance(agent, str) and agent else ""
     return _CREW_NO_HOOK_HEAD + (f"of {name} " if name else "") + _CREW_NO_HOOK_TAIL
 
@@ -1725,7 +1725,8 @@ def crew_footer_for(crew: Mapping[str, Any], reader: str | None = None) -> str:
     "Crew mode is automatic" is said only to a session the crew hooks joined (whatever its enforcement:
     a hook-joined Codex is advisory and its hooks still claim and checkpoint for it). An MCP session gets
     the advisory line. Without a known reader, "no hook session of <agent> is live here" is said only when
-    the server counted none (``hook_live`` is exactly 0); in every other case the neutral line.
+    the server counted none in the whole crew (``hook_live`` is exactly 0): a hook session under another
+    agent id may be the reader's own, so any live one means the neutral line.
     """
     kind = crew_reader_kind(crew, reader)
     if kind == "hook":
@@ -1842,8 +1843,8 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = (), reader: s
     """Template lines (ids only) and data items for one baton offered to the reader (D33: only then the adopt line).
 
     ``reader`` is the reading session's kind. A session the crew hooks did not join (``mcp``, ``cli``) cannot
-    run ``remembra-crew adopt`` (the CLI finds only hook-joined sessions), so its line leads with the
-    ``crew_claim`` form and names the CLI only as where the saved work is restored.
+    run ``remembra-crew adopt`` (the CLI finds only hook-joined sessions), so its line gives the
+    ``crew_claim`` form alone and says where saved work is restored, without a command it cannot run.
     """
     task = _only(baton.get("task"), _TASK_REF_RE)
     zones = [z for z in (baton.get("zones") or []) if _only(z, _SLUG_RE)]
@@ -1872,18 +1873,16 @@ def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = (), reader: s
         parts.append(f"{_plural(len(failing), 'failing test')}")
     lines = [" · ".join(parts)]
     if reader in ("mcp", "cli"):
-        cli = ""
         if task:
-            call, cli = f'To continue {task}: crew_claim(action="adopt", task="{task}")', f"remembra-crew adopt {task}"
+            call = f'To continue {task}: crew_claim(action="adopt", task="{task}")'
         elif zones:
-            call, cli = f'To continue: crew_claim(action="adopt", zone="{zones[0]}")', f"remembra-crew adopt --zone {zones[0]}"
+            call = f'To continue: crew_claim(action="adopt", zone="{zones[0]}")'
         elif paths:
             call = f'To continue: crew_claim(action="adopt", paths={json.dumps(paths[:5])})'
-            cli = f"remembra-crew adopt --path {shlex.quote(paths[0])}"
         else:
             call = ""
         if call:
-            saved = f"   (the saved work is restored only from a session the crew hooks joined: {cli})" if ref else ""
+            saved = "   (the saved work is restored only from a session the crew hooks joined)" if ref else ""
             lines.append(f"  {call}{saved}")
     elif task:
         lines.append(
@@ -2036,7 +2035,8 @@ def render_crew_block(
     if len(text) > max_chars:  # pathological: keep the header and the safety lines, drop the rest
         keep = baton_lines[:2]
         text = "\n".join([header, *keep, footer])
-        while len(text) > max_chars and keep:  # the reader line is never the part that is cut
+        # the reader line is the last thing cut (whole whenever max_chars has room for it and a header stub)
+        while len(text) > max_chars and keep:
             keep.pop()
             text = "\n".join([header, *keep, footer])
         if len(text) > max_chars:

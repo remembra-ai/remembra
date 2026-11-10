@@ -100,13 +100,18 @@ def test_codex_without_a_hook_session_hears_the_same_from_both_tools(live):
     server._client = agent(live, "codex", f"{project}-mcp", project)
     status = call("crew_status", project_id=project)  # joins the advisory MCP seat (and creates the crew)
     assert "mcp, advisory" in status and status.rstrip().endswith(MCP_FOOTER), status
+    # no hook session at all in the crew yet: nothing can be claiming for this reader, and the brief says so
+    brief = brief_text(project_id=project)
+    assert f"CREW {project} (" in brief, brief
+    assert brief.rstrip().split("\n")[-1] == H.crew_footer_no_hook("codex")
+    assert MANUAL in brief and MANUAL in status
     # a Claude Code hook session is live in the same crew, as on the owner's machine ("1 live" was cc-1)
     join_hook(live, project, "claude-code", "cc-hook-1", "claude-code")
     brief = brief_text(project_id=project)
-    assert f"CREW {project} (" in brief, brief
     assert AUTOMATIC not in brief, brief
-    assert brief.rstrip().split("\n")[-1] == H.crew_footer_no_hook("codex")
-    assert MANUAL in brief and MANUAL in status
+    # the server cannot tell whose hook session that is (agent ids are free text), so it claims nothing either way
+    assert brief.rstrip().split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
+    assert "crew_status says which kind yours is" in brief
     again = call("crew_status", project_id=project)
     assert AUTOMATIC not in again and again.rstrip().endswith(MCP_FOOTER), again
 
@@ -131,15 +136,34 @@ def test_the_server_tells_a_resolved_reader_by_its_kind(live):
     # a reader the server cannot resolve while a hook session of that agent is live: no claim either way
     for session in (None, "some-other-session"):
         unknown = server_brief(live, project, "codex", session)
-        assert unknown["crew"]["viewer"] is None and unknown["crew"]["hook_live"] == 1
+        assert unknown["crew"]["viewer"] is None and unknown["crew"]["hook_live"] == 2
         assert unknown["rendered"].split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
         assert AUTOMATIC not in unknown["rendered"]
     assert brief_text(project_id=project).rstrip().split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
-    # an ended hook session no longer counts
+    # an ended hook session no longer counts; another agent's live one still stops the definitive line
     live.run(_end_hook_sessions(live, project, "codex"))
+    other = server_brief(live, project, "codex", None)
+    assert other["crew"]["hook_live"] == 1 and other["crew"]["reader_agent"] == "codex"
+    assert other["rendered"].split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
+    live.run(_end_hook_sessions(live, project, "claude-code"))
     gone = server_brief(live, project, "codex", None)
     assert gone["crew"]["hook_live"] == 0 and gone["crew"]["reader_agent"] == "codex"
     assert gone["rendered"].split("\n")[-1] == H.crew_footer_no_hook("codex")
+
+
+def test_a_hook_session_under_another_agent_id_is_never_told_nothing_is_claimed(live):
+    """The hooks' --agent and the brief's agent_id are free text and can differ (claude-code / claude, codex / Codex)."""
+    project = project_name()
+    join_hook(live, project, "claude-code", "cc-hook-1", "claude-code")
+    for asked, session in (("claude", None), ("Claude-Code", "cc-hook-1"), ("someone-else", "nope")):
+        got = server_brief(live, project, asked, session)
+        last = got["rendered"].split("\n")[-1]
+        assert MANUAL not in last and AUTOMATIC not in last, (asked, last)
+        assert last == H.CREW_FOOTER_UNKNOWN, (asked, last)
+        assert got["crew"]["hook_live"] == 1
+    server._client = agent(live, "claude", f"{project}-mcp", project)
+    for kw in ({}, {"agent_id": "someone-else"}):
+        assert brief_text(project_id=project, **kw).rstrip().split("\n")[-1] == H.CREW_FOOTER_UNKNOWN
 
 
 async def _end_hook_sessions(live: LiveServer, project: str, agent_id: str) -> None:
@@ -234,8 +258,9 @@ def test_a_baton_in_crew_status_leads_with_crew_claim_for_the_mcp_seat(live):
     line = next(ln for ln in status.split("\n") if ln.startswith("  To continue"))
     assert line == (
         '  To continue: crew_claim(action="adopt", paths=["art/lls/cover.psd"])'
-        "   (the saved work is restored only from a session the crew hooks joined: remembra-crew adopt --path art/lls/cover.psd)"
+        "   (the saved work is restored only from a session the crew hooks joined)"
     ), status
+    assert "remembra-crew adopt" not in status, status
     # and the form it is given works, without promising a restore this seat cannot do
     adopted = call("crew_claim", action="adopt", paths=["art/lls/cover.psd"])
     assert adopted.startswith("ADOPTED art/lls/cover.psd: you now hold"), adopted
