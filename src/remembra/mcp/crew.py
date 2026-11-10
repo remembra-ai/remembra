@@ -356,6 +356,28 @@ def _safe(value: Any) -> str | None:
     return text if _SAFE_TEXT_RE.fullmatch(text) else None
 
 
+def _path_claim_covered(claim: Mapping[str, Any], paths: Sequence[str] | None, zone_globs: Sequence[str]) -> bool:
+    """True when ``claim`` is a path claim (no zone) that one of ``paths`` or the named zone's globs covers.
+
+    A path claim is stored with no zone id, and it stays that way when a zone arrives over its folder
+    later (a derived folder zone, a zones.yml upload). Naming the path, a folder above it or that zone
+    must still find it, although ``/match`` now files the path under the zone.
+    """
+    glob = str(claim.get("path_glob") or "")
+    if not glob or claim.get("zone_id"):
+        return False
+    if any(G.claim_covers_path(str(p), glob) for p in paths or ()):
+        return True
+    if not zone_globs:
+        return False
+    from remembra.crew import policy as P  # the overlap test the server uses for a path claim under a zone
+
+    try:
+        return P.any_overlap([str(g) for g in zone_globs], [glob])
+    except (ValueError, re.error):
+        return False
+
+
 def agent_text(value: Any) -> str:
     """One agent- or repo-authored value under the brief's trust policy (R-14,
     :func:`remembra.relay.handoff.police_item`): low-trust text becomes the fixed withheld note,
@@ -643,9 +665,12 @@ class CrewBridge:
 
     def _zone(self, http: CrewHttp, seat: Seat, ref: str) -> dict[str, Any]:
         wanted = ref.strip()
-        for z in self._zones(http, seat):
-            if z.get("id") == wanted or str(z.get("slug") or "").lower() == wanted.lower():
-                return z
+        for fresh in (False, True):
+            if fresh:  # the cached list may predate the zone (a folder zone derived a moment ago)
+                seat.forget("zones")
+            for z in self._zones(http, seat):
+                if z.get("id") == wanted or str(z.get("slug") or "").lower() == wanted.lower():
+                    return z
         raise CrewUsageError(f"Unknown zone {S.clip_item(wanted, 60)!r}. crew_status(verbose=True) lists the zones.")
 
     def _zone_label(self, http: CrewHttp, seat: Seat, zone_id: Any) -> str | None:
@@ -786,7 +811,7 @@ class CrewBridge:
             parts.append("holding nothing")
         return " · ".join(parts)
 
-    def _claim_label(self, http: CrewHttp, seat: Seat, claim: Mapping[str, Any]) -> str:
+    def _claim_label(self, http: CrewHttp, seat: Seat, claim: Mapping[str, Any], *, with_id: bool = False) -> str:
         zone = self._zone_label(http, seat, claim.get("zone_id"))
         if zone:
             target = f"zone {zone}"
@@ -798,6 +823,8 @@ class CrewBridge:
         bits = [str(claim.get("mode") or "exclusive"), str(claim.get("state") or "")]
         if task:
             bits.append(task)
+        if with_id and _safe(claim.get("id")):
+            bits.append(str(claim["id"]))
         return f"{target} ({', '.join(b for b in bits if b)})"
 
     def _queue_items(self, http: CrewHttp, seat: Seat) -> list[dict[str, Any]]:
@@ -1217,26 +1244,78 @@ class CrewBridge:
         mine = [c for c in self._claims(http, seat) if c.get("holder_session_id") == seat.session_id and c.get("state") in states]
         if not (zone or paths or task_id):
             return mine
+        named = self._claim_matcher(http, seat, zone, paths) if zone or paths else None
+        return [c for c in mine if (task_id and c.get("task_id") == task_id) or (named is not None and named(c))]
+
+    def _claim_matcher(
+        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None
+    ) -> Callable[[Mapping[str, Any]], bool]:
+        """Whether a claim is on the named zone/resource/paths: by the target the server would file them
+        under today, and by what a path claim covers (see :func:`_path_claim_covered`)."""
         zone_ids: set[str] = set()
         globs: set[str] = set()
         resources: set[str] = set()
-        if zone or paths:
-            targets, _ = self._targets(http, seat, zone, paths)
-            for _, t in targets:
-                if t.get("zone_id"):
-                    zone_ids.add(str(t["zone_id"]))
-                if t.get("path_glob"):
-                    globs.add(str(t["path_glob"]))
-                if t.get("resource"):
-                    resources.add(str(t["resource"]))
-        return [
-            c
-            for c in mine
-            if (task_id and c.get("task_id") == task_id)
-            or c.get("zone_id") in zone_ids
-            or c.get("path_glob") in globs
-            or c.get("resource") in resources
-        ]
+        targets, _ = self._targets(http, seat, zone, paths)
+        for _, t in targets:
+            if t.get("zone_id"):
+                zone_ids.add(str(t["zone_id"]))
+            if t.get("path_glob"):
+                globs.add(str(t["path_glob"]))
+            if t.get("resource"):
+                resources.add(str(t["resource"]))
+        zone_globs: list[str] = []
+        if zone and not _is_resource(zone):
+            zone_globs = [str(g) for g in self._zone(http, seat, zone).get("include_globs") or ()]
+
+        def named(c: Mapping[str, Any]) -> bool:
+            return (
+                c.get("zone_id") in zone_ids
+                or c.get("path_glob") in globs
+                or c.get("resource") in resources
+                or _path_claim_covered(c, paths, zone_globs)
+            )
+
+        return named
+
+    def _no_match(self, http: CrewHttp, seat: Seat, base: str, *, zone: str | None, paths: Sequence[str] | None) -> str:
+        """The empty answer of release and handover: ``base``, then what this session does hold, who holds
+        the named target instead, and how to spell a target that was passed with a ``zone:``/``path:`` prefix."""
+        out = [base]
+        for p in list(paths or ())[:3]:
+            m = re.fullmatch(r"(zone|path|resource):(.+)", str(p).strip())
+            if m is None:
+                continue
+            kind, rest = m.group(1), _safe(m.group(2))
+            if kind == "path":
+                out.append('Pass a path as it is in the repository, without "path:"' + (f': paths=["{rest}"].' if rest else "."))
+            else:
+                out.append(f"A {kind} goes in the zone argument, not in paths" + (f': zone="{rest}".' if rest else "."))
+        m = re.fullmatch(r"(zone|path):(.+)", str(zone or "").strip())
+        if m is not None:
+            kind, rest = m.group(1), _safe(m.group(2))
+            if kind == "path":
+                out.append("A path goes in the paths argument, not in zone" + (f': paths=["{rest}"].' if rest else "."))
+            else:
+                out.append('Pass the zone slug without "zone:"' + (f': zone="{rest}".' if rest else "."))
+        try:
+            live = self._claims(http, seat)
+        except CrewApiError:
+            return " ".join(out)
+        mine = [c for c in live if c.get("holder_session_id") == seat.session_id]
+        try:
+            named = self._claim_matcher(http, seat, zone, paths)
+        except (CrewApiError, CrewUsageError):
+            named = None
+        theirs = [c for c in live if c not in mine and c.get("state") != "queued" and named is not None and named(c)]
+        for c in theirs[:3]:
+            who = self._callsign(http, seat, c.get("holder_session_id")) or "a human or another session"
+            out.append(f"{self._claim_label(http, seat, c)} is held by {who}, not by you.")
+        if mine:
+            held = ", ".join(self._claim_label(http, seat, c, with_id=True) for c in mine[:6])
+            out.append(f"You hold: {held}." + (f" (+{len(mine) - 6} more)" if len(mine) > 6 else ""))
+        elif len(out) > 1:
+            out.append("You hold nothing.")
+        return " ".join(out)
 
     def _release(
         self,
@@ -1265,11 +1344,23 @@ class CrewBridge:
             )
         if not (zone or paths):
             raise CrewUsageError('Name what to release: zone="pos", paths=[...] or task="T-14".')
-        claims = self._my_claims(http, seat, zone=zone, paths=paths, task_id=None, states=("active", "offered", "queued"))
+        # reserved too: crew_status lists a session's own reservation as held, and the server lets its holder end it
+        claims = self._my_claims(http, seat, zone=zone, paths=paths, task_id=None, states=_LIVE_CLAIM_STATES)
         if not claims:
-            return "NOTHING RELEASED: you hold no live claim on that."
+            return self._no_match(http, seat, "NOTHING RELEASED: you hold no live claim on that.", zone=zone, paths=paths)
         lines = []
         for c in claims:
+            label = self._claim_label(http, seat, c)
+            if c.get("state") == "reserved" and c.get("reserve_reason") == "human_hold":
+                lines.append(f"NOT RELEASED {label}: a human put it on hold. Ask @mani with crew_say.")
+                continue
+            if c.get("state") == "reserved" and baton:
+                # the server ends a reserved claim on any release, so a baton that is already kept is left alone
+                lines.append(
+                    f"ALREADY RESERVED {label}: it is kept as a baton for the next pickup. "
+                    "Release it with baton=false to free the area."
+                )
+                continue
             body: dict[str, Any] = {"baton": bool(baton)}
             if reason:
                 body["note"] = reason[:280]
@@ -1279,7 +1370,11 @@ class CrewBridge:
                 lines.append(error_text(e, f"release {c['id']}"))
                 continue
             state = ((res or {}).get("claim") or {}).get("state") or "released"
-            lines.append(f"RELEASED {self._claim_label(http, seat, c)} → {state}")
+            line = f"RELEASED {label} → {state}"
+            ref = str(c.get("baton_ref") or "")
+            if c.get("state") == "reserved" and re.fullmatch(r"refs/remembra/baton/[A-Za-z0-9_/-]{1,120}", ref):
+                line += f" (the work saved with it is no longer offered; it stays as {ref} in the checkout that saved it)"
+            lines.append(line)
         return "\n".join(lines)
 
     def _adopt(self, http: CrewHttp, seat: Seat, *, zone: str | None, paths: Sequence[str] | None, task: str | None) -> str:
@@ -1307,7 +1402,8 @@ class CrewBridge:
         elif zone:
             z = self._zone(http, seat, zone)
             labels.append(f"zone {_safe(z.get('slug'))}")
-            picked += [c for c in reserved if c.get("zone_id") == z["id"]]
+            zone_globs = [str(g) for g in z.get("include_globs") or ()]
+            picked += [c for c in reserved if c.get("zone_id") == z["id"] or _path_claim_covered(c, None, zone_globs)]
         if paths:
             # a lost session's path claim, or the zone a path lies in
             labels.append(", ".join(_safe(p) or "a path" for p in list(paths)[:3]))
@@ -1316,7 +1412,8 @@ class CrewBridge:
             picked += [
                 c
                 for c in reserved
-                if c.get("zone_id") in zone_ids or any(G.claim_covers_path(p, str(c.get("path_glob") or "")) for p in paths)
+                if c not in picked
+                and (c.get("zone_id") in zone_ids or any(G.claim_covers_path(p, str(c.get("path_glob") or "")) for p in paths))
             ]
         label = " and ".join(labels)
         if not picked:
@@ -1390,7 +1487,7 @@ class CrewBridge:
         task_id = self._task(http, seat, task)["id"] if task else None
         claims = self._my_claims(http, seat, zone=zone, paths=paths, task_id=task_id, states=("active",))
         if not claims:
-            return "NOT HANDED OVER: you hold no active claim on that."
+            return self._no_match(http, seat, "NOT HANDED OVER: you hold no active claim on that.", zone=zone, paths=paths)
         who = self._callsign(http, seat, target) or target
         lines = []
         for c in claims:
