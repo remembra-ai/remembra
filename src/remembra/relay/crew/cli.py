@@ -679,7 +679,12 @@ def cmd_whereami(args: argparse.Namespace, layout: Layout) -> int:
         "task": who.get("task_ref"),
         "claims": [
             {
+                "id": c.get("id"),
                 "zone": next((z.get("slug") for z in snap.get("zones") or () if z.get("id") == c.get("zone_id")), None),
+                "resource": c.get("resource"),
+                "path_glob": c.get("path_glob"),
+                # what the claim is on, as claim/release take it (a resource lock or a path has no zone)
+                "label": _claim_name(snap, c) if c.get("zone_id") or c.get("resource") else f"path {_claim_name(snap, c)}",
                 "state": c.get("state"),
                 "epoch": c.get("epoch"),
                 "lease_expires_at": c.get("lease_expires_at"),
@@ -693,7 +698,7 @@ def cmd_whereami(args: argparse.Namespace, layout: Layout) -> int:
     print(f"You are {out['session']} in project {out['project']} ({out['crew']}); task {out['task'] or '-'}")
     print(f"Checkout {top} · here: {rel or '(outside the checkout)'} · zones here: {', '.join(zones) or 'none'}")
     for c in out["claims"]:
-        print(f"  holding zone {c['zone']} ({c['state']}, epoch {c['epoch']}, lease until {c['lease_expires_at'] or '-'})")
+        print(f"  holding {c['label']} ({c['state']}, epoch {c['epoch']}, lease until {c['lease_expires_at'] or '-'})")
     return 0
 
 
@@ -746,6 +751,40 @@ def cmd_renew(args: argparse.Namespace, layout: Layout) -> int:
 # ===========================================================================
 
 
+# After a release went through, how long to wait for crewd's background refresh of the on-disk snapshot
+# (what `status` renders) before saying that it lags.
+RELEASE_SETTLE_S = 3.0
+_CLAIM_PICK_ORDER = {"active": 0, "offered": 0, "queued": 1, "reserved": 2}
+
+
+def _claim_name(snap: Mapping[str, Any], claim: Mapping[str, Any]) -> str:
+    """What a claim is on, as ``claim``/``release`` take it: ``zone api``, ``deploy:prod`` or the path."""
+    if claim.get("zone_id"):
+        slug = next((z.get("slug") for z in snap.get("zones") or () if z.get("id") == claim.get("zone_id")), None)
+        return f"zone {slug or claim.get('zone_id')}"
+    return str(claim.get("resource") or claim.get("path_glob") or claim.get("id") or "a claim")
+
+
+def _own_claim(snap: Mapping[str, Any], session_id: str, target: str) -> dict[str, Any] | None:
+    """The caller's claim that ``target`` names: a claim id, a zone slug, a resource (``deploy:prod``) or a path
+    (as :func:`_claim_target` stores it). A held claim is picked before a queued one, then a reserved one (the
+    server lets its holder end that too), then any other row of that name."""
+    zone = _zone_by_slug(snap, target)
+    path = target.strip("/")
+    hits = [
+        dict(c)
+        for c in snap.get("claims") or ()
+        if c.get("holder_session_id") == session_id
+        and (
+            c.get("id") == target
+            or (zone is not None and c.get("zone_id") == zone["id"])
+            or (c.get("resource") and c.get("resource") == target)
+            or (c.get("path_glob") and c.get("path_glob") in (target, path))
+        )
+    ]
+    return min(hits, key=lambda c: _CLAIM_PICK_ORDER.get(str(c.get("state")), 3), default=None)
+
+
 def _claim_target(snap: Mapping[str, Any], target: str) -> dict[str, Any]:
     if ":" in target and target.split(":", 1)[0] in ("schema", "deploy", "service", "supabase", "mcp"):
         return {"resource": target}
@@ -792,23 +831,35 @@ def cmd_claim(args: argparse.Namespace, layout: Layout) -> int:
 def cmd_release(args: argparse.Namespace, layout: Layout) -> int:
     who = _need_session(layout)
     snap = _snapshot(layout, str(who["crew_id"]))
-    zone = _zone_by_slug(snap, args.target)
-    claim = next(
-        (
-            c
-            for c in snap.get("claims") or ()
-            if c.get("holder_session_id") == who["session_id"]
-            and (c.get("id") == args.target or (zone and c.get("zone_id") == zone["id"]) or c.get("path_glob") == args.target)
-        ),
-        None,
-    )
+    claim = _own_claim(snap, str(who["session_id"]), args.target)
     if claim is None:
-        return _fail({"message": f"you hold no claim on {args.target}"})
+        mine = [c for c in snap.get("claims") or () if c.get("holder_session_id") == who["session_id"]]
+        held = ", ".join(f"{_claim_name(snap, c)} ({c.get('id')})" for c in mine[:8])
+        return _fail({"message": f"you hold no claim on {args.target}" + (f". You hold: {held}" if held else "")})
     res = _api(layout, "POST", f"/claims/{claim['id']}/release", json_body={"baton": bool(args.baton)})
     if not res.get("ok"):
         return _fail(res)
     print(f"RELEASED {args.target}" + (" (held as a baton for the next pickup)" if args.baton else ""))
+    if not _release_settled(layout, str(who["crew_id"]), claim):
+        print(
+            "Note: `remembra-crew status` may still list it for up to a minute; "
+            "the local snapshot it reads is refreshed in the background."
+        )
     return 0
+
+
+def _release_settled(layout: Layout, crew_id: str, claim: Mapping[str, Any]) -> bool:
+    """True once the on-disk snapshot no longer shows ``claim`` as it was before the release (gone, or reserved
+    as a baton). Reads only the local file, which crewd rewrites after a write; gives up after RELEASE_SETTLE_S."""
+    deadline = time.monotonic() + RELEASE_SETTLE_S
+    while True:
+        rows = _snapshot(layout, crew_id).get("claims") or ()
+        now = next((c for c in rows if c.get("id") == claim.get("id")), None)
+        if now is None or now.get("state") != claim.get("state"):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
 
 
 def cmd_adopt(args: argparse.Namespace, layout: Layout) -> int:
