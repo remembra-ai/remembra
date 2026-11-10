@@ -55,6 +55,13 @@ CREW_SCOPED: Final = frozenset({"crew_claim", "crew_guard", "crew_task", "crew_s
 _METADATA_PROJECT: Final = frozenset({"send_to_inbox"})
 
 _PER_AGENT: Final = "The inbox is per agent, not per project: leave it out."
+# get_inbox reads every project's messages of one agent; only its declared project_id narrows a read.
+_INBOX_READ_PROJECT: Final = (
+    "The inbox is per agent and a read covers every project: leave it out, or pass project_id to read "
+    "only the messages tagged with one project."
+)
+# Tools whose project_id is a filter, not the project the call acts on: "project" is not read as it.
+_NO_PROJECT_ALIAS: Final = frozenset({"get_inbox"})
 _SESSION_PROJECT: Final = (
     "This tool acts on the project your session_brief resolved (session_brief(root_path=...) or "
     "session_brief(project_id=...)), else the configured one: leave it out."
@@ -75,8 +82,7 @@ HINTS: Final[Mapping[tuple[str, str], str]] = {
     ("crew_checkpoint", "tests_passing"): "Use tests=[{command, passed, failed}] (counts).",
     ("crew_task", "message"): "Use note.",
     ("crew_report", "files_changed"): "Files are taken from your checkpoints: call crew_checkpoint(files_changed=[...]) first.",
-    ("get_inbox", "project"): _PER_AGENT,
-    ("get_inbox", "project_id"): _PER_AGENT,
+    ("get_inbox", "project"): _INBOX_READ_PROJECT,
     ("ack_inbox", "project"): _PER_AGENT,
     ("ack_inbox", "project_id"): _PER_AGENT,
     ("*", "project"): _SESSION_PROJECT,
@@ -129,7 +135,7 @@ def _key(name: Any) -> str:
 def aliases_for(tool: str, declared: Sequence[str]) -> dict[str, str]:
     """Other name -> declared argument, for one tool."""
     out = {a: c for a, c in ALIASES.get(tool, {}).items() if c in declared and a not in declared}
-    if "project_id" in declared and "project" not in declared:
+    if "project_id" in declared and "project" not in declared and tool not in _NO_PROJECT_ALIAS:
         out["project"] = "project_id"
     return out
 
