@@ -707,6 +707,8 @@ class Seat:
     # set when this seat IS the agent's crew-hook session (see LocalCrew): calls go through crewd
     local: LocalCrew | None = None
     cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
+    # task id -> (status, owner) the "you do not own this task" note was last shown for (see _claim)
+    task_notes: dict[str, tuple[str, str]] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def cached(self, name: str, loader: Callable[[], Any], ttl: float = LIST_TTL_S) -> Any:
@@ -1683,29 +1685,53 @@ class CrewBridge:
         except (CrewApiError, CrewUsageError):
             return row
 
+    def _owner_presence(self, http: CrewHttp, seat: Seat, session_id: Any) -> tuple[str | None, bool | None]:
+        """``(callsign, still in the crew)`` of a task's owner, re-read; presence is None when it cannot be read."""
+        if not session_id:
+            return None, False
+        seat.forget("sessions")
+        try:
+            sessions = self._sessions(http, seat)
+        except CrewApiError:
+            return None, None
+        for s in sessions:
+            if s.get("id") == session_id:
+                return _safe(s.get("callsign")), s.get("state") != "ended"
+        return None, False
+
     def _ownership_step(self, http: CrewHttp, seat: Seat, row: Mapping[str, Any]) -> str:
         """For a task the caller does not own: its state, and the next step the server accepts in that state."""
         ref = task_ref(row)
         name = ref or "The task"
         status = str(row.get("status") or "")
         owner_id = row.get("owner_session_id")
-        try:
-            who = self._callsign(http, seat, owner_id)
-        except CrewApiError:
-            who = None
         own = (
             'To record your work now, create and start a task of your own (crew_task(action="create"), then '
             'action="start") and report on that, or use crew_checkpoint.'
         )
         if status == "stalled":
-            left = f"its owner {who} left" if who else "its owner left"
+            # a task stalls when its owner ends its session, and also when a live owner releases it
+            who, present = self._owner_presence(http, seat, owner_id)
+            owner = f"its owner {who}" if who else "its owner"
+            if present:
+                state = f"{owner} let it go and is still in the crew"
+            else:
+                state = f"{owner} no longer holds it" if present is None else f"{owner} left"
+            ask = f' crew_say(to="@{who}") reaches its owner.' if who and present else ""
+            last = f"ask {who} or a human to hand it over" if ask else "only a human can hand it over"
             if ref is None:
-                return f"{name} is stalled: {left}. Only a human can hand it over unless it was offered to you. {own}"
+                return f"{name} is stalled: {state}. Unless crew_status offers it to you, {last}. {own}{ask}"
+            # a baton reserved at the owner's exit is offered to a session when it reads crew_status
             return (
-                f'{ref} is stalled: {left}. Try crew_claim(action="adopt", task="{ref}") and then '
-                f'crew_task(action="start", task="{ref}"); if the adopt is refused, nothing of it is reserved '
-                f"for you and only a human can hand it over. {own}"
+                f"{ref} is stalled: {state}. Call crew_status first (it offers you the task as YOUR BATON when "
+                f'something of it is reserved), then crew_claim(action="adopt", task="{ref}") and '
+                f'crew_task(action="start", task="{ref}"). If the adopt is refused after crew_status, {ref} is not '
+                f"offered to you: {last}. {own}{ask}"
             )
+        try:
+            who = self._callsign(http, seat, owner_id)
+        except CrewApiError:
+            who = None
         if status == "ready" and not owner_id and ref is not None:
             return f'{ref} is ready and has no owner: crew_task(action="start", task="{ref}") makes it yours, then report.'
         if status in ("done", "cancelled"):
@@ -2492,18 +2518,44 @@ class CrewBridge:
                 "What was granted stays yours: release what you do not need."
             )
         if task_row is not None and any(ln.startswith("GRANTED ") for ln in lines):
-            # the server tags a claim with any task of the crew; the tag is not ownership
-            if task_row.get("owner_session_id") != seat.session_id:
-                task_row = self._fresh_task(http, seat, task_row)
-            if task_row.get("owner_session_id") != seat.session_id:
-                ref = task_ref(task_row) or "that task"
-                lines.append(
-                    f"NOTE: these claims are tagged {ref}, but you do not own {ref}; crew_report on {ref} will be refused. "
-                    + self._ownership_step(http, seat, task_row)
-                )
+            note = self._tag_note(http, seat, task_row)
+            if note:
+                lines.append(note)
         lines.extend(f"- {n}" for n in notes)
         # one target refused or not answered: the caller does not hold everything it asked for
         return _result(join_text(lines, data), failures)
+
+    def _tag_note(self, http: CrewHttp, seat: Seat, row: dict[str, Any]) -> str:
+        """The NOTE under claims tagged with a task the caller does not own ("" for its own task).
+
+        The server tags a claim with any task of the crew; the tag is not ownership. The full note is shown
+        once per state of the task; while the task list still shows that state, a repeat is one short line
+        and costs no request.
+        """
+
+        def key(r: Mapping[str, Any]) -> tuple[str, str]:
+            return str(r.get("status") or ""), str(r.get("owner_session_id") or "")
+
+        if row.get("owner_session_id") == seat.session_id:
+            return ""
+        tid = str(row.get("id") or "")
+        ref = task_ref(row) or "that task"
+        with seat.lock:
+            shown = seat.task_notes.get(tid)
+        if shown is not None and shown == key(row):
+            return f"NOTE: tagged {ref}, which you still do not own; crew_report on {ref} will be refused."
+        # first time, or the task moved: the cached row may predate this session taking the task
+        row = self._fresh_task(http, seat, row)
+        if row.get("owner_session_id") == seat.session_id:
+            with seat.lock:
+                seat.task_notes.pop(tid, None)
+            return ""
+        step = self._ownership_step(http, seat, row)
+        with seat.lock:
+            if len(seat.task_notes) >= 256:
+                seat.task_notes.clear()
+            seat.task_notes[tid] = key(row)
+        return f"NOTE: these claims are tagged {ref}, but you do not own {ref}; crew_report on {ref} will be refused. {step}"
 
     def _blocker_text(self, http: CrewHttp, seat: Seat, blockers: Sequence[Mapping[str, Any]]) -> str:
         if not blockers:

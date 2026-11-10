@@ -280,3 +280,104 @@ def test_instructions_tie_crew_report_to_the_callers_own_task():
     assert "When a task is done call crew_report" not in text
     assert len(text) <= S.TEXT_CAPS["mcp_instructions"]
     assert S.check_agent_text(text, "mcp_instructions") == []
+
+
+# ---------------------------------------------------------------------------
+# Review round: a reserved baton is offered on crew_status, a live owner has not "left", the NOTE is shown once
+# ---------------------------------------------------------------------------
+
+
+def _seat_of(project: str, callsign: str):
+    return next(
+        s for seats in server._crew._seats.values() for s in seats.values() if s.project_id == project and s.callsign == callsign
+    )
+
+
+def test_a_successor_that_was_already_live_is_sent_through_crew_status_and_the_steps_work(live, clock):
+    """The successor joined before the owner closed with a reserved claim: the baton is offered on its next
+    crew_status, so the refusal must not call a first refused adopt a dead end."""
+    project, a, a_sign, b, _ = _two_agents(live, "f49reserved")
+    use(a)
+    assert call("crew_task", action="create", title="Places route").startswith("CREATED T-1")
+    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert call("crew_claim", paths=["app/x.ts"], task="T-1").startswith("GRANTED path app/x.ts")
+    closed = as_json(call("close_session", summary="handing over", end_reason="handoff", project_id=project))
+    assert closed["crew"]["tasks_stalled"] == 1 and closed["crew"]["claims_reserved"] == 1, closed
+    use(b)
+    out = call("crew_report", task="T-1", sections={"done": ["x"]})
+    assert out.startswith(REFUSED), out
+    assert f"T-1 is stalled: its owner {a_sign} left." in out, out
+    assert "nothing of it is reserved" not in out, out  # something is, and the client cannot know either way
+    assert 0 < out.index("crew_status") < out.index('crew_claim(action="adopt", task="T-1")'), out
+    assert "If the adopt is refused after crew_status" in out, out
+    assert_clean(out)
+    # the printed steps, in order
+    status = call("crew_status")
+    assert "YOUR BATON (offered to you): T-1" in status, status
+    assert call("crew_claim", action="adopt", task="T-1").startswith("ADOPTED T-1"), out
+    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert call("crew_report", task="T-1", sections={"done": ["x"]}).startswith("REPORT rpt_")
+
+
+def test_a_task_its_live_owner_released_is_not_described_as_left(live, clock):
+    _, a, a_sign, b, _ = _two_agents(live, "f49letgo")
+    use(a)
+    call("crew_task", action="create", title="Invoice PDF")
+    call("crew_task", action="start", task="T-1")
+    assert call("crew_claim", paths=["app/pdf.ts"], task="T-1").startswith("GRANTED path app/pdf.ts")
+    assert call("crew_task", action="release", task="T-1").startswith("RELEASED T-1: now stalled")
+    use(b)
+    out = call("crew_report", task="T-1", sections={"done": ["x"]})
+    assert out.startswith(REFUSED), out
+    assert " left" not in out, out  # the owner is still in the crew
+    assert f"T-1 is stalled: its owner {a_sign} let it go and is still in the crew." in out, out
+    assert f'crew_say(to="@{a_sign}")' in out, out
+    assert "only a human can hand it over" not in out, out  # the owner can be asked
+    assert_clean(out)
+    tagged = call("crew_claim", paths=["docs/pdf.md"], task="T-1")
+    assert f"T-1 is stalled: its owner {a_sign} let it go and is still in the crew." in tagged, tagged
+    call("crew_status")
+    assert call("crew_claim", action="adopt", task="T-1").startswith("ADOPTED T-1")
+    assert call("crew_task", action="start", task="T-1") == "STARTED T-1 (in_progress)."
+    assert call("crew_report", task="T-1", sections={"done": ["x"]}).startswith("REPORT rpt_")
+
+
+def test_the_note_on_tagged_claims_is_full_once_then_one_short_line_without_a_re_read(live, clock, monkeypatch):
+    _, a_sign = _owner_left(live, "f49once")
+    gets: list[str] = []
+    real = crew_mod.CrewHttp.call
+
+    def counting(self, method, path, **kw):
+        if method == "GET" and (path.endswith("/tasks") or path.endswith("/sessions")):
+            gets.append(path.rsplit("/", 1)[-1])
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(crew_mod.CrewHttp, "call", counting)
+    first = call("crew_claim", paths=["app/a.ts"], task="T-1")
+    note = next(ln for ln in first.splitlines() if ln.startswith("NOTE: "))
+    assert f"T-1 is stalled: its owner {a_sign} left." in note and "crew_status" in note, first
+    gets.clear()
+    for path in ("app/b.ts", "app/c.ts"):
+        again = call("crew_claim", paths=[path], task="T-1")
+        assert again.startswith(f"GRANTED path {path}"), again
+        notes = [ln for ln in again.splitlines() if ln.startswith("NOTE: ")]
+        assert notes == ["NOTE: tagged T-1, which you still do not own; crew_report on T-1 will be refused."], again
+        assert_clean(again)
+    assert gets == [], gets  # the repeat costs no extra round trip
+
+
+def test_the_full_note_returns_when_the_tagged_task_changes_state(live, clock):
+    project, a, a_sign, b, b_sign = _two_agents(live, "f49moved")
+    use(a)
+    call("crew_task", action="create", title="Export")
+    call("crew_task", action="start", task="T-1")
+    use(b)
+    first = call("crew_claim", paths=["docs/a.md"], task="T-1")
+    assert f"T-1 is in_progress, owned by {a_sign}." in first, first
+    assert "still do not own" in call("crew_claim", paths=["docs/b.md"], task="T-1")
+    use(a)
+    assert call("crew_task", action="release", task="T-1").startswith("RELEASED T-1: now stalled")
+    use(b)
+    _seat_of(project, b_sign).forget("tasks")  # what the 15 s list cache does on its own
+    moved = call("crew_claim", paths=["docs/c.md"], task="T-1")
+    assert f"T-1 is stalled: its owner {a_sign} let it go and is still in the crew." in moved, moved
