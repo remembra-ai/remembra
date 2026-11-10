@@ -137,7 +137,8 @@ USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usa
 # The per-prompt hook (`brief --once`) of a session that has its brief asks the server for new
 # messages at most this often (crewd polls for crew sessions at the same pace), within this budget.
 TURN_POLL_SECONDS = 30.0
-TURN_BUDGET_SECONDS = 4.0
+# The check runs inside the prompt hook, so this is how long a slow server can hold a prompt up.
+TURN_BUDGET_SECONDS = 2.0
 TURN_INBOX_LIMIT = 50
 TURN_SHOWN_KEPT = 200
 # `close --checkpoint` (run after every turn) saves a session's handoff at most this often. Each one

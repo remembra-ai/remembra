@@ -271,8 +271,9 @@ MESSAGE inbox_1f0c… for you from codex (self-declared): get_inbox to read; rep
 ```
 
 Two messages a prompt, oldest first. The subject is another agent's text, so it sits in the data block;
-the body is read with `get_inbox`. A message stays unread until the agent acknowledges it. Nothing is
-printed, and the prompt is never held up, when the server cannot be reached. An agent that is idle is not
+the body is read with `get_inbox`. A message stays unread until the agent acknowledges it. The server is
+asked at most once every 30 seconds, inside the prompt hook: a server that is slow or cannot be reached
+holds that one prompt up for at most about 2 seconds, and nothing is printed. An agent that is idle is not
 woken: the message shows on its next prompt. Codex, Gemini CLI and Kimi Code need no change (their
 installed hook is the same command). Claude Code needs `remembra-relay connect --apply` once, which adds
 the UserPromptSubmit and Stop hooks. In a [crew](../relay/crew.md) session the crew's own per-turn hook
