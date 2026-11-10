@@ -435,7 +435,7 @@ def store_memory(
             store_status instead — it replaces the previous value.
         project_id: Project to store in. Default: the project your
             session_brief or crew_status resolved, else the configured one.
-            Pass it when this MCP server was briefed on more than one project.
+            Pass it when this MCP server was used for more than one project.
 
     Returns:
         JSON with status "stored" (id, project_id, extracted_facts) or
@@ -456,7 +456,7 @@ def store_memory(
         # This call's project, else the one this session's session_brief / crew_status resolved.
         target = _named_project(project_id)
         if not target:
-            refusal = _unnamed_project_refusal("store_memory", _briefed_projects())
+            refusal = _unnamed_project_refusal("store_memory", _chosen_projects())
             if refusal:
                 return json.dumps({"status": "error", "error": refusal})
             target = _session_project().get("project_id")
@@ -934,6 +934,21 @@ def _briefed_projects() -> list[str]:
     return [str(p) for p in _session_project().get("projects") or []]
 
 
+def _chosen_projects() -> list[str]:
+    """Every project this MCP session was briefed on or pointed at through the crew tools, oldest first.
+
+    A conversation may have chosen its project with ``crew_status(project_id=...)`` and never briefed, so the
+    briefs alone do not say how many projects this server is being used for. A crew write that named its
+    project (project_id / root_path) is for that call only: it chose nothing and is not counted.
+    """
+    projects = dict.fromkeys(_briefed_projects())
+    try:
+        projects.update(dict.fromkeys(_crew.pointed_projects(_crew_caller())))
+    except Exception:  # noqa: S110 - the briefed projects are still known
+        pass
+    return list(projects)
+
+
 def _unnamed_project_refusal(tool: str, projects: list[str]) -> str | None:
     """Why ``tool`` may not guess its project (None when it may): this MCP session knows several.
 
@@ -1106,7 +1121,7 @@ def close_session(
                     return json.dumps({"status": "error", "error": refused})
                 close_project = _project_for_locator(client, locator)
             else:
-                refusal = _unnamed_project_refusal("close_session", _known_projects())
+                refusal = _unnamed_project_refusal("close_session", _chosen_projects())
                 if refusal:
                     return json.dumps({"status": "error", "error": refusal + " (root_path or git_remote also work.)"})
                 remembered = _session_project()
@@ -1213,21 +1228,6 @@ def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | No
         f"'{resolved}' would take this and it is not used on its own: pass project_id='{resolved}' to work "
         "there, or the project_id you mean, or root_path=<your repository checkout>."
     )
-
-
-def _known_projects() -> list[str]:
-    """Every project this MCP session chose, oldest first: briefed on, or pointed at with crew_status or a
-    crew write that named none. A write that named its project is for that call only and is not counted."""
-    projects = dict.fromkeys(_briefed_projects())
-    try:
-        projects.update(dict.fromkeys(_crew.pointed_projects(_crew_caller())))
-    except Exception:  # noqa: S110 - the briefed projects are still known
-        pass
-    return list(projects)
-
-
-def _configured_crew_project(client: Memory) -> str | None:
-    return client.project if client.project and client.project != "default" else None
 
 
 def _project_for_locator(client: Memory, locator: dict[str, Any]) -> str | None:

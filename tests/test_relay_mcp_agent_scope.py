@@ -15,6 +15,7 @@ from remembra.auth.keys import APIKeyManager, _key_cache
 from remembra.auth.middleware import authenticate_api_key
 from remembra.auth.rbac import RoleManager
 from remembra.client.memory import Memory
+from remembra.mcp.crew import CrewBridge
 from remembra.security.untrusted import unwrap_untrusted
 from remembra.storage.database import Database
 from tests.agent_api_harness import build_api
@@ -44,6 +45,8 @@ def mcp_env(api, monkeypatch):
     monkeypatch.setattr(server, "REMEMBRA_SESSION_ID", "mcp-sess-1")
     monkeypatch.setattr(server, "_client", None)
     monkeypatch.setattr(server, "_session_projects", {})
+    # a fresh server process: the crew bridge also remembers which projects the session was pointed at
+    monkeypatch.setattr(server, "_crew", CrewBridge())
     yield api
     server._client = None
 

@@ -254,6 +254,49 @@ def test_store_memory_does_not_follow_another_conversations_brief(live, clock):
     assert stored["id"] in str(in_a) and stored["id"] not in str(in_b)
 
 
+def test_store_memory_does_not_follow_a_brief_when_another_conversation_chose_by_crew_status(live, clock):
+    """The incident's own order: conversation one chose its project with crew_status, conversation two briefed."""
+    a, b = project_name("stmem"), project_name("stother")
+    use(agent(live, "claude-desktop", "desktop-stmem", "configured-default"))
+    call("crew_status", project_id=a)
+    assert json.loads(call("session_brief", project_id=b, compact=True))["project_id"] == b
+    headers = {"X-API-Key": live.state["key"]}
+    before_b = str(live.api("GET", "/memories", headers=headers, params={"project_id": b}))
+    refused = as_json(call("store_memory", content="The deploy of this project runs from the release branch."))
+    assert refused["status"] == "error", refused
+    assert "project_id" in refused["error"] and a in refused["error"] and b in refused["error"], refused
+    assert str(live.api("GET", "/memories", headers=headers, params={"project_id": b})) == before_b
+    stored = as_json(call("store_memory", content="The deploy of this project runs from the release branch.", project_id=a))
+    assert stored["status"] == "stored" and stored["project_id"] == a, stored
+    assert stored["id"] in str(live.api("GET", "/memories", headers=headers, params={"project_id": a}))
+    assert stored["id"] not in str(live.api("GET", "/memories", headers=headers, params={"project_id": b}))
+    # a duplicate answer names its project too
+    again = as_json(call("store_memory", content="The deploy of this project runs from the release branch.", project_id=a))
+    assert again["project_id"] == a, again
+
+
+def test_store_memory_names_the_project_it_stored_into_when_none_was_passed(live, clock):
+    a = project_name("stone")
+    use(agent(live, "claude-desktop", "desktop-stone", "configured-default"))
+    assert json.loads(call("session_brief", project_id=a, compact=True))["project_id"] == a
+    stored = as_json(call("store_memory", content="Invoices are numbered per fiscal year here."))
+    assert stored["status"] == "stored" and stored["project_id"] == a, stored
+    use(agent(live, "claude-desktop", "desktop-stnone", project_name("stcfg")))
+    server._session_projects.clear()
+    plain = as_json(call("store_memory", content="Stock counts are taken on the last Friday of a month."))
+    assert plain["status"] == "stored" and plain["project_id"].startswith("stcfg"), plain
+
+
+def test_an_unnamed_close_with_one_seat_and_no_brief_closes_that_seats_project(live, clock):
+    a = project_name("oneseat")
+    use(agent(live, "claude-desktop", "desktop-oneseat", "configured-default"))
+    me = callsign_in(call("crew_status", project_id=a))
+    closed = as_json(call("close_session", summary="done in the only project", end_reason="done"))
+    assert closed["status"] == "ok" and closed["project_id"] == a, closed
+    assert closed["crew"]["session_left"] is True, closed
+    assert session_row(live, a, me)["state"] == "ended"
+
+
 def test_close_session_ends_its_own_projects_seat_not_the_pointed_one(live, clock):
     a, b = project_name("closea"), project_name("closeb")
     use(agent(live, "claude-desktop", "desktop-close", "configured-default"))
@@ -289,11 +332,22 @@ def test_close_session_by_location_ends_the_seat_of_the_project_it_resolves(live
     assert session_row(live, b, me_b)["state"] != "ended"
 
 
-def test_a_close_for_a_project_without_a_seat_sends_no_other_seats_token(live, clock):
+def test_a_close_for_a_project_without_a_seat_sends_no_other_seats_token(live, clock, monkeypatch):
     a, c = project_name("held"), project_name("noseat")
     use(agent(live, "claude-desktop", "desktop-noseat", "configured-default"))
     me_a = callsign_in(call("crew_status", project_id=a))
+    # the close of C must not be sent as A's crew session: record every close that carries a seat token
+    real = crew_mod.CrewHttp.call
+    with_token: list[Any] = []
+
+    def recording(self, method, path, **kw):
+        if path == "/session/close" and kw.get("token"):
+            with_token.append((kw.get("json") or {}).get("project_id"))
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(crew_mod.CrewHttp, "call", recording)
     closed = as_json(call("close_session", end_reason="done", project_id=c))
+    assert with_token == [], f"the close for {c} carried the token of the seat in {a}"
     assert closed["status"] == "ok" and closed["project_id"] == c, closed
     assert "crew" not in closed
     assert session_row(live, a, me_a)["state"] != "ended"
