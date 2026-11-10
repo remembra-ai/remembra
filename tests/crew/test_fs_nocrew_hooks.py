@@ -39,7 +39,25 @@ HOST_MARKERS = (
 )
 CMDS = CrewCommands(python="/usr/bin/python3", gate="/home/u/.remembra/crew/bin/crew-gate.py", crew="/opt/bin/remembra-crew")
 RELAY_HOOK = "/opt/bin/remembra-crew relay --hook {0} --agent {0} # remembra-crew"
-_SERVER_LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[")
+_SERVER_LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d\S* \[")
+_SERVER_LOG_KEYS = {"event", "level", "timestamp"}
+
+
+def _is_server_log(line: str) -> bool:
+    """A structlog line of the in-process server, in either renderer.
+
+    structlog's default is the console form; once any earlier test has run ``configure_logging`` with
+    stderr not a terminal (every CI run), the same lines are JSON objects with event, level and timestamp.
+    """
+    if _SERVER_LOG_RE.match(line):
+        return True
+    if not line.startswith("{"):
+        return False
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return False
+    return isinstance(record, dict) and record.keys() >= _SERVER_LOG_KEYS
 
 
 @pytest.fixture()
@@ -100,7 +118,7 @@ def _hook(env: dict[str, Any], monkeypatch, capsys, adapter: str, payload: dict[
     monkeypatch.setattr(cli, "read_stdin", lambda *a, **k: json.dumps(payload))
     code = cli.main(["relay", "--hook", adapter, "--agent", adapter], layout=env["layout"])
     out = capsys.readouterr().out
-    return code, "".join(line for line in out.splitlines(keepends=True) if not _SERVER_LOG_RE.match(line))
+    return code, "".join(line for line in out.splitlines(keepends=True) if not _is_server_log(line))
 
 
 def _relay(monkeypatch, capsys, argv: list[str], payload: dict[str, Any]) -> str:

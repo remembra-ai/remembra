@@ -30,7 +30,25 @@ from tests.relay_fixtures import Transcript, git, make_remote_and_clones
 
 CLAUDE = ["--hook", "claude-code", "--agent", "claude-code"]
 CODEX = ["--hook", "codex", "--agent", "codex"]
-_SERVER_LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[")
+_SERVER_LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d\S* \[")
+_SERVER_LOG_KEYS = {"event", "level", "timestamp"}
+
+
+def _is_server_log(line: str) -> bool:
+    """A structlog line of the in-process server, in either renderer.
+
+    structlog's default is the console form; once any earlier test has run ``configure_logging`` with
+    stderr not a terminal (every CI run), the same lines are JSON objects with event, level and timestamp.
+    """
+    if _SERVER_LOG_RE.match(line):
+        return True
+    if not line.startswith("{"):
+        return False
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return False
+    return isinstance(record, dict) and record.keys() >= _SERVER_LOG_KEYS
 
 
 @pytest.fixture()
@@ -91,7 +109,7 @@ def _run(monkeypatch, capsys, argv: list[str], payload: dict[str, Any] | None = 
     code = cli.main(argv)
     out = capsys.readouterr()
     # in-process, the server's log lines share stdout with the CLI: keep the CLI's own lines
-    own = [line for line in out.out.splitlines(keepends=True) if not _SERVER_LOG_RE.match(line)]
+    own = [line for line in out.out.splitlines(keepends=True) if not _is_server_log(line)]
     return code, "".join(own), out.err
 
 
