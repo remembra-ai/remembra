@@ -2993,10 +2993,12 @@ class CrewBridge:
 
         A server before the collision drain (0.17.5) never closes a row, so the list can hold
         hundreds about sessions that ended days ago or zones the seat has since been granted. A
-        row is current while its claim still stands with the holder it names (whatever that
-        holder's presence: a reserved baton is still not the writer's zone), or, for a row with
-        no claim, while the other session is live. When the lists cannot be read every row
-        counts as current.
+        row the seat wrote is current while its claim still stands with anyone but the seat
+        (whatever that holder's presence: a reserved baton is still not the writer's zone; when
+        the zone moved to a third session the row is shown against that holder); a row about the
+        seat's own claim while the seat still holds it and the writer is live; a row with no
+        claim while the other session is live. When the lists cannot be read every row counts
+        as current.
         """
         try:
             seat.forget("sessions")  # presence moves; a cached list would keep an ended session "live"
@@ -3016,11 +3018,13 @@ class CrewBridge:
                 claim = claims.get(c.get("claim_id"))
                 holder = claim.get("holder_session_id") if claim else None
                 own_fenced_write = writer and other_id is None and c.get("kind") == "stale_epoch_write"
-                expected = seat.session_id if (own_fenced_write or not writer) else other_id
-                if claim is None or holder != expected:
-                    continue  # the claim ended, moved on, or is now the writer's own
-                if writer or other_id is None or other_id in live:
-                    current.append(c)
+                if claim is None:
+                    continue  # the claim ended
+                if own_fenced_write or not writer:
+                    if holder == seat.session_id and (writer or other_id is None or other_id in live):
+                        current.append(c)
+                elif holder != seat.session_id:  # still someone else's zone; name whoever holds it now
+                    current.append(c if holder == other_id else {**c, "session_b": holder})
             elif other_id is None or other_id in live:
                 current.append(c)
         return current, len(mine) - len(current)

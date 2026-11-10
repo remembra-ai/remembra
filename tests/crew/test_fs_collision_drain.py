@@ -333,3 +333,167 @@ async def test_hook_snapshot_keeps_the_newest_collisions_when_over_the_cap(env, 
     got = snap["collisions"]
     assert len(got) == 3 and got[-1]["id"] == newest["id"], [c["subject"] for c in got]
     assert [c["subject"] for c in got[:2]] == ["src/lib/old2.ts", "src/lib/old3.ts"]  # still oldest first
+
+
+# ---------------------------------------------------------------------------
+# Review round: a zone handed to a third session, arrival order of commit reports, lost sessions
+# ---------------------------------------------------------------------------
+
+
+async def _hand_over(db, ops, claim, to_id):
+    """cs_a's claim becomes a reserved baton, is offered to ``to_id`` and adopted (the claim id is kept)."""
+    target = await db.fetchone("SELECT * FROM crew_sessions WHERE id = ?", (to_id,))
+    async with ops.log.transaction() as tx:
+        await C.reserve_session_claims(ops, tx, CREW, "cs_a", "quota")
+        await C.record_baton_offer(ops, tx, CREW, claim["id"], to_id)
+    await C.adopt(ops, claim, Z.Principal.for_session(target))
+
+
+async def _empty_checkpoint(db, session):
+    svc = CheckpointService(CrewEventLog(db, None))
+    await svc.ingest(CREW, Caller.for_session(session), {"session_id": session["id"], "trigger": "turn", "facts": {}})
+
+
+@pytest.mark.parametrize("via", ["checkpoint", "sweep"])
+async def test_breach_follows_the_zone_to_a_third_holder_while_the_write_stands(env, via):
+    db, ops, a, b = env
+    await seed_session(db, "cs_c", callsign="codex-9", agent_id="codex")
+    got = await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "pos"))
+    opened = await _fp(ops, b, {"path": "src/app/pos/cart.ts", **DIRTY})
+    assert [(r["kind"], r["session_b"]) for r in opened] == [("exclusive_breach", "cs_a")]
+    await _hand_over(db, ops, got.claim, "cs_c")
+    holder = await db.fetchone("SELECT state, holder_session_id FROM crew_claims WHERE id = ?", (got.claim["id"],))
+    assert (holder["state"], holder["holder_session_id"]) == ("active", "cs_c")
+
+    if via == "checkpoint":
+        await _empty_checkpoint(db, b)  # crewd sends no footprint again: the file did not change
+    else:
+        assert await CO.sweep(ops.log, {}) == 1
+    left = await _open(db)
+    assert [(r["kind"], r["severity"], r["session_a"], r["session_b"]) for r in left] == [
+        ("exclusive_breach", "high", "cs_b", "cs_c")
+    ]
+    assert left[0]["id"] != opened[0]["id"] and left[0]["claim_id"] == got.claim["id"]
+    assert left[0]["subject"] == "src/app/pos/cart.ts" and left[0]["attribution"] == "certain"
+    assert loads(left[0]["evidence"])["moved_from"] == "cs_a"
+    old = await db.fetchone("SELECT state, resolution FROM crew_collisions WHERE id = ?", (opened[0]["id"],))
+    assert (old["state"], old["resolution"]) == ("resolved", "auto")
+    # the new holder and the writer are told; the old holder's notice is gone; Needs-you has the new row
+    assert sorted(i["recipient"] for i in await _open_notices(db)) == ["cs_b", "cs_c"]
+    escalated = [i for i in await inbox(db, kind="collision_escalated") if i["state"] not in ("resolved", "dismissed")]
+    assert [i["ref_id"] for i in escalated] == [left[0]["id"]]
+    detected = await events(db, type_prefix="collision.detected")
+    assert len(detected) == 2 and detected[-1]["moment"] and detected[-1]["payload"]["collision"]["session_b"] == "cs_c"
+    # the Stop gate's snapshot carries the breach
+    snap = await CrewCore(db).snapshot(CREW)
+    assert [(c["kind"], c["session_a"], c["session_b"]) for c in snap["collisions"]] == [("exclusive_breach", "cs_b", "cs_c")]
+
+    # stable: further checkpoints and sweeps neither close nor duplicate it
+    await _empty_checkpoint(db, b)
+    assert await CO.sweep(ops.log, {}) == 0
+    assert [r["id"] for r in await _open(db)] == [left[0]["id"]]
+    # and it ends like any breach: the write lands
+    async with ops.log.transaction() as tx:
+        await CO.set_footprint_state(ops, tx, CREW, "cs_b", ["src/app/pos/cart.ts"], "landed")
+    assert await _open(db) == [] and await _open_notices(db) == []
+
+
+async def test_breach_does_not_follow_the_zone_once_the_write_landed_or_the_writer_is_gone(env):
+    db, ops, a, b = env
+    await seed_session(db, "cs_c", callsign="codex-9", agent_id="codex")
+    got = await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "pos"))
+    await _fp(ops, b, {"path": "src/app/pos/cart.ts", **DIRTY}, {"path": "src/app/pos/tender.ts", **DIRTY})
+    assert len(await _open(db, "exclusive_breach")) == 2
+    await _hand_over(db, ops, got.claim, "cs_c")
+    await _set(db, "UPDATE crew_footprints SET state = 'landed' WHERE session_id = 'cs_b' AND path = 'src/app/pos/cart.ts'")
+    await _empty_checkpoint(db, b)
+    assert [(r["subject"], r["session_b"]) for r in await _open(db)] == [("src/app/pos/tender.ts", "cs_c")]
+    await _set(db, "UPDATE crew_sessions SET state = 'ended', ended_at = ? WHERE id = 'cs_b'", (_ago(days=2),))
+    assert await CO.sweep(ops.log, {}) == 1
+    assert await _open(db) == [] and await _open_notices(db) == []
+
+
+async def test_shared_zone_notice_follows_the_claim_and_a_humans_commit_notice_does_not(env):
+    db, ops, a, b = env
+    await seed_session(db, "cs_c", callsign="codex-9", agent_id="codex")
+    pos = await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "pos"))
+    async with ops.log.transaction() as tx:
+        un = await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/a.ts"], commit="deadbeefcafe")
+    assert [(r["kind"], r["session_b"]) for r in un] == [("unattributed_change", "cs_a")]
+    shared = await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "reports"), mode="shared")
+    opened = await _fp(ops, b, {"path": "src/app/reports/daily.ts", **DIRTY})
+    assert [(r["kind"], r["session_b"]) for r in opened] == [("same_zone_shared", "cs_a")]
+    await _set(db, "UPDATE crew_claims SET holder_session_id = 'cs_c' WHERE id IN (?, ?)", (pos.claim["id"], shared.claim["id"]))
+    assert await CO.sweep(ops.log, {}) == 2
+    # the notice about a commit was for whoever held the zone then; the shared-zone overlap is with whoever holds it now
+    assert [(r["kind"], r["session_a"], r["session_b"]) for r in await _open(db)] == [("same_zone_shared", "cs_b", "cs_c")]
+
+
+@pytest.mark.parametrize("trigger", ["turn", "commit", "close"])
+async def test_a_checkpoint_that_named_the_commit_first_means_no_notice(env, trigger):
+    """crewd's Stop checkpoint (trigger ``turn``, ``commits`` = plain shas) can land before its commit scan."""
+    db, ops, a, b = env
+    await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "pos"))
+    sha = "89abcdef0123456789abcdef0123456789abcdef"
+    svc = CheckpointService(CrewEventLog(db, None))
+    await svc.ingest(
+        CREW, Caller.for_session(a), {"session_id": "cs_a", "trigger": trigger, "facts": {"head": sha, "commits": [sha]}}
+    )
+    await svc.ingest(  # an MCP-style checkpoint with a short id
+        CREW, Caller.for_session(b), {"session_id": "cs_b", "trigger": "turn", "facts": {"commits": [{"sha": "ABCDEF1"}]}}
+    )
+    async with ops.log.transaction() as tx:
+        assert await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/a.ts"], commit=sha) == []
+        assert await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/b.ts"], commit="abcdef1" + "0" * 33) == []
+        # a commit no checkpoint names is still reported, also when a checkpoint merely mentions it elsewhere
+        other = "7" * 40
+        await svc_note(svc, a, other)
+        assert len(await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/c.ts"], commit=other)) == 1
+    assert [r["subject"] for r in await _open(db, "unattributed_change")] == ["src/app/pos/c.ts"]
+
+
+async def svc_note(svc, session, sha):
+    """A checkpoint whose facts carry ``sha`` outside ``commits`` (its head): not a report of that commit."""
+    await svc.ingest(
+        CREW, Caller.for_session(session), {"session_id": session["id"], "trigger": "turn", "facts": {"head": sha, "commits": []}}
+    )
+
+
+async def test_only_the_newest_checkpoints_are_searched_for_a_commit(env, monkeypatch):
+    db, ops, a, b = env
+    await C.request_claim(ops, CREW, Z.Principal.for_session(a), zone_id=await zone_id(db, "pos"))
+    sha = "89abcdef0123456789abcdef0123456789abcdef"
+    svc = CheckpointService(CrewEventLog(db, None))
+    await svc.ingest(CREW, Caller.for_session(a), {"session_id": "cs_a", "trigger": "turn", "facts": {"commits": [sha]}})
+    await _set(db, "UPDATE crew_checkpoints SET created_at = ?", (_ago(days=9),))
+    for n in range(3):
+        await svc.ingest(CREW, Caller.for_session(b), {"session_id": "cs_b", "trigger": "turn", "facts": {"n": n}})
+    monkeypatch.setattr(CO, "COMMIT_LOOKBACK_CHECKPOINTS", 3)
+    async with ops.log.transaction() as tx:
+        assert len(await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/a.ts"], commit=sha)) == 1
+    monkeypatch.setattr(CO, "COMMIT_LOOKBACK_CHECKPOINTS", 4)
+    async with ops.log.transaction() as tx:
+        assert await CO.record_unattributed_change(ops, tx, CREW, ["src/app/pos/b.ts"], commit=sha) == []
+
+
+async def test_a_lost_session_counts_from_its_latest_sign_of_life(env):
+    db, ops, a, b = env
+    await _fp(ops, a, {"path": "src/lib/m.ts", **DIRTY})
+    await _fp(ops, b, {"path": "src/lib/m.ts", **DIRTY})
+    # a call advanced last_seen_at minutes ago although the last crewd heartbeat is days old
+    await _set(
+        db,
+        "UPDATE crew_sessions SET state = 'lost', last_heartbeat_at = ?, last_seen_at = ? WHERE id = 'cs_b'",
+        (_ago(days=3), _ago(minutes=5)),
+    )
+    assert await CO.sweep(ops.log, {}) == 0
+    assert len(await _open(db, "same_file")) == 1
+    await _set(db, "UPDATE crew_sessions SET last_seen_at = ?, joined_at = ? WHERE id = 'cs_b'", (_ago(days=2), _ago(days=5)))
+    assert await CO.sweep(ops.log, {}) == 1
+    assert await _open(db) == []
+    # an unreadable timestamp is skipped, not fatal
+    await _set(
+        db, "UPDATE crew_sessions SET last_heartbeat_at = 'garbage', last_seen_at = ? WHERE id = 'cs_b'", (_ago(minutes=1),)
+    )
+    fresh = await db.fetchone("SELECT * FROM crew_sessions WHERE id = 'cs_b'")
+    assert CO._recent(fresh) is True

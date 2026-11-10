@@ -26,8 +26,9 @@ resolve automatically when the overlap disappears, when an agent resolves them, 
 human dismisses them. The overlap is gone when a footprint landed or was removed; when a
 party's session ended, or was lost and last heard from, more than 24 h ago; when a committed
 file, or a file an MCP-only session declared, was last reported more than 24 h ago (file
-against file only); when the claim ended, moved to another holder or is now the writer's own;
-and, for ``unattributed_change``, when a crew session reports that commit as its own. The
+against file only); when the claim ended or is now the writer's own (a claim that moved to a third holder while the
+write still stands is re-opened against that holder); and, for ``unattributed_change``, when a
+crew session's footprint or checkpoint names that commit. The
 reporting session's rows are checked on every footprint report and checkpoint, and the reaper
 sweeps every crew (:func:`sweep`) for rows whose sessions no longer report at all.
 
@@ -78,7 +79,15 @@ FOOTPRINT_OVERLAP_WITHIN: Final = timedelta(hours=24)
 # crew in one reaper pass (the pass keeps a cursor, so a backlog drains over a few passes).
 SWEEP_SESSION_ROWS: Final = 50
 SWEEP_CREW_ROWS: Final = 100
+# How many of the crew's newest checkpoints are searched for a commit before it is called unattributed.
+COMMIT_LOOKBACK_CHECKPOINTS: Final = 500
 LIVE_CLAIM_STATES: Final = ("active", "offered", "reserved")
+# claim-bound kinds that follow the claim to a new holder (see ``_moved_to``), and the claim mode each is about
+_CLAIM_MODE: Final = {
+    "exclusive_breach": "exclusive",
+    "stale_epoch_write": "exclusive",
+    "same_zone_shared": "shared",
+}
 _SHA_RE: Final = re.compile(S.SHA_PATTERN)
 
 
@@ -262,7 +271,7 @@ def _recent(session: Mapping[str, Any]) -> bool:
     """Whether a session still counts as a party: live, ended within 24 h, or lost and heard from within 24 h.
 
     A lost session is never ended while it holds a reserved baton, so "lost" alone has no bound:
-    it counts for 24 h after its last sign of life (heartbeat, call or join), like an ended one.
+    it counts for 24 h after its latest sign of life (heartbeat or call, else its join), like an ended one.
     """
     if session["state"] in S.LIVE_PRESENCE_STATES:
         return True
@@ -272,9 +281,22 @@ def _recent(session: Mapping[str, Any]) -> bool:
     if not ended:
         if session["state"] != "lost":
             return False
-        ended = session.get("last_heartbeat_at") or session.get("last_seen_at") or session.get("joined_at")
-        if not ended:
-            return False
+        # the later of its last heartbeat and last call (a call can advance last_seen_at without a
+        # heartbeat); the join time only when it was never heard from afterwards
+        signs = []
+        for key in ("last_heartbeat_at", "last_seen_at"):
+            if not session.get(key):
+                continue
+            try:
+                signs.append(parse_iso(str(session[key])))
+            except ValueError:
+                continue
+        if not signs and session.get("joined_at"):
+            try:
+                signs.append(parse_iso(str(session["joined_at"])))
+            except ValueError:
+                pass
+        return bool(signs) and max(signs) >= utcnow() - MATCH_ENDED_WITHIN
     try:
         return bool(parse_iso(str(ended)) >= utcnow() - MATCH_ENDED_WITHIN)
     except ValueError:
@@ -650,9 +672,51 @@ async def _resolve_gone(tx: EventTx, crew_id: str, rows: Sequence[Mapping[str, A
             continue
         seen.add(str(r["id"]))
         if not await _still_overlapping(tx.conn, crew_id, r):
+            moved = await _moved_to(tx.conn, crew_id, r)
             await _close(tx, crew_id, r, "resolved", "auto", "system", Actor.system())
             done.append(str(r["id"]))
+            if moved is not None:
+                # the zone changed hands while the write still stands: the same collision, now with the new holder
+                await open_collision(
+                    CrewOps(tx._log),
+                    tx,
+                    crew_id,
+                    kind=str(r["kind"]),
+                    subject=str(r["subject"]),
+                    session_a=r.get("session_a"),
+                    session_b=moved.get("holder_session_id"),
+                    attribution=r.get("attribution"),
+                    zone_id=r.get("zone_id"),
+                    claim_id=r.get("claim_id"),
+                    evidence={**evidence(r), "holder_kind": moved["holder_kind"], "moved_from": r.get("session_b")},
+                )
     return done
+
+
+async def _moved_to(conn: aiosqlite.Connection, crew_id: str, row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The live claim of a closing collision when it now has a third holder and the collision still holds against it.
+
+    A row names the holder it opened against. When the zone is handed to someone else (a baton
+    adopted by a third session) the row no longer describes the overlap, but a write that is
+    still inside that zone is as much a breach against the new holder: the caller closes the
+    row and opens the same kind against the claim's current holder. None when the claim ended,
+    is the writer's own, did not move, or the overlap is gone for another reason.
+    """
+    if not row.get("claim_id") or not row.get("session_a") or row["kind"] not in _CLAIM_MODE:
+        return None  # an unattributed_change notice (no writer) does not follow the zone: it was for the holder then
+    claim = await fetchone(conn, "SELECT * FROM crew_claims WHERE id = ?", (row["claim_id"],))
+    if claim is None or claim["state"] not in LIVE_CLAIM_STATES or claim["mode"] != _CLAIM_MODE[row["kind"]]:
+        return None
+    if claim["mode"] == "shared" and claim["state"] == "reserved":
+        return None  # a reserved shared claim does not open same_zone_shared either (_detect)
+    holder = claim.get("holder_session_id")
+    if holder == row.get("session_b") or (holder is not None and holder == row.get("session_a")):
+        return None
+    if row["kind"] == "stale_epoch_write" and row.get("session_b") is None:
+        return None  # the writer's own fenced write: about its own claim, not about a holder
+    if not await _still_overlapping(conn, crew_id, {**row, "session_b": holder}):
+        return None
+    return claim
 
 
 async def sweep(log: CrewEventLog, cursors: MutableMapping[str, str]) -> int:
@@ -723,9 +787,11 @@ async def _live_fp(conn: aiosqlite.Connection, crew_id: str, session_id: str | N
 async def _claim_stands(conn: aiosqlite.Connection, row: Mapping[str, Any]) -> bool:
     """Whether the claim a collision is about is still live and still held as it was when the row opened.
 
-    The row closes when the claim ended, when the writer itself now holds it (it adopted or was
-    handed the zone it had written into), or when the zone moved to someone other than the
-    holder the row names. A writer's own fenced write (no other party) stays while its claim does.
+    False when the claim ended, when the writer itself now holds it (it adopted or was handed
+    the zone it had written into), or when the zone moved to someone other than the holder the
+    row names. In that last case the overlap is not over: ``_resolve_gone`` closes this row and
+    opens the same collision against the new holder (``_moved_to``). A writer's own fenced write
+    (no other party) stays while its claim does.
     """
     claim = await fetchone(conn, "SELECT state, holder_session_id FROM crew_claims WHERE id = ?", (row["claim_id"],))
     if claim is None or claim["state"] not in LIVE_CLAIM_STATES:
@@ -777,7 +843,15 @@ def checkpoint_shas(facts: Mapping[str, Any] | None) -> list[str]:
 
 
 async def _crew_commit(conn: aiosqlite.Connection, crew_id: str, sha: str) -> bool:
-    """Whether a crew session already reported ``sha`` as its own (a committed footprint or a checkpoint)."""
+    """Whether a crew session already reported ``sha`` (a footprint's ``last_commit`` or any checkpoint's ``commits``).
+
+    The same rule as :func:`resolve_attributed_commits`, so the order in which the checkpoint
+    and crewd's commit scan arrive does not matter. A checkpoint of any trigger counts: crewd
+    sends the checkout's new commits with its ``turn`` checkpoints. Those are every commit made
+    in that session's checkout since its last checkpoint, so a human's commit made inside a live
+    agent session's own checkout is taken for the session's (accepted: the notice exists for
+    changes from outside the crew's checkouts).
+    """
     row = await fetchone(
         conn,
         "SELECT 1 FROM crew_footprints WHERE crew_id = ? AND last_commit IS NOT NULL AND length(last_commit) >= 7"
@@ -788,9 +862,9 @@ async def _crew_commit(conn: aiosqlite.Connection, crew_id: str, sha: str) -> bo
         return True
     for ckp in await fetchall(
         conn,
-        "SELECT facts FROM crew_checkpoints WHERE crew_id = ? AND trigger = 'commit' AND facts IS NOT NULL"
-        " ORDER BY created_at DESC LIMIT 100",
-        (crew_id,),
+        "SELECT facts FROM (SELECT facts FROM crew_checkpoints WHERE crew_id = ? AND facts IS NOT NULL"
+        " ORDER BY created_at DESC LIMIT ?) WHERE facts LIKE ?",
+        (crew_id, COMMIT_LOOKBACK_CHECKPOINTS, f"%{sha[:7]}%"),  # a matching id shares its first 7 characters
     ):
         if any(_same_commit(sha, known) for known in checkpoint_shas(loads(ckp["facts"], {}))):
             return True
@@ -798,11 +872,12 @@ async def _crew_commit(conn: aiosqlite.Connection, crew_id: str, sha: str) -> bo
 
 
 async def resolve_attributed_commits(tx: EventTx, crew_id: str, shas: Sequence[Any]) -> list[str]:
-    """Close ``unattributed_change`` notices about commits a crew session has now reported as its own.
+    """Close ``unattributed_change`` notices about commits a crew session has now reported.
 
     crewd reports a commit without a crew trailer the moment it sees it; an agent that committed
     through its shell names the commit afterwards (footprint ``last_commit`` or checkpoint
-    ``commits``). The notice was about that commit, so it closes.
+    ``commits``, any trigger). The notice was about that commit, so it closes. See
+    :func:`_crew_commit` for the open-time side of the same rule and its trade-off.
     """
     known = [s for s in (_sha(v) for v in shas) if s]
     if not known:
@@ -827,8 +902,8 @@ async def record_unattributed_change(
     """A commit with no crew trailer (probably a human at a terminal) that touches a held zone: a notice.
 
     One notice per held claim for the commit (its first file is the subject, the others are in
-    the evidence), not one per file. A commit a crew session already reported as its own is
-    that session's, not a human's, and raises nothing.
+    the evidence), not one per file. A commit a crew session already reported (``_crew_commit``)
+    is that session's, not a human's, and raises nothing.
     """
     idx = await zone_index(tx.conn, crew_id)
     by_claim: dict[str, tuple[dict[str, Any], list[str]]] = {}

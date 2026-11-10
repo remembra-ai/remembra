@@ -213,3 +213,50 @@ def test_when_the_session_list_cannot_be_read_every_row_is_shown(live, clock, ol
     out = call("crew_checkpoint", files_changed=[], summary="blind")
     # not knowing who is live is no reason to hide an overlap: the reply is what it was before
     assert "COLLISIONS (1):" in out and "same_file [medium] on src/lib/money.ts" in out and STOP in out, out
+
+
+def _third_holder(live: LiveServer, project: str) -> tuple[Any, str]:
+    third = agent(live, "claude-code", f"{project}-c", project)
+    use(third)
+    return third, callsign_in(call("crew_status", project_id=project))
+
+
+def _breach_then_zone_moves_to_a_third_session(live: LiveServer, prefix: str) -> tuple[str, str, str]:
+    project, a, a_sign, b, b_sign = _two_agents(live, prefix)
+    use(a)
+    assert "GRANTED" in call("crew_claim", action="claim", zone="pos")
+    use(b)
+    out = call("crew_checkpoint", files_changed=["src/app/pos/cart.ts"], summary="wrote in a's zone")
+    assert f"exclusive_breach [high] on src/app/pos/cart.ts (zone pos) with {a_sign}" in out, out
+    _, c_sign = _third_holder(live, project)
+    c_id = session_row(live, project, c_sign)["id"]
+    _sql(
+        live,
+        "UPDATE crew_claims SET holder_session_id = ?, epoch = epoch + 1 WHERE crew_id = ?",
+        (c_id, crew_id_of(live, project)),
+    )
+    use(b)
+    return project, a_sign, c_sign
+
+
+def test_old_server_breach_of_a_zone_that_moved_to_a_third_session_is_still_a_stop_order(live, clock, old_server):
+    project, a_sign, c_sign = _breach_then_zone_moves_to_a_third_session(live, "thirdold")
+    out = call("crew_checkpoint", files_changed=[], summary="still dirty")
+    # the old server keeps the row against a; the zone is c's now, and it is still not the writer's to edit
+    assert "COLLISIONS (1):" in out and "older" not in out, out
+    assert f"exclusive_breach [high] on src/app/pos/cart.ts (zone pos) with {c_sign}" in out, out
+    assert f"{STOP}. Tell @{c_sign} or @mani with crew_say." in out and a_sign not in out.split("COLLISIONS (1):")[1], out
+    assert_clean(out)
+
+
+def test_fixed_server_reopens_the_breach_against_the_third_session(live, clock):
+    project, a_sign, c_sign = _breach_then_zone_moves_to_a_third_session(live, "thirdnew")
+    out = call("crew_checkpoint", files_changed=[], summary="still dirty")
+    assert "COLLISIONS (1):" in out and "older" not in out, out
+    assert f"exclusive_breach [high] on src/app/pos/cart.ts (zone pos) with {c_sign}" in out, out
+    assert f"{STOP}. Tell @{c_sign} or @mani with crew_say." in out, out
+    rows = live.crew_rows(
+        "SELECT kind, session_b FROM crew_collisions WHERE crew_id = ? AND state IN ('open','acknowledged')",
+        (crew_id_of(live, project),),
+    )
+    assert rows == [{"kind": "exclusive_breach", "session_b": session_row(live, project, c_sign)["id"]}]
