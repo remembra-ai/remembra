@@ -45,6 +45,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
+from remembra.crew.schemas import CREW_HOME_REL, CREW_HOOK_MARKER
 from remembra.marshal import codex_hooks, words
 from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY, Adapter
@@ -66,6 +67,11 @@ STALE_CHECKPOINT_MINUTES = 60
 
 _AGENT_LABEL_RE = re.compile(r"[^a-z0-9._-]+")
 _RELAY_CMD_RE = re.compile(r"^(?P<prefix>.+?) (?:brief|close) --hook (?P<hook>[\w.-]+) --agent \S+(?: --once)?$")
+# A crew hook that runs the relay brief or close itself: "<remembra-crew> start|stall|end --hook A --agent A # remembra-crew".
+_CREW_CLI_RE = re.compile(
+    r"^(?P<prefix>.+?) (?P<verb>start|stall|end) --hook (?P<hook>[\w.-]+) --agent \S+ " + re.escape(CREW_HOOK_MARKER) + "$"
+)
+_CREW_HOOK_RE = re.compile(r" --hook (?P<hook>[\w.-]+)(?: --agent \S+)? " + re.escape(CREW_HOOK_MARKER) + "$")
 _HTTP_STATUS_RE = re.compile(r"HTTP (\d{3})")
 _RAY_RE = re.compile(r"Ray ID:?\s*(?:<[^>]*>\s*)*([0-9a-f]{16})", re.I)
 _TRUE = frozenset({"1", "true", "yes", "on"})
@@ -254,9 +260,33 @@ class AgentSignals:
     detach_close: bool
     notes: str
     setup_note: str
+    # Crew mode (remembra-crew connect): its start / stall / end hooks run the relay brief and close themselves,
+    # and crew connect takes the relay's own entries out. ``present_events`` counts an event either kind covers.
+    crew_events: tuple[str, ...] = ()  # expected events a crew start / stall / end hook is on
+    relay_events: tuple[str, ...] = ()  # expected events a remembra-relay hook is on
+    crew_hooks: int = 0  # this agent's crew hooks in the file, gate hooks included
+    crew_gate: bool = True  # ~/.remembra/crew/bin/crew-gate.py exists (without it every gate hook does nothing)
+    crew_missing_binary: str | None = None  # the crew start / end hooks call this, and it no longer exists
+    crew_backup: str | None = None  # a *.bak-crew-* next to the config: remembra-crew connect wrote here once
+
+    @property
+    def crew_mode(self) -> bool:
+        """Crew hooks run this agent's brief and close: a crew start hook and a crew end hook are written."""
+        return bool(self.core_events) and set(self.core_events) <= set(self.crew_events)
+
+    @property
+    def hook_mode(self) -> str:
+        """Who runs the brief and the close: ``crew``, ``relay``, ``crew-partial`` (crew hooks, not both) or ``none``."""
+        if self.crew_mode:
+            return "crew"
+        if self.relay_events:
+            return "relay"
+        return "crew-partial" if self.crew_hooks else "none"
 
     @property
     def hooks_written(self) -> bool:
+        if self.crew_mode:
+            return True
         return bool(self.expected_events) and set(self.expected_events) <= set(self.present_events)
 
     @property
@@ -265,11 +295,25 @@ class AgentSignals:
 
     @property
     def any_hooks(self) -> bool:
-        return bool(self.present_events)
+        return bool(self.present_events) or self.crew_hooks > 0
 
     @property
     def missing_events(self) -> tuple[str, ...]:
+        if self.crew_mode:  # crew connect leaves these out on purpose: see crew_gap_events
+            return ()
         return tuple(e for e in self.expected_events if e not in self.present_events)
+
+    @property
+    def crew_gap_events(self) -> tuple[str, ...]:
+        """In crew mode: the relay's events that neither a crew start / stall / end hook nor a relay hook covers."""
+        if not self.crew_mode:
+            return ()
+        return tuple(e for e in self.expected_events if e not in self.present_events)
+
+    @property
+    def duplicated_events(self) -> tuple[str, ...]:
+        """Events with both a relay hook and a crew hook that runs the same brief or close: it runs twice."""
+        return tuple(e for e in self.expected_events if e in self.relay_events and e in self.crew_events)
 
 
 @dataclass(frozen=True)
@@ -416,6 +460,51 @@ def _relay_events(data: Any, toml_hooks: bool) -> dict[str, list[str]]:
     return events
 
 
+def _hook_commands(data: Any, toml_hooks: bool) -> list[tuple[str, str]]:
+    """Every ``(event, command)`` in a hook file, for the three config shapes the adapters write."""
+    found: list[tuple[str, str]] = []
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if toml_hooks:  # Kimi: [[hooks]] tables with event / command
+        for table in hooks if isinstance(hooks, list) else []:
+            if isinstance(table, dict) and isinstance(table.get("command"), str):
+                found.append((str(table.get("event")), table["command"]))
+        return found
+    if not isinstance(hooks, dict):
+        return found
+    for event, entries in hooks.items():
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            inner = entry.get("hooks")
+            if isinstance(inner, list):
+                commands = [h.get("command") for h in inner if isinstance(h, dict)]
+            else:
+                commands = [entry.get("command")]
+            found.extend((str(event), c) for c in commands if isinstance(c, str))
+    return found
+
+
+def _crew_hooks(data: Any, toml_hooks: bool, name: str) -> tuple[int, dict[str, list[str]], str | None]:
+    """``name``'s crew hooks in a hook file: how many, the events its start / stall / end hooks are on (with the
+    verbs), and the command those run before the verb (for the missing-command check; never shown whole)."""
+    count = 0
+    events: dict[str, list[str]] = {}
+    prefixes: dict[str, int] = {}
+    for event, command in _hook_commands(data, toml_hooks):
+        text = command.strip()
+        if CREW_HOOK_MARKER not in text:
+            continue
+        tagged = _CREW_HOOK_RE.search(text)
+        if tagged is None or tagged.group("hook") != name:
+            continue
+        count += 1
+        cli = _CREW_CLI_RE.match(text)
+        if cli is not None:
+            events.setdefault(event, []).append(cli.group("verb"))
+            prefixes[cli.group("prefix")] = prefixes.get(cli.group("prefix"), 0) + 1
+    return count, events, (max(prefixes, key=lambda p: prefixes[p]) if prefixes else None)
+
+
 def _prefix(commands: list[str], name: str) -> str | None:
     counts: dict[str, int] = {}
     for command in commands:
@@ -437,9 +526,9 @@ def _missing_binary(prefix: str | None) -> str | None:
     return None
 
 
-def _backup(path: Path) -> str | None:
+def _backup(path: Path, label: str = "relay") -> str | None:
     try:
-        found = sorted(path.parent.glob(f"{path.name}.bak-relay-*"))
+        found = sorted(path.parent.glob(f"{path.name}.bak-{label}-*"))
     except OSError:
         return None
     return found[-1].name if found else None
@@ -500,10 +589,14 @@ def _agent_signals(
     path = config_file(adapter, home)
     text, readable = _read_text(path)
     events: dict[str, list[str]] = {}
+    crew_count: int = 0
+    crew_cli: dict[str, list[str]] = {}
+    crew_prefix: str | None = None
     if text is not None:
         try:
             data = tomllib.loads(text) if path.suffix == ".toml" else (json.loads(text) if text.strip() else {})
             events = _relay_events(data, toml_hooks=path.suffix == ".toml")
+            crew_count, crew_cli, crew_prefix = _crew_hooks(data, path.suffix == ".toml", name)
         except ValueError:
             readable = False
     expected = tuple(event for _, event in adapter.events())
@@ -530,7 +623,7 @@ def _agent_signals(
         config_path=tilde(path, home),
         config_readable=readable,
         expected_events=expected,
-        present_events=tuple(e for e in expected if e in events),
+        present_events=tuple(e for e in expected if e in events or e in crew_cli),
         core_events=core,
         outdated=outdated,
         relay_prefix=prefix,
@@ -545,6 +638,12 @@ def _agent_signals(
         detach_close=spec.detach_close,
         notes=spec.notes,
         setup_note=spec.setup_note,
+        crew_events=tuple(e for e in expected if e in crew_cli),
+        relay_events=tuple(e for e in expected if e in events),
+        crew_hooks=crew_count,
+        crew_gate=(home / CREW_HOME_REL / "bin" / "crew-gate.py").is_file(),
+        crew_missing_binary=clean_text(gone, 120) if (gone := _missing_binary(crew_prefix)) else None,
+        crew_backup=_backup(path, "crew"),
     )
 
 
@@ -1190,7 +1289,8 @@ def collect(
     # Codex: trust and automation runs.
     codex_agent = agent_signals.get("codex")
     trust = (
-        codex_hooks.read_trust(home, hooks_path=config_file(REGISTRY["codex"], home))
+        # In crew mode the crew hooks are the ones Codex must trust.
+        codex_hooks.read_trust(home, hooks_path=config_file(REGISTRY["codex"], home), include_crew=codex_agent.crew_hooks > 0)
         if codex_agent and codex_agent.any_hooks
         else None
     )

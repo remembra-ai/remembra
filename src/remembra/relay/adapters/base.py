@@ -282,6 +282,24 @@ def is_relay_command(command: Any) -> bool:
     return any(marker in command for marker in RELAY_MARKERS) or bool(_RELAY_ARGS_RE.search(command.strip()))
 
 
+def crew_hooks_in(text: str | None, adapter: str) -> bool:
+    """True when ``text`` (an agent's hook file) holds ``adapter``'s crew hooks, written by ``remembra-crew connect``.
+
+    Crew ``start`` / ``end`` run the relay brief and close themselves, and crew connect takes the relay's own
+    entries out of the file. Such a file is crew's to manage: a relay hook written next to a crew hook would run
+    the brief or the close twice, until the next crew connect removed it again.
+    """
+    if not text or CREW_HOOK_MARKER not in text:
+        return False
+    return bool(re.search(rf"--hook {re.escape(adapter)}(?: --agent [\w.-]+)? {re.escape(CREW_HOOK_MARKER)}", text))
+
+
+CREW_OWNS_FILE = (
+    "crew hooks are in this file: remembra-crew start / end run the brief and the close, so no relay hook is"
+    " written next to them (remembra-crew connect manages this file)"
+)
+
+
 def _backup(path: Path, stamp: str, label: str) -> Path:
     """Copy ``path`` next to itself, owner-only (it may hold a key), never over an older backup."""
     backup = path.with_name(f"{path.name}.bak-{label}-{stamp}")
@@ -400,6 +418,9 @@ class Adapter:
 
     def plan_file(self, path: Path, relay: str) -> Change:
         before = path.read_text(encoding="utf-8") if path.exists() else None
+        if before is not None and crew_hooks_in(before, self.spec.name):
+            # Crew mode: nothing to write, and the reason (connect prints it; the doctor reads `changed`).
+            return Change(path=path, before=before, after=before, summary=[CREW_OWNS_FILE])
         after, summary = self.render(before, relay)
         return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary))
 

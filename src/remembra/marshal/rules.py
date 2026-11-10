@@ -576,8 +576,122 @@ def _connect_fix(agent: AgentSignals) -> Fix:
     )
 
 
+def _crew_unverified(name: str) -> bool:
+    from remembra.relay.adapters.crew_hooks import crew_specs
+
+    spec = crew_specs().get(name)
+    return spec is not None and not spec.verified
+
+
+def _crew_connect_fix(agent: AgentSignals) -> Fix:
+    """The fix for a hook file crew connect manages: it shows its plan and asks at a terminal before writing."""
+    return Fix(
+        kind="command",
+        text="Let crew connect rewrite the hooks (it shows its plan and asks; a backup of the file is kept):",
+        command=cmd.crew_connect([agent.name], unverified=_crew_unverified(agent.name)),
+        runs_where="user_terminal",
+        writes=(agent.config_path,),
+        backup=True,
+    )
+
+
+def _hooks_fix(agent: AgentSignals) -> Fix:
+    """Who writes this agent's hook file: crew connect once it holds crew hooks, else the relay's connect."""
+    return _crew_connect_fix(agent) if agent.crew_hooks else _connect_fix(agent)
+
+
+def _crew_findings(agent: AgentSignals) -> list[Finding]:
+    """An agent in crew mode: its crew start / end hooks run the brief and the close, so the hooks are written."""
+    name = agent.name
+    out: list[Finding] = []
+    if agent.crew_missing_binary:
+        out.append(
+            Finding(
+                "HOOKS_STALE_COMMAND",
+                BLOCKER,
+                name,
+                f"{agent.display}: its crew hooks call {agent.crew_missing_binary}, which no longer exists;"
+                " the start and end hooks fail, so it gets no brief and leaves no handoff.",
+                (  # only the missing path: the rest of a hook command is never shown
+                    f"{agent.config_path}: the remembra-crew hooks call {agent.crew_missing_binary}",
+                    f"{agent.crew_missing_binary}: no such file",
+                ),
+                fix=_crew_connect_fix(agent),
+                then=cmd.doctor(name),
+                doc=DOC_SETUP,
+                caveat="Codex asks for trust again after its hooks change." if name == "codex" else None,
+            )
+        )
+    doubled = agent.duplicated_events
+    if doubled:
+        events = ", ".join(doubled)
+        out.append(
+            Finding(
+                "HOOKS_DUPLICATED",
+                WARN,
+                name,
+                f"{agent.display}: {events} {'has' if len(doubled) == 1 else 'have'} a relay hook and a crew hook,"
+                " so the brief or the close runs twice there.",
+                (
+                    f"{agent.config_path}: remembra-relay and remembra-crew hooks on {events}",
+                    "remembra-crew start / end run the relay brief and close themselves",
+                ),
+                fix=_crew_connect_fix(agent),
+                then=cmd.doctor(name),
+                doc=DOC_SETUP,
+                caveat="Codex asks for trust again after its hooks change." if name == "codex" else None,
+            )
+        )
+    gaps = agent.crew_gap_events
+    if gaps:
+        events = " and ".join(gaps)
+        out.append(
+            Finding(
+                "CREW_RELAY_GAP",
+                INFO,
+                name,
+                f"{agent.display}: in crew mode nothing runs the relay's {events} hook for a session outside a crew;"
+                " the brief at the start and the close at the end still run.",
+                (
+                    f"{agent.config_path}: remembra-crew hooks run the brief and close on {', '.join(agent.crew_events)}",
+                    f"{agent.config_path}: no relay hook on {', '.join(gaps)}",
+                ),
+                fix=Fix(
+                    kind="none",
+                    text="Nothing to change here: crew connect takes those relay hooks out, and its own hook on"
+                    f" {events} acts only in a crew session.",
+                    runs_where="none",
+                ),
+            )
+        )
+    return out
+
+
 def rule_hooks(sig: Signals) -> list[Finding]:
     out: list[Finding] = []
+    crewed = [sig.agents[n] for n in scope(sig) if sig.agents[n].crew_hooks and sig.agents[n].config_readable]
+    gate_missing = [a for a in crewed if not a.crew_gate]
+    if gate_missing:
+        files = ", ".join(a.config_path for a in gate_missing)
+        out.append(
+            Finding(
+                "CREW_GATE_MISSING",
+                WARN,
+                None,
+                "Crew hooks are written, but the gate they run is missing: every gate hook does nothing,"
+                " so no claim or DO NOT TOUCH zone is checked.",
+                ("~/.remembra/crew/bin/crew-gate.py: no such file", f"remembra-crew hooks in {files}"),
+                fix=Fix(
+                    kind="command",
+                    text="Let crew connect put the gate back (it shows its plan and asks before it writes):",
+                    command=cmd.crew_connect(unverified=any(_crew_unverified(a.name) for a in gate_missing)),
+                    runs_where="user_terminal",
+                    writes=("~/.remembra/crew/bin/crew-gate.py",),
+                ),
+                then=cmd.doctor(),
+                doc=DOC_SETUP,
+            )
+        )
     for name in scope(sig):
         agent = sig.agents[name]
         if not _in_play(agent, sig):
@@ -613,6 +727,28 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                 )
             )
             continue
+        if agent.crew_mode:
+            out.extend(_crew_findings(agent))
+            continue
+        if not agent.core_written and agent.crew_hooks:
+            # Some crew hooks, but not both a start and an end hook: crew connect wrote the file, and repairs it.
+            uncovered = [e for e in agent.core_events if e not in agent.present_events]
+            out.append(
+                Finding(
+                    "HOOKS_NOT_WRITTEN",
+                    BLOCKER,
+                    name,
+                    f"{agent.display}: its crew hooks are incomplete, so it gets no brief or leaves no handoff.",
+                    (
+                        f"{agent.config_path}: {words.plural(agent.crew_hooks, 'remembra-crew hook')},"
+                        f" none that runs the brief or the close on {', '.join(uncovered)}",
+                    ),
+                    fix=_crew_connect_fix(agent),
+                    then=cmd.doctor(name),
+                    doc=DOC_SETUP,
+                )
+            )
+            continue
         if not agent.core_written:
             evidence = [
                 f"{agent.config_path}: "
@@ -622,9 +758,13 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                 evidence.append(f"{agent.mcp_path}: remembra MCP server set up (remembra-install ran)")
             if agent.backup:
                 evidence.append(f"{agent.backup}: connect --apply wrote here once; the hooks were removed since")
+            elif agent.crew_backup:
+                evidence.append(f"{agent.crew_backup}: remembra-crew connect wrote here once; its hooks were removed since")
             elif not agent.any_hooks and agent.verified:
+                # No backup says only that connect never rewrote a file that was already here: it keeps none of
+                # a file it creates, so this is never proof that it "never wrote" the hooks.
                 evidence.append(
-                    "no *.bak-relay-* backup here: connect --apply never wrote this file (dry run only, or never run)"
+                    "no *.bak-relay-* backup here: connect --apply has not rewritten this file (dry run only, or never run)"
                 )
             elif not agent.any_hooks:
                 # connect --apply skips an unverified adapter on purpose: no backup says nothing about a dry run.
@@ -671,7 +811,7 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                         f"{agent.config_path}: the relay hooks call {agent.missing_binary}",
                         f"{agent.missing_binary}: no such file",
                     ),
-                    fix=_connect_fix(agent),
+                    fix=_hooks_fix(agent),
                     then=cmd.doctor(name),
                     doc=DOC_SETUP,
                     caveat="Codex asks for trust again after its hooks change." if name == "codex" else None,
@@ -691,7 +831,7 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                     name,
                     what,
                     (f"{agent.config_path}: remembra-relay hooks on {', '.join(agent.present_events)}",),
-                    fix=_connect_fix(agent),
+                    fix=_hooks_fix(agent),
                     then=cmd.doctor(name),
                     doc=DOC_SETUP,
                     caveat="Codex asks for trust again after its hooks change." if name == "codex" else None,
@@ -716,7 +856,8 @@ def rule_codex_trust(sig: Signals) -> list[Finding]:
     agent = sig.agents["codex"]
     if not agent.core_written or agent.missing_binary:
         return []
-    hooks_line = f"{agent.config_path}: {len(trust.relay_hooks)} remembra-relay hooks"
+    kind = "remembra-crew" if agent.crew_mode else "remembra-relay"
+    hooks_line = f"{agent.config_path}: {len(trust.relay_hooks)} {kind} hooks"
     config = agent.config_path.replace("hooks.json", "config.toml")
     if trust.config_state == "unreadable":
         return [
@@ -1153,6 +1294,9 @@ RULE_IDS: tuple[str, ...] = (
     "HOOKS_NOT_FIRING",
     "STALE_CHECKPOINT",
 )
+
+# Findings only a machine in crew mode (remembra-crew connect) can have; documented in the same guide.
+CREW_RULE_IDS: tuple[str, ...] = ("HOOKS_DUPLICATED", "CREW_GATE_MISSING", "CREW_RELAY_GAP")
 
 
 def evaluate(sig: Signals) -> list[Finding]:

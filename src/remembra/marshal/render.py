@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from remembra.marshal import RULESET_VERSION, codex_hooks
+from remembra.marshal import commands as cmd
 from remembra.marshal.rules import Finding, age, scope
 from remembra.marshal.signals import AgentSignals, Signals, clean_text, slot_ts
 
@@ -39,6 +40,9 @@ RUNS_WHERE = {
     "dashboard": "done in the dashboard; Marshal can't do it",
     "none": "",
 }
+# remembra-crew connect involves no key: it runs in the user's own terminal because it asks there before it writes.
+CREW_TERMINAL = "run it yourself in your own terminal: it asks you to confirm before it writes"
+MCP_ONLY_MAX = 6
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,8 @@ def _trust_word(sig: Signals) -> str | None:
 def hooks_word(agent: AgentSignals) -> str:
     if not agent.config_readable:
         return "config unreadable"
+    if agent.crew_mode:  # remembra-crew start / end run the brief and the close
+        return "hooks call a missing command" if agent.crew_missing_binary else "crew hooks written"
     if not agent.any_hooks:
         # connect --apply leaves an unverified adapter out unless asked: left out, not missing.
         return "hooks NOT written" if agent.verified else "hooks left out"
@@ -153,10 +159,35 @@ def _active(sig: Signals, agent: AgentSignals) -> bool:
     return at is not None and sig.now - at < 7 * 86400
 
 
+def failure_superseded(sig: Signals, agent: AgentSignals) -> bool:
+    """True when something newer than the recorded failure shows the same command worked.
+
+    ``status.json`` keeps the last failure until another one replaces it, so a failure from days ago stayed on
+    the slip beside a success from minutes ago. It is outlived by a later success of the same command, or, for
+    a close, by the agent's handoff reaching the trail after it (what ``rule_close_failing`` counts too).
+    A failure with no time, or with nothing newer, is still shown.
+    """
+    failure, success = agent.last_failure, agent.last_success
+    failed_at = slot_ts(failure)
+    if not isinstance(failure, dict) or failed_at is None:
+        return False
+    command = str(failure.get("command") or "")
+    if not command:
+        return False
+    worked_at = slot_ts(success)
+    if isinstance(success, dict) and str(success.get("command") or "") == command and worked_at is not None:
+        if worked_at > failed_at:
+            return True
+    if command.startswith("close") and sig.server is not None:
+        return sig.server.handoff_since(agent.name, failed_at) is not None
+    return False
+
+
 def _local_line(sig: Signals, agent: AgentSignals) -> str | None:
     parts = []
+    superseded = failure_superseded(sig, agent)
     for slot, word in ((agent.last_success, "ok"), (agent.last_failure, "failed")):
-        if not isinstance(slot, dict):
+        if not isinstance(slot, dict) or (word == "failed" and superseded):
             continue
         at = slot_ts(slot)
         when = age(sig.now - at) if at is not None else "at an unknown time"
@@ -215,6 +246,8 @@ def _finding_block(slip: _Slip, finding: Finding, indent: list[Segment]) -> None
             command_indent = pad if lead + len(pad) + len(fix.command) <= WIDTH else "  "
             slip.add([*hang, (command_indent, None), (fix.command, "signal")])
             where = RUNS_WHERE.get(fix.runs_where, "")
+            if fix.runs_where == "user_terminal" and fix.command.startswith("remembra-crew "):
+                where = CREW_TERMINAL
             if fix.writes:
                 where += ("; " if where else "") + "writes " + ", ".join(fix.writes)
             if where:
@@ -301,6 +334,25 @@ def render_text(sig: Signals, findings: list[Finding], style: Style | None = Non
         for finding in own:
             _finding_block(slip, finding, rail_indent)
 
+    for name, entries in mcp_only_agents(sig):
+        # On the trail, with no hook file of its own here (Claude Desktop, say): it is not skipped, there is
+        # nothing on this machine to check for it.
+        slip.add([slip.rail()])
+        said = f"MCP only {g['dot']} no hooks to check {g['dot']} {entries} entr{'y' if entries == 1 else 'ies'} in 7d"
+        station: list[Segment] = [(f"  {g['active']} ", None), (f"{name:<12} ", "bold")]
+        slip.wrapped(station, [slip.rail(), ("              ", None)], said, "dim")
+
+    if any(sig.agents[n].crew_hooks for n in scope(sig)):
+        # The doctor reads the hook files; the crew runtime has its own read-only check.
+        slip.add([slip.rail()])
+        slip.wrapped(
+            [("  ", None), ("crew  ", "dim")],
+            [("        ", None)],
+            "crew hooks are written here. The gate, crewd and each session's claims are checked by:",
+            "dim",
+        )
+        slip.add([("        ", None), (cmd.CREW_DOCTOR, "signal")])
+
     slip.add([slip.rail()])
     todo = sum(1 for f in findings if f.to_do)
     watch = sum(1 for f in findings if f.actionable and not f.to_do)
@@ -314,6 +366,15 @@ def render_text(sig: Signals, findings: list[Finding], style: Style | None = Non
     footer = f"Built by rules in remembra {sig.version} from {sources}. No model wrote this. {FOOTER_END}"
     slip.wrapped([("  ", None)], [("  ", None)], footer, "dim")
     return slip.text() + "\n"
+
+
+def mcp_only_agents(sig: Signals) -> list[tuple[str, int]]:
+    """Agents with entries on the trail in 7 days and no adapter here: they use the MCP tools, not hooks."""
+    if sig.server is None or sig.wanted:
+        return []
+    seen = sig.server.entries_7d
+    names = sorted((n for n in seen if n not in sig.agents and seen[n] > 0), key=lambda n: (-seen[n], n))
+    return [(clean_text(n, 24), seen[n]) for n in names[:MCP_ONLY_MAX]]
 
 
 def _slot(slot: Any) -> dict[str, Any] | None:
@@ -339,8 +400,20 @@ def render_json(sig: Signals, findings: list[Finding], exit_code: int) -> dict[s
             "hooks": {
                 "state": hooks_word(agent),
                 "config_path": agent.config_path,
+                "mode": agent.hook_mode,
                 "present": list(agent.present_events),
                 "missing": list(agent.missing_events),
+                "crew": {
+                    "hooks": agent.crew_hooks,
+                    "events": list(agent.crew_events),
+                    "not_covered": list(agent.crew_gap_events),
+                    "duplicated": list(agent.duplicated_events),
+                    "gate": agent.crew_gate,
+                    "backup_from_connect": agent.crew_backup,
+                    "missing_command": agent.crew_missing_binary,
+                }
+                if agent.crew_hooks or agent.crew_backup
+                else None,
                 "backup_from_connect": agent.backup,
                 "missing_command": agent.missing_binary,
             },
@@ -348,6 +421,7 @@ def render_json(sig: Signals, findings: list[Finding], exit_code: int) -> dict[s
             "mcp": {"state": agent.mcp, "config_path": agent.mcp_path, "project": agent.mcp_project},
             "last_success": _slot(agent.last_success),
             "last_failure": _slot(agent.last_failure),
+            "last_failure_superseded": failure_superseded(sig, agent),
             "findings": [f.id for f in findings if f.agent == name],
         }
         if name == "codex" and sig.codex.trust is not None:
@@ -373,6 +447,7 @@ def render_json(sig: Signals, findings: list[Finding], exit_code: int) -> dict[s
         "config": dict(sig.config),
         "reads": [{"what": r.what, "result": r.result, "ms": r.ms, "ok": r.ok} for r in sig.reads],
         "agents": agents,
+        "mcp_only_agents": [{"name": name, "entries_7d": entries} for name, entries in mcp_only_agents(sig)],
         "findings": [f.as_dict() for f in findings],
         "unchecked": list(sig.unchecked),
         "things_to_do": sum(1 for f in findings if f.to_do),

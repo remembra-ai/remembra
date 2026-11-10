@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remembra.crew.schemas import CREW_HOOK_MARKER
 from remembra.relay.adapters.base import is_relay_command
 
 HASH_VERIFIED_WITH = ("0.155.0-alpha.16.4", "0.157.1")
@@ -149,8 +150,12 @@ class CodexTrust:
         return bool(self.per_hook) and all(t.status == TRUSTED for t in self.per_hook)
 
 
-def relay_hooks_in(text: str | None) -> tuple[bool, tuple[RelayHook, ...]]:
-    """``(readable, remembra-relay hooks)`` in a Codex hooks.json text (Claude-style nesting)."""
+def relay_hooks_in(text: str | None, include_crew: bool = False) -> tuple[bool, tuple[RelayHook, ...]]:
+    """``(readable, remembra-relay hooks)`` in a Codex hooks.json text (Claude-style nesting).
+
+    With ``include_crew`` the ``remembra-crew`` hooks count too: in crew mode they are the hooks Codex must
+    trust (``remembra-crew connect`` replaces the relay's entries with them), keyed and hashed the same way.
+    """
     if text is None:
         return True, ()
     try:
@@ -170,7 +175,8 @@ def relay_hooks_in(text: str | None) -> tuple[bool, tuple[RelayHook, ...]]:
                 continue
             for i, hook in enumerate(inner):
                 command = hook.get("command") if isinstance(hook, dict) else None
-                if not is_relay_command(command):
+                crew = include_crew and isinstance(command, str) and CREW_HOOK_MARKER in command
+                if not (is_relay_command(command) or crew):
                     continue
                 certain = isinstance(hook, dict) and set(hook) <= _KNOWN_FIELDS and not hook.get("commandWindows")
                 found.append(
@@ -199,9 +205,13 @@ def trust_for(
     config_path: Path,
     config_text: str | None,
     config_error: str | None = None,
+    include_crew: bool = False,
 ) -> CodexTrust:
-    """Trust of the relay hooks in ``hooks_text`` (as written, or as ``connect`` would write it)."""
-    readable, relay = relay_hooks_in(hooks_text)
+    """Trust of the relay hooks in ``hooks_text`` (as written, or as ``connect`` would write it).
+
+    ``include_crew`` adds the crew hooks (see :func:`relay_hooks_in`).
+    """
+    readable, relay = relay_hooks_in(hooks_text, include_crew)
     if config_error is not None:
         state = "unreadable"
         records: dict[str, Any] = {}
@@ -265,14 +275,22 @@ def _read(path: Path) -> tuple[str | None, str | None]:
         return None, e.__class__.__name__
 
 
-def read_trust(home: Path, hooks_text: str | None = None, *, planned: bool = False, hooks_path: Path | None = None) -> CodexTrust:
+def read_trust(
+    home: Path,
+    hooks_text: str | None = None,
+    *,
+    planned: bool = False,
+    hooks_path: Path | None = None,
+    include_crew: bool = False,
+) -> CodexTrust:
     """Trust of the relay hooks in ``hooks.json`` (or in ``hooks_text`` when ``planned``).
 
     ``hooks_path`` defaults to ``~/.codex/hooks.json``; Codex keeps ``config.toml`` next to it.
+    ``include_crew`` adds the crew hooks (see :func:`relay_hooks_in`).
     """
     hooks_path = hooks_path or Path(home) / ".codex" / "hooks.json"
     config_path = hooks_path.with_name("config.toml")
     if not planned:
         hooks_text, _ = _read(hooks_path)
     config_text, error = _read(config_path)
-    return trust_for(hooks_path, hooks_text, config_path, config_text, error)
+    return trust_for(hooks_path, hooks_text, config_path, config_text, error, include_crew)

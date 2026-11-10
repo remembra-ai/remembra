@@ -34,6 +34,7 @@ TOP_KEYS = {
     "config",
     "reads",
     "agents",
+    "mcp_only_agents",
     "findings",
     "unchecked",
     "things_to_do",
@@ -185,7 +186,11 @@ def test_a_close_fixed_before_a_brief_is_not_reported_as_failing(server: str, tm
 
     out = cli(fh, "doctor", "--agent", "claude-code", env={**env, "NO_COLOR": "1"}, cwd=repo)
     assert "last close failed" not in out.stdout and "Nothing to do." in out.stdout, out.stdout
-    assert "close failed just now (HTTP 422)" in out.stdout  # the station still shows what status.json holds
+    # A handoff from it reached the trail after the failure: the station no longer shows the failure as current
+    # (status.json still holds it, and the JSON below reports it with last_failure_superseded).
+    assert "close failed" not in out.stdout and "brief ok just now" in out.stdout, out.stdout
+    after = json.loads(cli(fh, "doctor", "--agent", "claude-code", "--format", "json", env=env, cwd=repo).stdout)["agents"][0]
+    assert after["last_failure"]["http_status"] == 422 and after["last_failure_superseded"] is True
     _check_text(out.stdout)
     # Without the trail the brief hides whether a close worked: a note, never "no close has worked since".
     offline = cli(fh, "doctor", "--agent", "claude-code", "--no-server", "--format", "json", env=env, cwd=repo)

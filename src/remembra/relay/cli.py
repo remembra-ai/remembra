@@ -1764,6 +1764,9 @@ def cmd_connect(args: argparse.Namespace) -> int:
             print(f"  note: {note}")
         if change.changed:
             _print_change(change)
+        elif change.summary:  # nothing to write, and why (crew hooks are in the file)
+            for line in change.summary:
+                print(f"  no change: {line}")
         else:
             print("  already connected, no change")
         for other, why in others:

@@ -116,6 +116,24 @@ def agent_connect(agent: str) -> str:
     return connect([agent], unverified=adapter is None or not adapter.spec.verified)
 
 
+def crew_connect(agents: Iterable[str] = (), *, unverified: bool = False) -> str:
+    """Rewrite the crew hooks (``remembra-crew connect`` shows its plan and asks at a terminal before it writes).
+
+    The fix for a machine in crew mode: crew connect replaces the relay's hook entries with ``remembra-crew
+    start`` / ``end``, so ``remembra-relay connect`` is never offered there. An unverified crew adapter is
+    only written with ``--include-unverified``.
+    """
+    parts = ["remembra-crew connect --apply"]
+    parts.extend(f"--agent {_agent(a)}" for a in agents)
+    if unverified:
+        parts.append("--include-unverified")
+    return " ".join(parts)
+
+
+# Read-only: the gate, crewd, the outbox and each session's commit gate (claims and zones: crew_status).
+CREW_DOCTOR = "remembra-crew doctor"
+
+
 def close(agent: str) -> str:
     return f"remembra-relay close --agent {_agent(agent)}"
 
@@ -157,6 +175,8 @@ ALLOWED: tuple[re.Pattern[str], ...] = (
     re.compile(r"^" + re.escape(PIPX_ENSUREPATH) + r"$"),
     re.compile(r"^remembra-install --all(?: --url https?://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?)?$"),
     re.compile(rf"^remembra-relay connect(?: --apply)?(?: --agent {_A})*(?: --include-unverified)?$"),
+    re.compile(rf"^remembra-crew connect --apply(?: --agent {_A})*(?: --include-unverified)?$"),
+    re.compile("^" + re.escape(CREW_DOCTOR) + "$"),
     re.compile(rf"^remembra-relay close --agent {_A}$"),
     re.compile(r"^remembra-relay resolve --project [A-Za-z0-9][A-Za-z0-9._-]{0,127} --bind$"),
     re.compile(r"^remembra-relay status --format json$"),
