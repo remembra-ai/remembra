@@ -160,7 +160,16 @@ async def decline_claim(request: Request, ent: CrewEntity = Depends(crew_entity(
 @router.post("/claims/{claim_id}/adopt")
 async def adopt_claim(request: Request, ent: CrewEntity = Depends(crew_entity("claim", PC))) -> Any:
     principal = await principal_for(request, ent.access)
-    _limit("adopt", request, principal)
+    me = principal.session.get("id") if principal.session is not None else None
+    # A session taking back its own reservation (C.adopt's retake branch) is no takeover: it is charged like
+    # the plain claim that does the same, not against the small adopt budget.
+    retake = (
+        me is not None
+        and ent.row.get("state") == "reserved"
+        and ent.row.get("holder_session_id") == me
+        and ent.row.get("reserved_for") in (None, me)
+    )
+    _limit("claims" if retake else "adopt", request, principal)
     body = closed(await read_body(request, required=False), {"task_id"})
     ops = await with_limits(request, crew_ops(request), ent.access.crew.owner_user_id)
     async with crew_errors():

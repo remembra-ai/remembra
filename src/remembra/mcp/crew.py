@@ -410,14 +410,37 @@ def task_ref(task: Mapping[str, Any] | None) -> str | None:
     return f"T-{number}" if isinstance(number, int) and not isinstance(number, bool) else None
 
 
+def rate_limit_text(e: CrewApiError) -> str:
+    """What a 429 said, with a long wait also in minutes; empty when it carried neither a sentence nor a wait.
+
+    The crew limiter's sentence names the kind of request, whose budget it is and the limit
+    (``Too many adopt requests for this session (6/hour). Retry in 3569s.``); it is printed as sent.
+    """
+    retry = e.body.get("retry_after_s")
+    if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
+        retry = None
+    wait = "" if retry is None else f"{retry}s" + (f" (about {round(retry / 60)} min)" if retry >= 120 else "")
+    said = (e.message or "").strip()
+    if said in ("rate_limited", e.error):  # only the error code came back
+        said = ""
+    if not said:
+        return f"retry in {wait}." if wait else ""
+    if wait:
+        plain = f"Retry in {retry}s."
+        said = f"{said[: -len(plain)]}Retry in {wait}." if said.endswith(plain) else f"{said} Retry in {wait}."
+    if e.error == "rate_limited":  # the crew limiter: one budget per kind of request
+        said += " Other kinds of crew call are not limited by this."
+    return said
+
+
 def error_text(e: CrewApiError, what: str) -> str:
     if e.status == 0:
         return f"CREW UNAVAILABLE: {e.message}"
     if e.status == 503 or e.error in ("route_missing", "crew_unavailable"):
         return "CREW UNAVAILABLE: Crew mode is not enabled on this Remembra server."
     if e.status == 429:
-        retry = e.body.get("retry_after_s")
-        return f"RATE LIMITED ({what}): retry in {retry}s." if retry is not None else f"RATE LIMITED ({what})."
+        said = rate_limit_text(e)
+        return f"RATE LIMITED ({what}): {said}" if said else f"RATE LIMITED ({what})."
     return f"CREW ERROR ({what}: {e.status} {S.clip_item(e.error, 64)}): {e.message}"
 
 
@@ -1385,6 +1408,8 @@ class CrewBridge:
             except CrewApiError as e:
                 if e.status in (403, 409):
                     return f"NOT ADOPTED {task_ref(task_row)}: {e.message}"
+                if e.status == 429:
+                    return f"NOT ADOPTED {task_ref(task_row)}: {rate_limit_text(e) or 'rate limited'}"
                 raise
             seat.forget("tasks")
             seat.current_task_id = str(task_row["id"])
@@ -1435,15 +1460,26 @@ class CrewBridge:
         baton: dict[str, Any] | None = None
         refused: list[str] = []
         done: set[str] = set()
+        limited = False  # each adopt is charged on its own: after a 429 nothing more is sent, and what was adopted is kept
+        own_left = False
         for c in picked:
             if c["id"] in done:  # adopting a task's baton takes its sibling batons too
+                continue
+            if limited:
+                own_left = own_left or c.get("holder_session_id") == seat.session_id
+                refused.append(f"NOT ADOPTED {self._claim_label(http, seat, c)}: not tried, the adopt limit was reached")
                 continue
             try:
                 _, body, _ = http.call("POST", f"/claims/{c['id']}/adopt", token=seat.token, json={})
             except CrewApiError as e:
-                if e.status in (403, 409):
+                if e.status in (403, 409, 429):
                     what = label if len(picked) == 1 else self._claim_label(http, seat, c)
-                    refused.append(f"NOT ADOPTED {what}: {e.message}")
+                    if e.status == 429:
+                        limited = True
+                        own_left = own_left or c.get("holder_session_id") == seat.session_id
+                        refused.append(f"NOT ADOPTED {what}: {rate_limit_text(e) or 'rate limited'}")
+                    else:
+                        refused.append(f"NOT ADOPTED {what}: {e.message}")
                     continue
                 raise
             body = body or {}
@@ -1452,6 +1488,11 @@ class CrewBridge:
             done |= {str(x.get("id")) for x in got} | {str(c["id"])}
             if baton is None and isinstance(body.get("baton"), dict):
                 baton = body["baton"]
+        if own_left:
+            refused.append(
+                "A reserved claim of your own needs no adopt: a plain crew_claim on it re-takes it, "
+                'and crew_claim(action="release") frees it.'
+            )
         if not claims:
             return "\n".join(refused) or f"NOT ADOPTED {label}: nothing is reserved there."
         text = self._adopted(http, seat, label, {"claims": claims, **({"baton": baton} if baton else {})})

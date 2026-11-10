@@ -2039,9 +2039,11 @@ async def crew_claim(
     Answers GRANTED, QUEUED or REFUSED. When REFUSED, do not edit there: work elsewhere or ask
     the holder with crew_say(to="@holder", kind="request_release"). wait_s (≤300) waits for the
     grant instead (the call blocks until granted or the time is up).
-    release: zone/paths/task you hold (baton=True keeps it reserved for the next pickup).
+    release: zone/paths/task you hold, also one crew_status shows as yours and reserved
+    (baton=True keeps an active one reserved for the next pickup).
     adopt: a baton offered to you in your brief: task="T-12", zone="pos" or the reserved
-    paths=["src/app/cart.ts"]. handover: give your claim to to="@codex-1".
+    paths=["src/app/cart.ts"]. Your own reserved area needs no adopt: a plain claim re-takes
+    it. handover: give your claim to to="@codex-1".
     accept/decline: answer a handover offered to you.
 
     Args:
