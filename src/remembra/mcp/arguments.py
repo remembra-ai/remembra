@@ -98,8 +98,22 @@ def takes(tool: str, declared: Sequence[str]) -> str:
     return f"{tool} takes: {', '.join(declared)}." if declared else f"{tool} takes no arguments."
 
 
+class InvalidArguments(Exception):
+    """Raised inside a tool whose arguments fit the schema and still cannot work (its text is a ``refusal``).
+
+    The MCP server answers it like every other argument failure: an error result carrying that text.
+    """
+
+
 def refusal(tool: str, declared: Sequence[str], problems: Sequence[str]) -> str:
-    return f"{PREFIX}{'; '.join(problems[:5])} {takes(tool, declared)} {NOTHING_DONE}"
+    reasons = "; ".join(problems[:5])
+    if reasons[-1:] not in (".", "!", "?"):
+        reasons += "."
+    return f"{PREFIX}{reasons} {takes(tool, declared)} {NOTHING_DONE}"
+
+
+def _blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
 
 
 def _key(name: Any) -> str:
@@ -145,9 +159,12 @@ def prepare(
             continue
         value = extras.pop(alias)
         mine = args.get(canonical)
-        if mine is None:
+        if _blank(mine) and (mine is None or not _blank(value)):
+            # nothing under the declared name (or an empty string next to a real value): the alias is the argument
             args[canonical] = value
             out.sent_as[canonical] = alias
+        elif _blank(value) and isinstance(value, str):
+            continue  # an empty alias next to a value says nothing
         elif not _same(mine, value, canonical, normalize_project):
             problems.append(f"{canonical} and {alias} are the same argument and differ: pass one")
 

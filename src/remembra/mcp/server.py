@@ -55,7 +55,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
+from pydantic import ConfigDict, ValidationError, WithJsonSchema, create_model, model_validator
 
 from remembra import __version__
 from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
@@ -3087,7 +3087,9 @@ def ack_inbox(
     """
     ids = list(dict.fromkeys(str(i).strip() for i in [inbox_id, *(inbox_ids or [])] if i and str(i).strip()))
     if not ids:
-        return tool_arguments.refusal("ack_inbox", ("inbox_id", "inbox_ids", "result", "note"), ["inbox_id: required"])
+        raise tool_arguments.InvalidArguments(
+            tool_arguments.refusal("ack_inbox", ("inbox_id", "inbox_ids", "result", "note"), ["inbox_id: required"])
+        )
 
     def view(updated: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -4118,27 +4120,33 @@ def _crew_scope_refusal(tool: str, scope: dict[str, str], caller: CallerInfo, re
         locator, _ = _locator(git_remote=scope.get("git_remote"), root_path=scope.get("root_path"))
         if current and remembered.get("project_id") == current and _same_place(remembered.get("locator"), locator):
             return None
+        on_record = True
         try:
             brief = caller.client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
             wanted = str(brief.get("project_id") or "") or None
+            resolution = brief.get("resolution")
+            # "derived": no project is on record for this location; the id is only what one would be called
+            on_record = not (isinstance(resolution, dict) and resolution.get("source") == "derived")
         except Exception:
             wanted = None
-        switch = (
-            f'crew_status(project_id="{_shown(wanted)}")'
-            if wanted
-            else "crew_status(" + ", ".join(f'{k}="{_shown(scope[k])}"' for k in ("root_path", "git_remote") if k in scope) + ")"
-        )
+        if wanted and current and wanted == current:
+            return None
+        if not (wanted and on_record):
+            wanted = None
+            where = ", ".join(f'{k}="{_shown(scope[k])}"' for k in ("root_path", "git_remote") if k in scope)
+            switch = f"crew_status({where})"
+        else:
+            switch = f'crew_status(project_id="{_shown(wanted)}")'
     if wanted and current and wanted == current:
         return None
+    here = f"which is {_shown(current)}" if current else "and this session has not joined one"
     if wanted:
         said = f"you named {_shown(wanted)}" + (f" ({place})" if place else "")
+        then = f"Switch with {switch}, then repeat the call."
     else:
-        said = f"the location you named ({place}) did not resolve to a project"
-    here = f"which is {_shown(current)}" if current else "and this session has not joined one"
-    return (
-        f"{tool_arguments.PREFIX}{tool} acts on this session's crew, {here}; {said}. {tool_arguments.NOTHING_DONE} "
-        f"Switch with {switch}, then repeat the call."
-    )
+        said = f"the location you named ({place}) is not on record for any project"
+        then = f"Leave it out to act on this crew; if that location is where you work, join its crew with {switch} first."
+    return f"{tool_arguments.PREFIX}{tool} acts on this session's crew, {here}; {said}. {tool_arguments.NOTHING_DONE} {then}"
 
 
 def _install_argument_guard() -> None:
@@ -4149,6 +4157,10 @@ def _install_argument_guard() -> None:
     argument stands for, and answers an argument failure in one ``INVALID ARGUMENTS`` line. The
     published inputSchema says the same (``additionalProperties: false`` and the aliases), for
     clients that validate before they send.
+
+    An argument failure is an MCP error (``isError``), as a failed validation always was: a client
+    that keys on the flag, or parses a tool's JSON, sees that nothing ran. Only the failure of the
+    tool's own argument model counts; a validation error raised inside a tool stays what it was.
     """
     manager = mcp._tool_manager
     for name, tool in manager._tools.items():
@@ -4173,16 +4185,22 @@ def _install_argument_guard() -> None:
                 )
             except Exception as e:  # answered as text, like every crew failure
                 text = _crew_error(e)
+                return tool.fn_metadata.convert_result(text) if convert_result else text
         if text is None:
             try:
                 return await dispatch(name, prepared.arguments, context=context, convert_result=convert_result)
             except ToolError as e:
-                errors = getattr(e.__cause__, "errors", None)
-                if type(e.__cause__).__name__ != "ValidationError" or not callable(errors):
+                cause = e.__cause__
+                if isinstance(cause, tool_arguments.InvalidArguments):
+                    text = str(cause)
+                elif isinstance(cause, ValidationError) and cause.title == tool.fn_metadata.arg_model.__name__:
+                    sent = [k for k in arguments if arguments[k] is not None] if isinstance(arguments, dict) else []
+                    text = tool_arguments.validation_text(
+                        name, declared, sent, cause.errors(include_input=False), prepared.sent_as
+                    )
+                else:
                     raise
-                sent = [k for k in arguments if arguments[k] is not None] if isinstance(arguments, dict) else []
-                text = tool_arguments.validation_text(name, declared, sent, errors(include_input=False), prepared.sent_as)
-        return tool.fn_metadata.convert_result(text) if convert_result else text
+        raise ToolError(text)
 
     manager.call_tool = call_tool  # type: ignore[method-assign]
 

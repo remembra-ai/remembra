@@ -12,6 +12,8 @@ import json
 from typing import Any
 
 
+from mcp.server.fastmcp.exceptions import ToolError
+
 import remembra.mcp.server as server
 from remembra.crew import schemas as S
 import tests.crew.test_mcp_crew as base
@@ -19,7 +21,6 @@ from tests.crew.test_mcp_crew import (
     _two_agents,
     agent,
     as_json,
-    call,
     crew_id_of,
     project_name,
     use,
@@ -28,6 +29,14 @@ from tests.crew.test_mcp_crew import (
 # the live API and the fresh crew bridge, shared with the WP-11 suite
 live = base.live
 clock = base.clock
+
+
+def call(name: str, **args: Any) -> str:
+    """A tool's answer as text. An argument failure is an MCP error (``ToolError``): its text is the answer."""
+    try:
+        return base.call(name, **args)
+    except ToolError as e:
+        return str(e)
 
 
 def _seated(live: Any, prefix: str, agent_id: str = "claude-desktop") -> str:
@@ -176,7 +185,7 @@ def test_a_wrong_type_names_the_argument_without_echoing_the_value(live, clock):
     assert "You sent: commits, summary." in out, out
 
 
-def test_refusals_pass_the_output_schema_over_a_real_mcp_session(live, clock):
+def test_answers_and_refusals_over_a_real_mcp_session(live, clock):
     from mcp.shared.memory import create_connected_server_and_client_session
 
     _seated(live, "wire")
@@ -195,10 +204,11 @@ def test_refusals_pass_the_output_schema_over_a_real_mcp_session(live, clock):
             return out
 
     missing, sent, checkpoint, badtype = asyncio.run(run())
-    assert missing == (False, missing[1]) and missing[1].startswith("INVALID ARGUMENTS: body: required"), missing
+    # an argument failure is an MCP error carrying the one line; an answer is not an error
+    assert missing == (True, missing[1]) and missing[1].startswith("INVALID ARGUMENTS: body: required"), missing
     assert sent[0] is False and sent[1].startswith("SENT msg_"), sent
     assert checkpoint[0] is False and checkpoint[1].startswith("CHECKPOINT ckp_"), checkpoint
-    assert badtype[0] is False and badtype[1].startswith("INVALID ARGUMENTS:"), badtype
+    assert badtype[0] is True and badtype[1].startswith("INVALID ARGUMENTS:"), badtype
 
 
 # -- the product's own hint ------------------------------------------------------------------

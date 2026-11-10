@@ -12,12 +12,15 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
+from mcp.server.fastmcp.exceptions import ToolError
+
 import remembra.mcp.server as server
 import tests.crew.test_mcp_crew as base
 from tests.crew.test_mcp_crew import (
     agent,
     as_json,
-    call,
     crew_id_of,
     project_name,
     use,
@@ -26,6 +29,14 @@ from tests.crew.test_mcp_crew import (
 # the live API and the fresh crew bridge, shared with the WP-11 suite
 live = base.live
 clock = base.clock
+
+
+def call(name: str, **args: Any) -> str:
+    """A tool's answer as text. An argument failure is an MCP error (``ToolError``): its text is the answer."""
+    try:
+        return base.call(name, **args)
+    except ToolError as e:
+        return str(e)
 
 
 def _seated(live: Any, prefix: str, agent_id: str = "claude-desktop") -> str:
@@ -80,8 +91,9 @@ def test_an_undeclared_argument_set_to_null_asks_for_nothing_and_is_ignored(live
 def test_arguments_that_are_not_an_object_are_refused(clock):
     out = asyncio.run(server.mcp._tool_manager.call_tool("crew_status", None, convert_result=False))  # type: ignore[arg-type]
     assert not str(out).startswith("INVALID ARGUMENTS"), out  # no arguments at all is an ordinary call
-    bad = asyncio.run(server.mcp._tool_manager.call_tool("crew_say", ["hi"], convert_result=False))  # type: ignore[arg-type]
-    assert str(bad).startswith("INVALID ARGUMENTS: crew_say takes named arguments"), bad
+    with pytest.raises(ToolError) as bad:
+        asyncio.run(server.mcp._tool_manager.call_tool("crew_say", ["hi"], convert_result=False))  # type: ignore[arg-type]
+    assert str(bad.value).startswith("INVALID ARGUMENTS: crew_say takes named arguments"), bad.value
 
 
 # -- project -> project_id ------------------------------------------------------------------
