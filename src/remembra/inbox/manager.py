@@ -747,29 +747,37 @@ class InboxManager:
             raise ValueError(f"Inbox item '{inbox_id}' not found")
 
         now_iso = datetime.now(UTC).isoformat()
-        current = existing.get("status")
-        if (result is None and current in ACK_RESULTS) or (result == "accepted" and current in TERMINAL_STATUSES):
-            # "Mark read" on a row that is already accepted or finished, or "accepted" on a finished
-            # row: its status and result stand (a finished row is never reopened), the note is taken.
-            new_status = str(existing["status"])
-            if note is not None:
-                await self._db.conn.execute(
-                    "UPDATE agent_inbox SET ack_at = ?, ack_note = ? WHERE inbox_id = ? AND owner_user_id = ?",
-                    (now_iso, note, inbox_id, owner_user_id),
-                )
-                await self._db.conn.commit()
+        # The status change is ONE conditional UPDATE: the row read above may be stale by the time
+        # this writes (another seat's ack in between), so the statuses a change may start from are
+        # checked by the statement itself and never taken from that read.
+        if result in TERMINAL_STATUSES:
+            keep: tuple[str, ...] = ()  # a terminal result is set from any status, as before
+        elif result == "accepted":
+            keep = tuple(sorted(TERMINAL_STATUSES))  # a finished row is never reopened
         else:
-            new_status = result if result else "read"
+            keep = tuple(sorted(ACK_RESULTS))  # "mark read" never downgrades an accepted or finished row
+        guard = f" AND status NOT IN ({', '.join('?' for _ in keep)})" if keep else ""
+        cursor = await self._db.conn.execute(
+            f"""
+            UPDATE agent_inbox
+               SET status = ?, ack_at = ?, ack_note = ?, ack_result = ?
+             WHERE inbox_id = ? AND owner_user_id = ?{guard}
+            """,  # noqa: S608
+            (result if result else "read", now_iso, note, result, inbox_id, owner_user_id, *keep),
+        )
+        if cursor.rowcount == 0 and note is not None:
+            # The row is already accepted or finished (now, whatever the read above saw): its status
+            # and result stand, the note is taken.
             await self._db.conn.execute(
-                """
-                UPDATE agent_inbox
-                   SET status = ?, ack_at = ?, ack_note = ?, ack_result = ?
-                 WHERE inbox_id = ? AND owner_user_id = ?
-                """,
-                (new_status, now_iso, note, result, inbox_id, owner_user_id),
+                "UPDATE agent_inbox SET ack_at = ?, ack_note = ? WHERE inbox_id = ? AND owner_user_id = ?",
+                (now_iso, note, inbox_id, owner_user_id),
             )
-            await self._db.conn.commit()
+        await self._db.conn.commit()
 
+        # Re-read to get the authoritative row
+        updated = await self.get_one(owner_user_id, inbox_id)
+        assert updated is not None  # just updated it
+        new_status = updated.get("status")
         logger.info(
             "inbox_acked owner=%s id=%s status=%s",
             owner_user_id,
@@ -777,9 +785,6 @@ class InboxManager:
             new_status,
         )
 
-        # Re-read to get the authoritative row
-        updated = await self.get_one(owner_user_id, inbox_id)
-        assert updated is not None  # just updated it
         return updated
 
 
