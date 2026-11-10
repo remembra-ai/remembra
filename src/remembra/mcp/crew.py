@@ -63,6 +63,8 @@ MCP_FOOTER: Final = (
 CORRECTIVE: Final = "Do not modify these files further. Tell @{who} or @mani with crew_say."
 
 _SAFE_TEXT_RE: Final = re.compile(r"[A-Za-z0-9._/@+:=-]{1,200}")
+# A repo path or path glob: one token without whitespace, with the characters framework routes are named with.
+_SAFE_PATH_RE: Final = re.compile(r"[A-Za-z0-9._@+$(\[][A-Za-z0-9._/@+:=$()\[\]*-]{0,199}")
 _TASK_NUMBER_RE: Final = re.compile(r"(?:t-?|#)?([1-9][0-9]{0,6})", re.IGNORECASE)
 _TARGET_RE: Final = re.compile(r"@?[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
 _CLIENT_ID_RE: Final = re.compile(r"[^A-Za-z0-9._:-]+")
@@ -354,6 +356,22 @@ def _safe(value: Any) -> str | None:
     """``value`` when it is a plain id/slug/path token that may appear outside the data block."""
     text = str(value) if value is not None else ""
     return text if _SAFE_TEXT_RE.fullmatch(text) else None
+
+
+def _safe_path(value: Any) -> str | None:
+    """``value`` when it is a repo path (or path glob) that may appear outside the data block.
+
+    Everything :func:`_safe` allows, plus the characters routes and globs are written with: ``[id]``,
+    ``[...slug]``, ``(group)``, ``$id`` and ``*``. Still one token with no whitespace, quote or shell
+    separator, never a ``..`` segment or a ``$(``; anything else is named only inside the data block.
+    """
+    plain = _safe(value)
+    if plain is not None:
+        return plain
+    text = str(value) if value is not None else ""
+    if not _SAFE_PATH_RE.fullmatch(text) or ".." in text.split("/") or "$(" in text:
+        return None
+    return text
 
 
 def _path_claim_covered(claim: Mapping[str, Any], paths: Sequence[str] | None, zone_globs: Sequence[str]) -> bool:
@@ -776,7 +794,7 @@ class CrewBridge:
         brief = self._crew_block(http, caller, seat)
         if brief:
             lines.append(brief)
-        lines.append(self._you_line(http, seat, rejoin))
+        lines.append(self._you_line(http, seat, rejoin, data))
         items = self._queue_items(http, seat)
         if items:
             lines.append("FOR YOU (session queue):")
@@ -814,7 +832,7 @@ class CrewBridge:
         lines = text.split("\n")
         return "\n".join(ln for ln in lines if ln != CREW_FOOTER)
 
-    def _you_line(self, http: CrewHttp, seat: Seat, rejoin: Mapping[str, Any]) -> str:
+    def _you_line(self, http: CrewHttp, seat: Seat, rejoin: Mapping[str, Any], data: list[str] | None = None) -> str:
         session = rejoin.get("session") or {}
         state = _safe(session.get("state")) or "active"
         verified = "key-verified" if seat.verified else "self-declared"
@@ -829,19 +847,33 @@ class CrewBridge:
         except CrewApiError:
             mine = []
         if mine:
-            parts.append("holding " + ", ".join(self._claim_label(http, seat, c) for c in mine[:6]))
+            parts.append("holding " + ", ".join(self._claim_label(http, seat, c, data) for c in mine[:6]))
         else:
             parts.append("holding nothing")
         return " · ".join(parts)
 
-    def _claim_label(self, http: CrewHttp, seat: Seat, claim: Mapping[str, Any], *, with_id: bool = False) -> str:
+    def _claim_label(
+        self,
+        http: CrewHttp,
+        seat: Seat,
+        claim: Mapping[str, Any],
+        data: list[str] | None = None,
+        *,
+        with_id: bool = False,
+    ) -> str:
+        """``zone pos (exclusive, active)``. A path that is not one plain token is labelled by its claim id,
+        and its name goes into ``data`` (the reply's data block) when the caller has one."""
         zone = self._zone_label(http, seat, claim.get("zone_id"))
         if zone:
             target = f"zone {zone}"
         elif claim.get("resource"):
             target = _safe(claim.get("resource")) or "a resource"
         else:
-            target = f"path {_safe(claim.get('path_glob')) or '(see verbose)'}"
+            named = _safe_path(claim.get("path_glob"))
+            cid = _safe(claim.get("id"))
+            if named is None and cid is not None and data is not None and claim.get("path_glob"):
+                data.append(f"{cid} path: {agent_text(claim.get('path_glob'))}")
+            target = f"path {named or cid or '(unnamed)'}"
         task = task_ref(self._task_by_id(http, seat, claim.get("task_id"))) if claim.get("task_id") else None
         bits = [str(claim.get("mode") or "exclusive"), str(claim.get("state") or "")]
         if task:
@@ -1061,13 +1093,14 @@ class CrewBridge:
         """Adopt through crewd, which also restores the saved work into this checkout and reports the restore."""
         from remembra.relay.crew.gate import rpc
 
+        data: list[str] = []
         args: dict[str, Any] = {"key": local.who["key"]}
         if task:
             args["task"] = task
             what = _safe(task) or "the task"
         elif paths:
             args["paths"] = [str(x) for x in list(paths)[:20]]
-            what = ", ".join(_safe(x) or "a path" for x in list(paths)[:3])
+            what = self._paths_label(paths, data)
         elif zone:
             args["zone"] = zone
             what = f"zone {_safe(zone) or 'named'}"
@@ -1082,10 +1115,10 @@ class CrewBridge:
             if again is not None and again.get("ok") and again.get("restore"):
                 res = again
         if res is None:
-            return f"NOT ADOPTED {what}: the local crew daemon did not answer. Try again in a moment."
+            return join_text([f"NOT ADOPTED {what}: the local crew daemon did not answer. Try again in a moment."], data)
         if not res.get("ok"):
             msg = _clean_message(res.get("message") or res.get("error") or "refused")
-            return f"NOT ADOPTED {what}: {msg}"
+            return join_text([f"NOT ADOPTED {what}: {msg}"], data)
         claims = [c for c in res.get("claims") or [] if isinstance(c, str)]
         me = _safe(local.who.get("callsign")) or "your crew session"
         lines = [f"ADOPTED {what}: you now hold {len(claims) or 'its'} claim(s) as {me}."]
@@ -1107,7 +1140,18 @@ class CrewBridge:
             lines.append("The saved work could not be restored here" + (f"; it is kept as {ref}." if ref else "."))
         for item in res.get("refused") or []:
             lines.append(f"NOT ADOPTED {_clean_message(item, 160)}")
-        return "\n".join(lines)
+        return join_text(lines, data)
+
+    @staticmethod
+    def _paths_label(paths: Sequence[str], data: list[str]) -> str:
+        """The first three of ``paths`` for a headline; one that is not a plain token is ``path #n``, named in ``data``."""
+        out: list[str] = []
+        for n, p in enumerate(list(paths)[:3], 1):
+            named = _safe_path(p)
+            if named is None:
+                data.append(f"path #{n}: {agent_text(p)}")
+            out.append(named or f"path #{n}")
+        return ", ".join(out)
 
     def _touch_quietly(self, caller: CallerInfo, seat: Seat) -> None:
         try:
@@ -1116,9 +1160,11 @@ class CrewBridge:
             pass
 
     def _targets(
-        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None
+        self, http: CrewHttp, seat: Seat, zone: str | None, paths: Sequence[str] | None, data: list[str] | None = None
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
-        """``[(label, claim body target)]`` for a zone and/or paths; plus notes for paths that need no claim."""
+        """``[(label, claim body target)]`` for a zone and/or paths; plus notes for paths that need no claim.
+
+        A path that is not one plain token is labelled ``#n`` (its place in ``paths``) and named in ``data``."""
         targets: list[tuple[str, dict[str, Any]]] = []
         notes: list[str] = []
         if zone:
@@ -1131,9 +1177,11 @@ class CrewBridge:
         if paths:
             _, body, _ = http.call("POST", f"/crews/{seat.crew_id}/match", token=seat.token, json={"paths": list(paths)[:200]})
             seen = {t[1].get("zone_id") for t in targets}
-            for hit in (body or {}).get("paths") or []:
+            for n, hit in enumerate((body or {}).get("paths") or [], 1):
                 path = str(hit.get("path") or "")
-                label = _safe(path) or "a path"
+                label = _safe_path(path) or f"#{n}"
+                if label == f"#{n}" and data is not None and path:
+                    data.append(f"path #{n}: {agent_text(path)}")
                 if hit.get("error"):
                     notes.append(f"{label}: not a repo-relative path (pass paths relative to the repository root)")
                 elif hit.get("crew_policy"):
@@ -1172,13 +1220,13 @@ class CrewBridge:
             seat.current_task_id = str(task_row["id"])
             got = [self._claim_label(http, seat, c) for c in (claimed or {}).get("claims") or []]
             return f"GRANTED {task_ref(task_row)}: " + (", ".join(got) if got else "claimed (the task has no zones)")
-        targets, notes = self._targets(http, seat, zone, paths)
+        data: list[str] = []
+        targets, notes = self._targets(http, seat, zone, paths, data)
         if not targets:
             if notes:
-                return join_text(["NOTHING TO CLAIM:", *[f"- {n}" for n in notes]])
+                return join_text(["NOTHING TO CLAIM:", *[f"- {n}" for n in notes]], data)
             raise CrewUsageError('Name what to claim: zone="pos", paths=["src/app/pos/cart.ts"] or task="T-14".')
         lines: list[str] = []
-        data: list[str] = []
         for label, target in targets:
             body: dict[str, Any] = {
                 **target,
@@ -1320,6 +1368,7 @@ class CrewBridge:
                 out.append("A path goes in the paths argument, not in zone" + (f': paths=["{rest}"].' if rest else "."))
             else:
                 out.append('Pass the zone slug without "zone:"' + (f': zone="{rest}".' if rest else "."))
+        data: list[str] = []
         try:
             live = self._claims(http, seat)
         except CrewApiError:
@@ -1332,13 +1381,13 @@ class CrewBridge:
         theirs = [c for c in live if c not in mine and c.get("state") != "queued" and named is not None and named(c)]
         for c in theirs[:3]:
             who = self._callsign(http, seat, c.get("holder_session_id")) or "a human or another session"
-            out.append(f"{self._claim_label(http, seat, c)} is held by {who}, not by you.")
+            out.append(f"{self._claim_label(http, seat, c, data)} is held by {who}, not by you.")
         if mine:
-            held = ", ".join(self._claim_label(http, seat, c, with_id=True) for c in mine[:6])
+            held = ", ".join(self._claim_label(http, seat, c, data, with_id=True) for c in mine[:6])
             out.append(f"You hold: {held}." + (f" (+{len(mine) - 6} more)" if len(mine) > 6 else ""))
         elif len(out) > 1:
             out.append("You hold nothing.")
-        return " ".join(out)
+        return join_text([" ".join(out)], data)
 
     def _release(
         self,
@@ -1372,8 +1421,9 @@ class CrewBridge:
         if not claims:
             return self._no_match(http, seat, "NOTHING RELEASED: you hold no live claim on that.", zone=zone, paths=paths)
         lines = []
+        data: list[str] = []
         for c in claims:
-            label = self._claim_label(http, seat, c)
+            label = self._claim_label(http, seat, c, data)
             if c.get("state") == "reserved" and c.get("reserve_reason") == "human_hold":
                 lines.append(f"NOT RELEASED {label}: a human put it on hold. Ask @mani with crew_say.")
                 continue
@@ -1398,7 +1448,7 @@ class CrewBridge:
             if c.get("state") == "reserved" and re.fullmatch(r"refs/remembra/baton/[A-Za-z0-9_/-]{1,120}", ref):
                 line += f" (the work saved with it is no longer offered; it stays as {ref} in the checkout that saved it)"
             lines.append(line)
-        return "\n".join(lines)
+        return join_text(lines, data)
 
     def _adopt(self, http: CrewHttp, seat: Seat, *, zone: str | None, paths: Sequence[str] | None, task: str | None) -> str:
         if task:
@@ -1413,11 +1463,13 @@ class CrewBridge:
                 raise
             seat.forget("tasks")
             seat.current_task_id = str(task_row["id"])
-            return self._adopted(http, seat, task_ref(task_row) or "the task", body or {})
+            task_data: list[str] = []
+            return join_text([self._adopted(http, seat, task_ref(task_row) or "the task", body or {}, task_data)], task_data)
         if not (zone or paths):
             raise CrewUsageError(
                 'Name the baton to adopt: task="T-12", zone="pos" or paths=["src/app/cart.ts"] (as offered in your brief).'
             )
+        data: list[str] = []
         reserved = [c for c in self._claims(http, seat) if c.get("state") == "reserved"]
         picked: list[dict[str, Any]] = []
         labels: list[str] = []
@@ -1431,7 +1483,7 @@ class CrewBridge:
             picked += [c for c in reserved if c.get("zone_id") == z["id"] or _path_claim_covered(c, None, zone_globs)]
         if paths:
             # a lost session's path claim, or the zone a path lies in
-            labels.append(", ".join(_safe(p) or "a path" for p in list(paths)[:3]))
+            labels.append(self._paths_label(paths, data))
             targets, _ = self._targets(http, seat, None, paths)
             zone_ids = {t["zone_id"] for _, t in targets if t.get("zone_id")}
             picked += [
@@ -1442,7 +1494,7 @@ class CrewBridge:
             ]
         label = " and ".join(labels)
         if not picked:
-            return f"NOT ADOPTED {label}: nothing is reserved there."
+            return join_text([f"NOT ADOPTED {label}: nothing is reserved there."], data)
         saved = {str(c["baton_ref"]) for c in picked if c.get("baton_ref")}
         if len(saved) > 1:  # one adopt takes one lost session's saved work, as remembra-crew adopt does
             names = sorted(
@@ -1455,7 +1507,10 @@ class CrewBridge:
                     if c.get("baton_ref")
                 }
             )
-            return f"NOT ADOPTED {label}: {len(saved)} batons with saved work match; adopt one at a time: " + ", ".join(names[:5])
+            return join_text(
+                [f"NOT ADOPTED {label}: {len(saved)} batons with saved work match; adopt one at a time: " + ", ".join(names[:5])],
+                data,
+            )
         claims: list[dict[str, Any]] = []
         baton: dict[str, Any] | None = None
         refused: list[str] = []
@@ -1467,13 +1522,13 @@ class CrewBridge:
                 continue
             if limited:
                 own_left = own_left or c.get("holder_session_id") == seat.session_id
-                refused.append(f"NOT ADOPTED {self._claim_label(http, seat, c)}: not tried, the adopt limit was reached")
+                refused.append(f"NOT ADOPTED {self._claim_label(http, seat, c, data)}: not tried, the adopt limit was reached")
                 continue
             try:
                 _, body, _ = http.call("POST", f"/claims/{c['id']}/adopt", token=seat.token, json={})
             except CrewApiError as e:
                 if e.status in (403, 409, 429):
-                    what = label if len(picked) == 1 else self._claim_label(http, seat, c)
+                    what = label if len(picked) == 1 else self._claim_label(http, seat, c, data)
                     if e.status == 429:
                         limited = True
                         own_left = own_left or c.get("holder_session_id") == seat.session_id
@@ -1494,13 +1549,13 @@ class CrewBridge:
                 'and crew_claim(action="release") frees it.'
             )
         if not claims:
-            return "\n".join(refused) or f"NOT ADOPTED {label}: nothing is reserved there."
-        text = self._adopted(http, seat, label, {"claims": claims, **({"baton": baton} if baton else {})})
-        return "\n".join([text, *refused])
+            return join_text(refused or [f"NOT ADOPTED {label}: nothing is reserved there."], data)
+        text = self._adopted(http, seat, label, {"claims": claims, **({"baton": baton} if baton else {})}, data)
+        return join_text([text, *refused], data)
 
-    def _adopted(self, http: CrewHttp, seat: Seat, what: str, body: Mapping[str, Any]) -> str:
+    def _adopted(self, http: CrewHttp, seat: Seat, what: str, body: Mapping[str, Any], data: list[str] | None = None) -> str:
         claims = [c for c in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(c, dict)]
-        held = ", ".join(self._claim_label(http, seat, c) for c in claims) if claims else "no zone claims"
+        held = ", ".join(self._claim_label(http, seat, c, data) for c in claims) if claims else "no zone claims"
         lines = [f"ADOPTED {what}: you now hold {held}."]
         ref = None
         baton = body.get("baton")
@@ -1531,6 +1586,7 @@ class CrewBridge:
             return self._no_match(http, seat, "NOT HANDED OVER: you hold no active claim on that.", zone=zone, paths=paths)
         who = self._callsign(http, seat, target) or target
         lines = []
+        data: list[str] = []
         for c in claims:
             body: dict[str, Any] = {"to": target}
             if reason:
@@ -1540,8 +1596,8 @@ class CrewBridge:
             except CrewApiError as e:
                 lines.append(error_text(e, f"handover {c['id']}"))
                 continue
-            lines.append(f"OFFERED {self._claim_label(http, seat, c)} to {who} (they accept or decline within 10 min).")
-        return "\n".join(lines)
+            lines.append(f"OFFERED {self._claim_label(http, seat, c, data)} to {who} (they accept or decline within 10 min).")
+        return join_text(lines, data)
 
     def _answer_handover(self, http: CrewHttp, seat: Seat, action: str, *, zone: str | None, task: str | None) -> str:
         claims = [c for c in self._claims(http, seat) if c.get("state") == "offered" and c.get("offered_to") == seat.session_id]
