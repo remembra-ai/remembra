@@ -27,6 +27,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from remembra.relay.handoff import is_probe_command
+from remembra.relay.testruns import failed_tests, resolve_runs, run_verdict, runner_invocations
 from remembra.security.secrets import redact_secrets
 
 MAX_COMMITS = 30
@@ -53,18 +54,6 @@ CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "t
 CLOSE_ITEM_CLIP = 1000  # characters per path (or other text item), as the server keeps them
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-_TEST_RE = re.compile(
-    r"(?:^|[\s;&|(/])(?:"
-    r"pytest|py\.test|python[\d.]*\s+-m\s+(?:pytest|unittest)|tox|nox|jest|vitest|mocha|ava|rspec|phpunit|"
-    r"go\s+test|cargo\s+(?:test|nextest)|swift\s+test|xcodebuild\b[^;&|]*\btest\b|mvn\b[^;&|]*\btest\b|"
-    r"gradlew?\b[^;&|]*\btest\b|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|deno\s+test|bun\s+test|make\s+(?:test|check)\b|"
-    r"ctest|dotnet\s+test|mix\s+test|flutter\s+test|dart\s+test"
-    r")(?=$|[\s;&|)])"
-)
-_TEST_SUMMARY_RE = re.compile(
-    r"\b\d+\s+(?:passed|failed|errors?|failures?)\b|^Tests?:\s|\bTEST (?:SUCCEEDED|FAILED)\b|^(?:ok|FAIL)\s|\btest result:",
-    re.IGNORECASE,
-)
 _EXIT_RE = re.compile(r"^\s*(?:Error:\s*)?Exit code (\d+)")
 # `git commit` / cherry-pick / revert output: "[branch 1a2b3c4] subject" (or "(root-commit)").
 _COMMIT_LINE_RE = re.compile(r"^\[[^\]\n]+? (?:\(root-commit\) )?([0-9a-f]{7,40})\] \S", re.MULTILINE)
@@ -547,13 +536,6 @@ def _result_text(content: Any) -> str:
     return ""
 
 
-def _test_summary(output: str) -> str | None:
-    for line in reversed([ln.strip(" =") for ln in output.splitlines() if ln.strip()]):
-        if _TEST_SUMMARY_RE.search(line):
-            return _scrub_clip(line, 200)
-    return None
-
-
 def _last_meaningful_line(output: str) -> str:
     lines = [ln.strip() for ln in output.splitlines() if ln.strip() and not _EXIT_RE.match(ln)]
     return _scrub_clip(lines[-1], 200) if lines else ""
@@ -600,19 +582,34 @@ def _outside_root(command: str, root: str | None, cwd: str | None = None) -> boo
     return not (target_path == root_path or target_path.startswith(root_path.rstrip(os.sep) + os.sep))
 
 
+def _test_command(cmd: str) -> str:
+    """A test run's command as it is sent. One too long to keep whole is sent as the runner it
+    runs (``pytest -q tests/x``), not as its first ``CMD_CLIP`` characters (a ``cd``, a heredoc script)."""
+    if len(" ".join(cmd.split())) <= CMD_CLIP:
+        return cmd
+    return "; ".join(dict.fromkeys(run.text for run in runner_invocations(cmd))) or cmd
+
+
 def _finish(
     facts: TranscriptFacts, command_log: list[dict[str, Any]], files: list[str], open_todos: list[str]
 ) -> TranscriptFacts:
     """Turn a parsed command log (oldest first: ``cmd``, ``exit_code``, ``output``) into the facts
     every transcript parser reports: commands, test verdicts, errors, files, open todos."""
-    # Tests: last result per exact command.
+    # Tests: commands that run a test runner, with the runner's verdict (testruns.run_verdict:
+    # the exit code when it is the runner's, else the runner's own summary line), newest
+    # result per exact command, in the order they last ran.
     tests: dict[str, dict[str, Any]] = {}
     for item in command_log:
-        if _TEST_RE.search(item["cmd"]):
+        verdict = run_verdict(item["cmd"], item["exit_code"], item["output"])
+        tests.pop(item["cmd"], None)
+        if verdict is not None:
             tests[item["cmd"]] = {
                 "cmd": item["cmd"],
-                "passed": item["exit_code"] == 0,
-                "summary": _test_summary(item["output"]),
+                "passed": verdict[0],
+                "summary": _scrub_clip(verdict[1], 200) if verdict[1] else None,
+                # Which tests failed, when the output names all of them: a later green run of
+                # those tests then replaces this run (used here only, not sent).
+                "failed_tests": [] if verdict[0] else failed_tests(item["output"], verdict[1]),
             }
     # Errors: failed non-probe, non-test commands whose exact command did not later succeed.
     last_exit: dict[str, int] = {}
@@ -622,7 +619,7 @@ def _finish(
     seen: set[str] = set()
     for item in reversed(command_log):
         cmd = item["cmd"]
-        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or _TEST_RE.search(cmd) or is_probe_command(cmd):
+        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or cmd in tests or is_probe_command(cmd):
             continue
         seen.add(cmd)
         detail = _last_meaningful_line(item["output"])
@@ -634,11 +631,12 @@ def _finish(
     facts.commands = [{"cmd": _scrub_clip(c["cmd"], CMD_CLIP), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]]
     facts.tests = [
         {
-            "cmd": _scrub_clip(t["cmd"], CMD_CLIP),
+            "cmd": _scrub_clip(_test_command(t["cmd"]), CMD_CLIP),
             "passed": t["passed"],
             "summary": _scrub(t["summary"]) if t["summary"] else None,
         }
-        for t in tests.values()
+        # A red run that was re-run green (or a later run of the same tests) is not sent.
+        for t in resolve_runs(list(tests.values()))[0]
     ]
     facts.errors = [_scrub(e) for e in errors]
     facts.files = list(dict.fromkeys(files))

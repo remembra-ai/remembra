@@ -31,6 +31,7 @@ from typing import Any
 
 from remembra.crew.gatecore import SAFE_CLAIM_PATH_RE
 from remembra.relay.identity import repository_key
+from remembra.relay.testruns import resolve_runs, runner_invocations
 from remembra.security.secrets import redact_secrets
 from remembra.security.untrusted import (
     COMMAND_FLAG,
@@ -339,8 +340,8 @@ def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[
             checked.append(f"file {path}")
             issues.append(f"mentions {path}, which is not in the recorded changed files (unverifiable)")
 
-    tests = facts.get("tests") or []
-    failing = [t for t in tests if t.get("passed") is False]
+    tests = latest_tests(facts.get("tests") or [], collected=_collected_tests(facts))
+    failing = [t for t in reversed(tests) if t.get("passed") is False]
     if _TESTS_PASS_RE.search(text):
         checked.append("tests pass")
         if failing:
@@ -386,12 +387,37 @@ def _brief_done(done: list[Any], declared: Any, shown: int = 4) -> list[Any]:
     return head + done[count:][: shown - len(head)]
 
 
-def latest_tests(tests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Last result per distinct command, in first-seen order."""
-    by_cmd: dict[str, dict[str, Any]] = {}
-    for test in tests:
-        by_cmd[str(test.get("cmd") or "")] = test
-    return list(by_cmd.values())
+def _collected_tests(facts: dict[str, Any]) -> bool:
+    """True when the facts' test runs were taken from a session transcript by the client, not typed by an agent."""
+    return "transcript" in str(facts.get("facts_source") or "")
+
+
+def latest_tests(tests: list[dict[str, Any]], *, collected: bool = False) -> list[dict[str, Any]]:
+    """The test results that still stand, oldest first, with a checked verdict.
+
+    See :func:`remembra.relay.testruns.resolve_runs`: a run whose own summary
+    reports failures did not pass, a later run of the same tests replaces an
+    earlier one, and a later green run replaces the red runs it covers.
+    """
+    return resolve_runs(tests, collected=collected)[0]
+
+
+def _test_label(cmd: Any, limit: int) -> str:
+    """A test run's command for a section line. One too long to show names the runner it runs
+    (``pytest -q tests/x``) instead of whatever the command starts with (a ``cd``, a heredoc script)."""
+    text = " ".join(strip_controls(str(cmd or "")).split())
+    if len(text) > limit:
+        runs = runner_invocations(str(cmd).rstrip("…"))
+        if runs:
+            return clip("; ".join(dict.fromkeys(run.text for run in runs)), limit)
+    return clip(text, limit)
+
+
+def _test_commands(facts: dict[str, Any]) -> set[str]:
+    """Commands that are test runs (recorded as one, or running a test runner): never listed as a failed command."""
+    recorded = resolve_runs(facts.get("tests") or [], collected=_collected_tests(facts))[1]
+    ran = {str(c.get("cmd") or "") for c in facts.get("commands") or [] if isinstance(c, dict)}
+    return recorded | {cmd for cmd in ran if runner_invocations(cmd)}
 
 
 MAX_DECLARED_DONE = 10
@@ -418,7 +444,7 @@ def declared_done(facts: dict[str, Any]) -> list[str]:
 def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> dict[str, Any]:
     """Deterministic Done / Not done / Failing / Next sections from facts."""
     commits = facts.get("commits") or []
-    tests = latest_tests(facts.get("tests") or [])
+    tests = latest_tests(facts.get("tests") or [], collected=_collected_tests(facts))
     files = [str(f) for f in facts.get("files_changed") or []]
     uncommitted = [str(f) for f in facts.get("uncommitted_files") or []]
     todos = [str(t) for t in facts.get("todos_open") or [] if str(t).strip()]
@@ -438,7 +464,7 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
     for test in tests:
         if test.get("passed") is True:
             summary = f" ({clip(test.get('summary'), 80)})" if test.get("summary") else ""
-            done.append(f"tests passing: {clip(test.get('cmd'), 100)}{summary}")
+            done.append(f"tests passing: {_test_label(test.get('cmd'), 100)}{summary}")
     if files:
         done.append(f"changed {len(files)} file(s): {_list_more([clip(f, 80) for f in files], 8)}")
     if facts.get("diff_stat"):
@@ -461,14 +487,14 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
         not_done.append("push state: unknown (git did not finish in time)")
 
     failing: list[str] = []
-    for test in tests:
+    for test in reversed(tests):  # newest first: the run to fix is the latest one
         if test.get("passed") is False:
             summary = f" ({clip(test.get('summary'), 100)})" if test.get("summary") else ""
-            failing.append(f"FAILING: {clip(test.get('cmd'), 120)}{summary}")
+            failing.append(f"FAILING: {_test_label(test.get('cmd'), 120)}{summary}")
     # Failed commands: last result per exact command (a later success clears
     # it), minus test runs, probes (grep no-match) and anything an error
     # entry already describes.
-    test_cmds = {str(t.get("cmd") or "") for t in tests}
+    test_cmds = _test_commands(facts)
     last_exit: dict[str, Any] = {}
     for cmd in commands:
         last_exit[str(cmd.get("cmd") or "")] = cmd.get("exit_code")
@@ -482,9 +508,9 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
     failing = list(dict.fromkeys(failing))[:12]
 
     agent_next = clip(next_step_hint, 240) if next_step_hint and next_step_hint.strip() else None
-    first_failing_test = next((t for t in tests if t.get("passed") is False), None)
+    first_failing_test = next((t for t in reversed(tests) if t.get("passed") is False), None)
     if first_failing_test is not None:
-        derived_next = f"fix the failing run: {clip(first_failing_test.get('cmd'), 120)}"
+        derived_next = f"fix the failing run: {_test_label(first_failing_test.get('cmd'), 120)}"
     elif failing:
         derived_next = f"resolve: {failing[0]}"
     elif todos:
@@ -975,7 +1001,7 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
     uncommitted = facts.get("uncommitted_files") or []
     todos = [t for t in facts.get("todos_open") or [] if str(t).strip()]
     errors = [e for e in facts.get("errors") or [] if str(e).strip()]
-    tests = latest_tests(facts.get("tests") or [])
+    tests = latest_tests(facts.get("tests") or [], collected=_collected_tests(facts))
     unpushed = facts.get("unpushed_commits")
     incomplete = sorted({str(x) if str(x) in GIT_PROBE_NAMES else "other" for x in facts.get("incomplete") or []})
     worked = bool(commits or files or uncommitted)
@@ -1018,7 +1044,7 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
         missing.append("tests not run")
     if errors:
         missing.append(f"{len(errors)} error(s) recorded")
-    failed_cmds = _failed_commands(facts, {str(t.get("cmd") or "") for t in tests})
+    failed_cmds = _failed_commands(facts, _test_commands(facts))
     if failed_cmds:
         missing.append(f"{failed_cmds} failed command(s)")
 
