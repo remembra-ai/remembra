@@ -1171,11 +1171,14 @@ def _crew_evidence(
     return out_commits, out_tests, summary
 
 
-def _close_git_facts(root_path: str | None, project_id: str | None) -> dict[str, Any]:
+def _close_git_facts(root_path: str | None, project_id: str | None, git_remote: str | None = None) -> dict[str, Any]:
     """Git state of the checkout a close is about, read on a local (stdio) server.
 
     The checkout is ``root_path``, else the one the session's ``session_brief``
-    resolved (only for that brief's project). Branch, HEAD, push state and
+    resolved, and that one only when the close is about the same project: it
+    names no other ``project_id`` and no ``git_remote`` other than that
+    checkout's own (a close for another repository must never carry this
+    one's branch, commits and file names). Branch, HEAD, push state and
     uncommitted files are read as they are now. This session's commits and the
     files they changed are read only when the session briefed in this checkout
     first (its HEAD then is the start): with no start nothing says which
@@ -1190,7 +1193,14 @@ def _close_git_facts(root_path: str | None, project_id: str | None) -> dict[str,
     if not root:
         if project_id and project_id != remembered.get("project_id"):
             return {}
-        root = (remembered.get("locator") or {}).get("root_path")
+        locator = remembered.get("locator") or {}
+        if git_remote:
+            from remembra.relay.identity import normalize_git_remote
+
+            named = normalize_git_remote(git_remote)
+            if not named or named != normalize_git_remote(locator.get("git_remote")):
+                return {}
+        root = locator.get("root_path")
     if not root:
         return {}
     from pathlib import Path
@@ -1219,9 +1229,10 @@ def _close_git_facts(root_path: str | None, project_id: str | None) -> dict[str,
 
 def _is_no_change_close(declared: dict[str, Any], summary: str | None, end_reason: str | None) -> bool:
     """True when the agent closes a run that changed nothing (``end_reason="no_change"``, "idle",
-    "heartbeat") and what it declared records no work: only todos, a next step, notes or a summary
-    (the brief's own rule, :func:`remembra.relay.handoff.sections_have_substance`). Judged on what
-    the agent declared, before git is read: the checkout's state is not this run's work."""
+    "heartbeat") and what it declared records no work and no summary: only todos, a next step or
+    notes (the brief's own rule, :func:`remembra.relay.handoff.sections_have_substance`). Judged on
+    what the agent declared: the checkout's branch and uncommitted files are not this run's work
+    (commits made since the session's brief are; the caller checks those)."""
     from remembra.relay.handoff import build_sections, is_no_change_reason, sections_have_substance
 
     if not is_no_change_reason(end_reason):
@@ -1313,9 +1324,9 @@ def close_session(
             called session_brief there first; what you declare here wins.
         end_reason: Why the session ends (e.g. "done", "blocked", "context full").
             A run that changed nothing (an idle or heartbeat check): pass
-            end_reason="no_change". When you give no work, errors or failing
-            tests with it, nothing is stored and the last handoff stays the
-            one the next agent picks up.
+            end_reason="no_change". When you give no work, summary, errors or
+            failing tests with it, nothing is stored and the last handoff
+            stays the one the next agent picks up.
         project_id: Project. Default: the project your session_brief or
             crew_status resolved, else your crew session's. A local (stdio)
             server with none of these asks for root_path or project_id
@@ -1360,8 +1371,9 @@ def close_session(
         if next_step:
             merged["next_step"] = next_step
         project_id = project_id or project
+        git_found = _close_git_facts(root_path, project_id, git_remote)
         declared_only = merged  # what the agent gave, before anything is read from git
-        merged = _with_git_facts(merged, _close_git_facts(root_path, project_id))
+        merged = _with_git_facts(merged, git_found)
         locator = None
         # how the project was found: named on this call, a location on this call (then the server's
         # resolution source), or inherited: remembered / crew-seat / relay-project / configured
@@ -1385,8 +1397,9 @@ def close_session(
                 origin = "remembered" if (locator or project_id) else None
                 close_project = remembered.get("project_id")
         seat = _crew_seat_for_close(close_project)
-        if seat is None and _is_no_change_close(declared_only, summary, end_reason):
-            # An idle or heartbeat run: there is no handoff to leave (a live crew seat still closes below).
+        if seat is None and not git_found.get("commits") and _is_no_change_close(declared_only, summary, end_reason):
+            # An idle or heartbeat run: there is no handoff to leave (a live crew seat still closes below,
+            # and so does a run that committed since its brief, whatever reason it gives).
             return _dump(
                 {
                     "status": "ok",
@@ -1395,7 +1408,7 @@ def close_session(
                     "changed": False,
                     "stored": False,
                     "skipped": (
-                        "no-change close: nothing stored. It records no work, errors or failing tests, so the last "
+                        "no-change close: nothing stored. It records no work, summary, errors or failing tests, so the last "
                         "handoff stays the one the next agent picks up. To store it anyway, give another end_reason."
                     ),
                 }

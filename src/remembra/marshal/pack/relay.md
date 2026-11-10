@@ -539,8 +539,10 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   the brief says how many (`Skipped 3 newer sessions that recorded nothing …`). So is a newer close that
   records no work and only repeats the open items an older close of the same agent in the same place
   already recorded (a heartbeat automation closing on every idle run: `Skipped 24 newer closes that
-  recorded no work and repeated open items …`), and a close sent with `end_reason="no_change"` that
-  records no work (the MCP `close_session` tool stores nothing for it). The agent's notes and
+  recorded no work and repeated open items …`; the same words and numbers, whatever the time or id
+  stamped on them, so a close whose open item differs in any word still shows), and a close sent with
+  `end_reason="no_change"` that records no work and no summary (the MCP `close_session` tool stores
+  nothing for it). The agent's notes and
   summary follow on their own lines (`Notes from codex (unverified): …`, `Summary from codex
   [unverified narrative; …]: …`).
 - **Recent.** At most five of this project's latest handoffs and checkpoints, newest first. Other

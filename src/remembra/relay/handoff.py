@@ -20,7 +20,6 @@ Pure functions; everything that ends up stored first goes through
 
 from __future__ import annotations
 
-import difflib
 import functools
 import json
 import re
@@ -32,7 +31,7 @@ from typing import Any
 
 from remembra.crew.gatecore import SAFE_CLAIM_PATH_RE
 from remembra.relay.identity import repository_key
-from remembra.relay.testruns import resolve_runs, runner_invocations
+from remembra.relay.testruns import executing_invocations, resolve_runs, runner_invocations
 from remembra.security.secrets import redact_secrets
 from remembra.security.untrusted import (
     COMMAND_FLAG,
@@ -83,9 +82,14 @@ _NEGATION_FILLER = frozenset(
     }
 )
 _PARTICIPLE_RE = re.compile(r"^[a-z]+(?:ed|en|ne|lt|un|ut|de|wn)$")
+_LIST_CONJUNCTION_RE = re.compile(r"\b(?:or|nor|and)\b", re.IGNORECASE)
+_LIST_GOES_ON_RE = re.compile(r"^(?:\s*,\s*[\w-]+)*\s*,?\s*(?:or|nor)\s+\w", re.IGNORECASE)
 # "pushed: no", "deployed=false", "pushed nothing": the verb is a label or its object is nothing.
+# The label's value ends there ("Pushed: no.", "deployed=false, ..."): "pushed - no issues found" and
+# "Deployed: none of the checks failed" go on to say something else, and still claim the push.
 _PUSH_DENIED_AFTER_RE = re.compile(
-    r"^\s*(?:(?:[:=]|->|-)\s*(?:no|false|none|not|pending|todo|n/?a|0)\b|(?:nothing|none)\b)", re.IGNORECASE
+    r"^\s*(?:(?:[:=]|->|-)\s*(?:(?:false|pending|todo|n/?a)\b|(?:no|none|not(?:\s+yet)?|0)(?=\s*(?:$|[,;.)\]|/])))|(?:nothing|none)\b)",
+    re.IGNORECASE,
 )
 # Not a statement about what happened: "ready to be deployed", "will be merged", "once pushed".
 _PUSH_PROSPECT_RE = re.compile(
@@ -252,12 +256,18 @@ def is_probe_command(command: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _negated(before: str) -> bool:
-    """True when a negation earlier in the clause reaches the verb that follows ``before``."""
+def _negated(before: str, after: str = "") -> bool:
+    """True when a negation earlier in the clause reaches the verb between ``before`` and ``after``."""
     negators = list(_NEGATOR_RE.finditer(before))
     if not negators:
         return False
     gap = before[negators[-1].end() :]
+    # A comma ends the negation's reach ("Nothing broken, deployed to production") unless it
+    # separates the items of one denied list, which a conjunction closes: before the verb ("not
+    # staged, committed or deployed") or right after it ("nothing committed, pushed, deployed or published").
+    _, comma, tail = gap.rpartition(",")
+    if comma and not _LIST_CONJUNCTION_RE.search(tail) and not _LIST_GOES_ON_RE.match(after):
+        return False
     words = [w for w in re.split(r"[\s,/&+]+", gap.strip().lower()) if w]
     return all(w in _NEGATION_FILLER or _PARTICIPLE_RE.match(w) for w in words)
 
@@ -276,7 +286,7 @@ def claims_pushed(text: str) -> bool:
             continue
         for match in _PUSHED_RE.finditer(clause):
             before, after = clause[: match.start()], clause[match.end() :]
-            if _negated(before) or _PUSH_DENIED_AFTER_RE.match(after) or _PUSH_PROSPECT_RE.search(before):
+            if _negated(before, after) or _PUSH_DENIED_AFTER_RE.match(after) or _PUSH_PROSPECT_RE.search(before):
                 continue
             if match.group(1).lower() == "merged" and _LOCAL_MERGE_RE.match(after):
                 continue
@@ -418,7 +428,7 @@ def _test_commands(facts: dict[str, Any]) -> set[str]:
     """Commands that are test runs (recorded as one, or running a test runner): never listed as a failed command."""
     recorded = resolve_runs(facts.get("tests") or [], collected=_collected_tests(facts))[1]
     ran = {str(c.get("cmd") or "") for c in facts.get("commands") or [] if isinstance(c, dict)}
-    return recorded | {cmd for cmd in ran if runner_invocations(cmd)}
+    return recorded | {cmd for cmd in ran if executing_invocations(cmd)}
 
 
 MAX_DECLARED_DONE = 10
@@ -719,10 +729,13 @@ def sections_have_substance(sections: dict[str, Any], *, summary: Any = None, no
     notice is the whole point of such a close. A session that recorded none of
     these (an idle or automated run) left nothing to pick up. Neither did a
     close its agent marked as a run that changed nothing
-    (:data:`NO_CHANGE_REASONS`) and that records no work: its todos, next step
-    and notes only carry forward what an earlier handoff holds.
+    (:data:`NO_CHANGE_REASONS`) and that records no work and no summary: its
+    todos, next step and notes only carry forward what an earlier handoff
+    holds. A summary is the agent's own statement of what the run found
+    ("the cause is the expired certificate; no code change needed"): it shows.
     """
-    if is_no_change_reason(end_reason) and records_no_work(sections):
+    summary_given = bool(summary.strip() if isinstance(summary, str) else summary)
+    if is_no_change_reason(end_reason) and records_no_work(sections) and not summary_given:
         return False
     if any(sections.get(name) for name in ("done", "not_done", "failing")):
         return True
@@ -752,12 +765,30 @@ def handoff_has_substance(memory: dict[str, Any] | None) -> bool:
     return sections_have_substance(relay, summary=summary_given or None, notes=notes or None, end_reason=relay.get("end_reason"))
 
 
-# Two idle closes say the same thing when their open items read this much alike (0..1). A
-# heartbeat's wording drifts from run to run ("Await X" / "Refresh status; await X"); a new
-# open item reads differently.
-REPEAT_SIMILARITY = 0.8
+# Two idle closes say the same thing when their open items are the same words in the same order.
+# What a run stamps on them is left out first: clock times, dates, timestamps and ids. Case,
+# punctuation and articles do not count. Every other word and number does: "Review PR 42" is not
+# "Review PR 41", "deploy the frontend" is not "deploy the backend", "do rotate" is not "do not rotate".
 _REPEAT_TEXTS_KEPT = 50  # distinct earlier wordings compared per agent and place
-_NOT_LETTERS_RE = re.compile(r"[^a-z]+")
+_MONTH = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?"
+    r"|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+)
+_RUN_STAMP_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}(?:[t ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?)?\b"  # 2026-11-05, ...T14:51:00Z
+    r"|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm|utc|gmt|z)?\b"  # 14:51 UTC
+    rf"|\b{_MONTH}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\b|\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}\b"  # November 5, 5 Nov
+    r"|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"  # a UUID
+    r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{4,}\b"  # a hex id (1f2e, 0004c0de): digits and letters
+)
+_NOT_WORD_RE = re.compile(r"[^a-z0-9]+")
+_ARTICLES = frozenset({"the", "a", "an"})
+
+
+def _said(text: str) -> str:
+    """``text`` as compared between idle closes: lower-case words and numbers, without run stamps and articles."""
+    words = _NOT_WORD_RE.sub(" ", _RUN_STAMP_RE.sub(" ", text.lower())).split()
+    return " ".join(w for w in words if w not in _ARTICLES)
 
 
 def _idle_close(memory: dict[str, Any] | None) -> tuple[tuple[Any, ...], str] | None:
@@ -766,8 +797,8 @@ def _idle_close(memory: dict[str, Any] | None) -> tuple[tuple[Any, ...], str] | 
     No work: nothing done, nothing failing, only todos open (:func:`records_no_work`), no
     summary and no stop notice. "Who and where" is the agent (and whether its key verified it),
     the recorded location and the branch and HEAD: a close from another checkout, or after HEAD
-    moved, is not the same idle thread. "What it says" is its open todos and next step (its notes when it has neither),
-    reduced to lower-case words so that times, counters and ids in it do not matter.
+    moved, is not the same idle thread. "What it says" is its open todos and next step (its notes when it
+    has neither) as :func:`_said` reads them: the words and numbers, without times, dates and ids.
     """
     relay = _relay_meta(memory)
     if not memory or relay is None or not records_no_work(relay):
@@ -784,10 +815,10 @@ def _idle_close(memory: dict[str, Any] | None) -> tuple[tuple[Any, ...], str] | 
     verified = relay.get("agent_verified") is True
     signature = (who, verified, place, str(relay.get("branch") or ""), str(relay.get("head_commit") or ""))
     items = [str(item) for item in relay.get("not_done") or [] if isinstance(item, str)]
-    text = " | ".join([*items, str(relay.get("next") or "")])
-    words = _NOT_LETTERS_RE.sub(" ", text.lower()).strip()
+    # Item by item: the same words split differently over the todos and the next step are not the same close.
+    words = " | ".join(_said(part) for part in [*items, str(relay.get("next") or "")]).strip(" |")
     if not words:
-        words = _NOT_LETTERS_RE.sub(" ", (recorded_notes(memory.get("content")) or "").lower()).strip()
+        words = _said(recorded_notes(memory.get("content")) or "")
     return signature, words
 
 
@@ -796,27 +827,16 @@ def is_idle_close(memory: dict[str, Any] | None) -> bool:
     return _idle_close(memory) is not None
 
 
-def _reads_alike(a: str, b: str) -> bool:
-    if a == b:
-        return True
-    if not a or not b:
-        return False
-    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    return (
-        matcher.real_quick_ratio() >= REPEAT_SIMILARITY
-        and matcher.quick_ratio() >= REPEAT_SIMILARITY
-        and matcher.ratio() >= REPEAT_SIMILARITY
-    )
-
-
 def repeated_idle_closes(handoffs: list[dict[str, Any]]) -> set[str]:
     """Ids of the handoffs (given newest first) that record no work and repeat an older one.
 
-    A repeat is an idle close (:func:`is_idle_close`) whose open items read like those of an
-    older idle close by the same agent in the same place (:data:`REPEAT_SIMILARITY`): an
-    automation that closes on every idle run, or a session that only carries a todo forward.
-    The oldest of such a run is not a repeat (it is where the open item was first recorded), and
-    neither is a close with a new open item, a summary, recorded work, or from another place.
+    A repeat is an idle close (:func:`is_idle_close`) whose open items and next step say what an
+    older idle close by the same agent in the same place already said (:func:`_said`: the same
+    words and numbers; times, dates, ids, case, punctuation and articles apart): an automation
+    that closes on every idle run, or a session that only carries a todo forward. The oldest of
+    such a run is not a repeat (it is where the open item was first recorded), and neither is a
+    close whose open item differs in any word or number, or one with a summary, recorded work,
+    or from another place.
     """
     repeats: set[str] = set()
     seen: dict[tuple[Any, ...], list[str]] = {}
@@ -826,9 +846,9 @@ def repeated_idle_closes(handoffs: list[dict[str, Any]]) -> set[str]:
             continue
         signature, words = idle
         earlier = seen.setdefault(signature, [])
-        if any(_reads_alike(words, other) for other in reversed(earlier)):
+        if words in earlier:
             repeats.add(str(memory.get("id")))
-        if words not in earlier:
+        else:
             earlier.append(words)
             del earlier[:-_REPEAT_TEXTS_KEPT]
     return repeats

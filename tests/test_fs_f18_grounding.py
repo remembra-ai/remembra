@@ -204,7 +204,9 @@ def test_mcp_close_reads_git_from_root_path(mcp_env, work):
     assert "1 commit(s) not pushed to origin/main" in rendered
     assert "uncommitted changes in 1 file(s): NOTES.md" in rendered
     assert out["headline"].startswith("1 commit(s), last: feat: widget")
-    assert out["grounding"] == {"status": "consistent", "issues": [], "checked": [f"commit {sha[:7]}"]}
+    # (An abbreviated id that happens to be all digits reads as a number and is not checked.)
+    checked = [] if sha[:7].isdigit() else [f"commit {sha[:7]}"]
+    assert out["grounding"] == {"status": "consistent", "issues": [], "checked": checked}
     assert "Facts: declared by the agent (not checked)." in rendered  # the label an old server also knows
 
 

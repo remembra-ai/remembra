@@ -3,9 +3,10 @@
 A close that records no work (nothing done, nothing failing, only open todos,
 no summary) and repeats the open items an earlier such close of the same
 agent in the same place already recorded is skipped as "Last session" and in
-Recent, and counted; the brief shows the last handoff with real work. The
-wording of a heartbeat drifts from run to run, so the repeat is found by
-similarity, not by equal text. A first statement of an open item, a different
+Recent, and counted; the brief shows the last handoff with real work. What a
+run stamps on its text (a clock time, an id), case, punctuation and articles
+do not make it news; any other word or number does (see
+tests/test_fs_handoff_review.py). A first statement of an open item, a different
 open item and a close from another place still show. A close sent as
 ``end_reason="no_change"`` stores nothing over MCP and is never shown.
 """
@@ -40,15 +41,15 @@ WORK = {
     "files_changed": ["src/pricing.py"],
     "tests": [{"cmd": "pytest -q", "passed": True, "summary": "12 passed"}],
 }
-# One long-lived automation thread: the wording drifts between runs, the content does not.
+# One long-lived automation thread: the stamps and the punctuation change between runs, the content does not.
 HEARTBEATS = [
     ("Await the full upgrade and the approved offer check", "Monitor the release task without interrupting it."),
     ("Await the full upgrade and the approved offer check", "Monitor the release task without interrupting it."),
     (
-        "Refresh the task status; await the full upgrade and the approved offer check",
+        "await the full upgrade and the approved offer check (14:05 UTC, 0004c0de)",
         "Monitor the release task without interrupting it.",
     ),
-    ("Await the full upgrade and the approved offer check.", "Keep monitoring the release task without interrupting it."),
+    ("Await the full upgrade and the approved offer check.", "Monitor the release task without interrupting it"),
     ("Await the full upgrade and approved offer check", "Monitor the release task without interrupting it."),
     ("Await the full upgrade and the approved offer check", "Monitor the release task, without interrupting it"),
 ]
@@ -176,7 +177,8 @@ def _row(ident: str, relay: dict[str, Any] | None, agent: str = "codex", content
 def test_repeats_are_found_only_among_relay_handoffs_that_record_no_work():
     idle = {"agent_id": "codex", "done": [], "failing": [], "not_done": ["TODO: wait for the deploy"], "next": "monitor"}
     newest_first = [
-        _row("n5", {**idle, "next": "keep monitoring"}),
+        _row("n6", {**idle, "next": "keep monitoring"}),  # says something else: not a repeat
+        _row("n5", {**idle, "next": "Monitor."}),
         _row("n4", None, content="free-form handoff: wait for the deploy"),  # stored through the memory API
         _row("n3", {**idle, "done": ["abc1234 feat"]}),  # recorded work
         _row("n2", {**idle, "grounding": {"status": "consistent"}}),  # carries a summary
