@@ -1509,6 +1509,7 @@ class CrewBridge:
                 "you here. Call crew_status without join=False to join."
             )
         return join_text(lines)
+
     def _message(self, http: CrewHttp, seat: Seat, message_id: str) -> dict[str, Any] | None:
         """One message of this crew by id, or None when the crew has no such message. ``thread=<id>``
         selects ``id = ? OR thread_root_id = ?`` in seq order, so the first row is the message itself

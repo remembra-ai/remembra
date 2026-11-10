@@ -2168,6 +2168,8 @@ def _inbox_identity_mismatch(e: MemoryError, requested: str | None) -> dict[str,
         "message": message,
         "detail": sanitize_error_message(e),
     }
+
+
 # Filters a server older than them refuses (422), with the row statuses each one stands for.
 _NEWER_INBOX_FILTERS: dict[str, tuple[str, ...]] = {"open": ("unread", "read", "accepted"), "accepted": ("accepted",)}
 

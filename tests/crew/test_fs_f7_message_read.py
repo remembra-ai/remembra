@@ -166,7 +166,8 @@ def test_the_notice_names_the_read_path(live, clock):
 
 def test_crew_status_contract_gains_the_message_argument():
     spec = next(t for t in S.MCP_TOOLS if t.name == "crew_status")
-    assert [p.name for p in spec.params] == ["project_id", "git_remote", "root_path", "verbose", "message"]
+    # join is the look-only switch another fix added to the same tool (F5)
+    assert [p.name for p in spec.params] == ["project_id", "git_remote", "root_path", "verbose", "join", "message"]
     assert S.validate_mcp_call("crew_status", {"message": "msg_01ABC"}) == []
     assert S.validate_mcp_call("crew_status", {"verbose": True}) == []  # an old call is still valid
 
