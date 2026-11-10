@@ -126,8 +126,12 @@ def test_recent_failures_are_bounded_and_odd_status_files_do_not_break_record(ho
     assert "unknown-agent" in outbox.read_status(home)["agents"]
 
 
-def test_concurrent_records_do_not_lose_each_other(home):
+def test_concurrent_records_do_not_lose_each_other(home, monkeypatch):
     """Several hooks end in the same second (an app quit): each one's result must survive."""
+    # This checks that the lock excludes, not how long a hook waits for it: 96 contended writes queue for
+    # more than the 0.5 s a hook is allowed to wait on a slow CI runner, and a writer that gives up goes
+    # ahead unlocked by design.
+    monkeypatch.setattr(outbox, "STATUS_LOCK_WAIT_SECONDS", 60.0)
     agents = [f"agent-{n}" for n in range(8)]
 
     def work(agent: str) -> None:
