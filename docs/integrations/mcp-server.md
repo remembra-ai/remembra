@@ -615,10 +615,11 @@ desktop app can start a single process for all its conversations, which then sha
 ### Waiting (`wait_s`)
 
 `crew_claim(wait_s=…)` and `crew_say(wait_s=…)` hold the call until the grant or the first reply. One call
-waits at most 40 seconds, whatever `wait_s` says: MCP clients drop a tool call after about 60 seconds, and
-some then replace the server process. When the time is up the answer says so. A claim stays queued (call
-`crew_claim` again to keep waiting); a reply to `crew_say` reaches you as a `crew_notice` on a later call or
-in `crew_status`. Set `REMEMBRA_MCP_MAX_WAIT_S` only for a client with a longer tool timeout.
+holds at most 45 seconds in all, whatever `wait_s` says: MCP clients drop a tool call after about 60 seconds, and
+some then replace the server process. When the time is up the answer says so and how long was held. A claim
+stays queued (call `crew_claim` again to keep waiting); `crew_say` always answers with the message id, so the
+message is never sent twice, and a reply reaches you as a `crew_notice` on a later call or in `crew_status`.
+Set `REMEMBRA_MCP_MAX_WAIT_S` (or `REMEMBRA_MCP_WAIT_MAX_S`) only for a client with a longer tool timeout.
 
 ### A seat that survives a server restart (stdio)
 
@@ -654,7 +655,8 @@ that does it says `RESUMED`: `crew_status` on its YOU line, a crew write on the 
 | `REMEMBRA_AGENT_ID` | - | This agent's id (`claude-code`, `claude-desktop`, `codex`, `gemini`, `clawdbot`). Required for the inbox. Stamped on every store. `health_check` warns when it is missing |
 | `REMEMBRA_PROJECT_ALIASES` | - | `alias=canonical,...`. For example `clawdbot=clawbot` makes both names resolve to `clawbot`. Case is kept for ids that are not aliases |
 | `REMEMBRA_SESSION_ID` | random per process | Session id stamped on stores. When set, a restarted stdio server resumes this id's crew seat |
-| `REMEMBRA_MCP_MAX_WAIT_S` | `40` | Longest time one `crew_claim` / `crew_say` call waits on the server (`wait_s`), in seconds |
+| `REMEMBRA_MCP_MAX_WAIT_S` | `45` | Longest time one `crew_claim` / `crew_say` call waits on the server (`wait_s`), in seconds; read when the server starts |
+| `REMEMBRA_MCP_WAIT_MAX_S` | - | The same limit, read on every call; when set (1 to 300) it is the one used |
 | `REMEMBRA_MCP_SEAT_STORE` | `1` | `0`: do not keep crew seats in `~/.remembra/mcp/seats/` (a restarted stdio server then joins as a new seat) |
 | `REMEMBRA_KNOWN_AGENTS` | `claude-code,claude-desktop,codex,gemini,clawdbot` | Valid agent ids. Used for typo warnings |
 | `REMEMBRA_MCP_TRANSPORT` | `stdio` | Transport: `stdio`, `sse`, or `streamable-http` |

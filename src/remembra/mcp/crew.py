@@ -15,9 +15,10 @@ parts that are not MCP plumbing:
   with the current token at most once per :data:`TOUCH_INTERVAL_S`; the server treats a
   re-join as activity and renews the session's leases (§10.1 "MCP-only: last call").
 * **Long-poll.** ``crew_claim(wait_s=…)`` and ``crew_say(wait_s=…)`` pass ``wait_s`` to the
-  server, which holds the request; the HTTP timeout is raised to match. One call waits at
-  most :data:`MAX_WAIT_S`: MCP clients drop a request after about 60 s and may then replace
-  the server process, so a longer wait is cut and the answer says so.
+  server, which holds the request. One MCP call holds at most :data:`MCP_HOLD_MAX_S` seconds in
+  all (:meth:`CrewBridge.hold_max_s`), below the 60 s request timeout of MCP clients, which drop a
+  longer request and may then replace the server process: a larger ``wait_s`` (the contract still
+  accepts ≤300 / ≤120) is held that long and the answer says so.
 * **Piggyback.** Every Remembra MCP result gets a ``crew_notice`` (≤300 chars) when this
   session's queue changed: at most one per :data:`NOTICE_INTERVAL_S`, except collisions,
   overrides and pause, which are sent at once (§7). Notices carry server-template text only
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import functools
 import math
+import os
 import re
 import shlex
 import threading
@@ -59,9 +61,15 @@ POLL_INTERVAL_S: Final = 5.0
 NOTICE_INTERVAL_S: Final = float(S.MCP_PIGGYBACK_MIN_INTERVAL_S)
 LIST_TTL_S: Final = 15.0
 HTTP_GRACE_S: Final = 15.0
-# The longest one crew call waits on the server (wait_s). An MCP client gives a tool call about 60 s; a call
-# that runs longer is dropped and the client may replace the stdio server, which costs the session its seat.
-MAX_WAIT_S: Final = 40
+# The longest one MCP tool call holds a long-poll (crew_say / crew_claim wait_s), for the whole call.
+# MCP clients give up on a request after 60 s (Claude desktop: fixed, not extended by progress) and
+# then restart the server process, so a longer hold loses the answer and the crew seat with it.
+MCP_HOLD_MAX_S: Final = 45
+MCP_HOLD_GRACE_S: Final = 10.0
+MCP_HOLD_ENV: Final = "REMEMBRA_MCP_WAIT_MAX_S"
+# The default of CrewBridge.max_wait_s, which the server sets from REMEMBRA_MCP_MAX_WAIT_S: the same hold.
+# With the HTTP grace on top a call still answers inside the client's 60 s.
+MAX_WAIT_S: Final = MCP_HOLD_MAX_S
 # Join answers that mean a stored seat can never be used again: the server refuses its token (409
 # session_exists) or the session has ended (409 session_ended, 410). Anything else is about the request,
 # the API key or the server (401, 403, 404, 422, 5xx) and says nothing about the seat, which is kept.
@@ -99,6 +107,36 @@ _OPEN_TASK_STATUSES: Final = ("backlog", "ready", "claimed", "in_progress", "blo
 # ---------------------------------------------------------------------------
 # Errors and HTTP
 # ---------------------------------------------------------------------------
+
+
+def _hold_override() -> int | None:
+    """``REMEMBRA_MCP_WAIT_MAX_S`` when it is set to a usable number (1..300), else None."""
+    try:
+        value = int(os.environ.get(MCP_HOLD_ENV, "").strip())
+    except ValueError:
+        return None
+    return min(value, S.CLAIM_WAIT_MAX_S) if value > 0 else None
+
+
+def mcp_hold_max_s() -> int:
+    """Seconds one MCP call may hold a long-poll: :data:`MCP_HOLD_MAX_S`, or ``REMEMBRA_MCP_WAIT_MAX_S``
+    for a client with a longer request timeout (1..300; anything else is ignored)."""
+    override = _hold_override()
+    return MCP_HOLD_MAX_S if override is None else override
+
+
+def _hold(wait_s: int, started: float, cap: int | None = None) -> int:
+    """The wait to ask the server for now: ``wait_s`` cut to what is left of this call's hold budget
+    (counted from ``started``, the tool call's entry on :func:`time.monotonic`)."""
+    if wait_s <= 0:
+        return 0
+    left = (mcp_hold_max_s() if cap is None else cap) - (time.monotonic() - started)
+    return max(0, min(int(wait_s), int(round(left))))
+
+
+def _held_note(wait_s: int, cap: int | None = None) -> str:
+    """Said when less than the asked ``wait_s`` was held (server template, no agent text)."""
+    return f" of the {wait_s} asked: one MCP call holds at most {mcp_hold_max_s() if cap is None else cap}s"
 
 
 class CrewApiError(Exception):
@@ -742,6 +780,13 @@ class CrewBridge:
         self._written = threading.local()  # the seat the running crew write uses (see _names_crew)
 
     # -- seat registry ------------------------------------------------------------
+
+    def hold_max_s(self) -> int:
+        """Seconds one call of this bridge holds a long-poll in all: ``REMEMBRA_MCP_WAIT_MAX_S`` when it is
+        set (read on every call), else :attr:`max_wait_s` (the server's ``REMEMBRA_MCP_MAX_WAIT_S``, default
+        :data:`MAX_WAIT_S`)."""
+        override = _hold_override()
+        return self.max_wait_s if override is None else override
 
     def seat_for_scope(self, caller: CallerInfo) -> Seat | None:
         """The crew session this MCP session uses now (None before its first crew call)."""
@@ -1755,6 +1800,7 @@ class CrewBridge:
         wait_s: int,
         project_id: str | None = None,
     ) -> str:
+        started = time.monotonic()
         seat = self.write_seat(caller, project_id, "crew_claim")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
@@ -1768,7 +1814,9 @@ class CrewBridge:
             }
             return shadow.refusal(*refusals[action])
         if action == "claim":
-            text = self._claim(http, seat, zone=zone, paths=paths, mode=mode, task=task, reason=reason, wait_s=wait_s)
+            text = self._claim(
+                http, seat, zone=zone, paths=paths, mode=mode, task=task, reason=reason, wait_s=wait_s, started=started
+            )
             note = self._elsewhere_note(seat, shadow)
             return f"{text}\n{note}" if note else text
         if action == "release":
@@ -1929,7 +1977,11 @@ class CrewBridge:
         task: str | None,
         reason: str | None,
         wait_s: int,
+        started: float | None = None,
     ) -> str:
+        """``wait_s`` is one budget for the whole call (:func:`_hold`), not one wait per target: every
+        target is still queued behind its holder, and the ones the budget no longer covers are not held."""
+        entered = time.monotonic() if started is None else started
         task_row = self._task(http, seat, task) if task else None
         if task_row is not None and not zone and not paths:
             _, claimed, _ = http.call("POST", f"/tasks/{task_row['id']}/claim", token=seat.token)
@@ -1947,35 +1999,35 @@ class CrewBridge:
         granted = capped = 0
         widened: dict[str, list[str]] = {}  # zone id -> the paths a whole-zone-only server widened to it
         asked = wait_s
-        budget = min(asked, self.max_wait_s) if asked > 0 else 0  # one budget for the whole call, not per target
-        cut = f" Waits are cut to {self.max_wait_s}s per call." if asked > budget else ""
-        deadline = time.monotonic() + budget
+        cap = self.hold_max_s()  # one budget for the whole call, not per target
+        cut = f" Waits are cut to {cap}s per call." if asked > cap else ""
         queue = list(targets)
         while queue:
             label, target = queue.pop(0)
             fallback = target.get("_zone")
-            # a claim that waits is queued; one that does not is refused: keep waiting (≥1 s) once asked to
-            wait_s = max(1, int(round(deadline - time.monotonic()))) if asked > 0 else 0
+            # a claim that waits is queued; one that does not is refused: once asked to wait, every target
+            # is queued, and the ones the budget no longer covers are not held
             body: dict[str, Any] = {
                 **{k: v for k, v in target.items() if k != "_zone"},
                 "mode": mode,
-                "wait": wait_s > 0,
+                "wait": asked > 0,
                 "source": "mcp",
             }
-            if wait_s > 0:
-                body["wait_s"] = wait_s
+            held = _hold(asked, entered, cap)
+            if held > 0:
+                body["wait_s"] = held
             if task_row is not None:
                 body["task_id"] = task_row["id"]
             if reason:
                 body["reason"] = reason[:280]
-            started = time.monotonic()
+            posted = time.monotonic()
             try:
                 status, res, _ = http.call(
                     "POST",
                     f"/crews/{seat.crew_id}/claims",
                     token=seat.token,
                     json=body,
-                    timeout=(wait_s + HTTP_GRACE_S) if wait_s > 0 else None,
+                    timeout=(held + MCP_HOLD_GRACE_S) if held > 0 else None,
                 )
             except CrewApiError as e:
                 if e.status == 422 and e.error == "zone_path" and isinstance(fallback, dict):
@@ -1988,7 +2040,7 @@ class CrewBridge:
                 capped += 1 if e.status == 409 and e.error == "claim_cap" else 0
                 lines.append(self._refused(http, seat, label, e, data))
                 continue
-            waited = int(round(time.monotonic() - started))
+            waited = int(round(time.monotonic() - posted))
             claim = (res or {}).get("claim") or {}
             state = claim.get("state")
             granted += 1 if state == "active" else 0
@@ -1997,7 +2049,7 @@ class CrewBridge:
                 lines.append(f"GRANTED {label} ({claim.get('mode')}, epoch {claim.get('epoch')}, {claim.get('id')}){note}")
             elif state == "queued":
                 who = self._blocker_text(http, seat, (res or {}).get("blockers") or [])
-                waited_txt = f" (waited {waited}s)" if asked > 0 else ""
+                waited_txt = f" (waited {waited}s{_held_note(asked, cap) if held < asked else ''})" if asked > 0 else ""
                 lines.append(
                     f"QUEUED {label}{waited_txt}: {who}. You are next in line ({claim.get('id')}); "
                     f"call crew_claim again with wait_s to keep waiting, or work elsewhere.{cut}"
@@ -2682,6 +2734,7 @@ class CrewBridge:
         wait_s: int,
         project_id: str | None = None,
     ) -> str:
+        started = time.monotonic()
         seat = self.write_seat(caller, project_id, "crew_say")
         http = self._http(caller, seat)
         self._touch_quietly(caller, seat)
@@ -2697,18 +2750,37 @@ class CrewBridge:
                 text = f"{mention} {text}"
         payload: dict[str, Any] = {"kind": kind, "body": text, "client_msg_id": f"mcp-{uuid.uuid4().hex[:24]}"}
         asked = wait_s
-        wait_s = min(asked, self.max_wait_s) if asked > 0 else 0
+        cap = self.hold_max_s()
         if thread:
             payload["thread_root_id"] = thread.strip()
-        if wait_s > 0:
-            payload["wait_s"] = wait_s
-        _, res, _ = http.call(
-            "POST",
-            f"/crews/{seat.crew_id}/messages",
-            token=seat.token,
-            json=payload,
-            timeout=(wait_s + HTTP_GRACE_S) if wait_s > 0 else None,
-        )
+        held = _hold(asked, started, cap)
+        if held > 0:
+            payload["wait_s"] = held
+        cut_short = False
+        try:
+            _, res, _ = http.call(
+                "POST",
+                f"/crews/{seat.crew_id}/messages",
+                token=seat.token,
+                json=payload,
+                timeout=(held + MCP_HOLD_GRACE_S) if held > 0 else None,
+            )
+        except CrewApiError as e:
+            if held <= 0 or e.status != 0 or e.error != "timeout":
+                raise
+            # The server commits the message before it starts waiting, so a wait that outlived the HTTP
+            # timeout left it posted. The same client_msg_id returns that row (no second message).
+            payload.pop("wait_s")
+            try:
+                _, res, _ = http.call("POST", f"/crews/{seat.crew_id}/messages", token=seat.token, json=payload)
+            except CrewApiError:
+                raise CrewApiError(
+                    0,
+                    "timeout",
+                    "The Remembra server did not answer in time. The message may already be posted: look at "
+                    "crew_status(verbose=True) before you send it again.",
+                ) from None
+            cut_short = True
         res = res or {}
         msg = res.get("message") or {}
         lines = [
@@ -2719,19 +2791,25 @@ class CrewBridge:
             lines.append(
                 f"Decision D-{decision.get('number')} is PROPOSED: it is not in force until a human confirms it on the dashboard."
             )
-        if wait_s > 0:
+        if asked > 0:
             reply_text = res.get("reply_text")
+            read_it = f'crew_status(message="{_safe(msg.get("id")) or "msg_…"}") shows the replies.'
             if res.get("reply") and isinstance(reply_text, str):
                 lines.append(reply_text)
+            elif cut_short:
+                lines.append(
+                    f"The wait for a reply was cut short (no answer from the server within {held}s). The message is "
+                    f"posted: do not send it again. {read_it}"
+                )
+            elif held < asked:
+                waited = int(round(float(res.get("waited_s") or held)))
+                cut = f" Waits are cut to {cap}s per call." if asked > cap else ""
+                lines.append(
+                    f"no reply yet (waited {waited}s{_held_note(asked, cap)}).{cut} The message is posted: do not send "
+                    f"it again. {read_it} A later reply also reaches you as a crew_notice on a later call."
+                )
             else:
-                waited = int(round(float(res.get("waited_s") or wait_s)))
-                if asked > wait_s:
-                    lines.append(
-                        f"no reply yet (waited {waited}s; waits are cut to {self.max_wait_s}s per call). The reply "
-                        "will reach you as a crew_notice on a later call, or in crew_status."
-                    )
-                else:
-                    lines.append(f"no reply yet (waited {waited}s)")
+                lines.append(f"no reply yet (waited {int(round(float(res.get('waited_s') or asked)))}s)")
         return "\n".join(lines)
 
     # -- crew_checkpoint ------------------------------------------------------------------

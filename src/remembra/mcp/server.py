@@ -2222,7 +2222,7 @@ def ack_inbox(
 
 
 def _max_wait_s(raw: str | None) -> int:
-    """``REMEMBRA_MCP_MAX_WAIT_S``: the longest one crew call waits on the server (default 40 s).
+    """``REMEMBRA_MCP_MAX_WAIT_S``: the longest one crew call waits on the server (default 45 s).
 
     MCP clients drop a tool call after about 60 s and may then replace the stdio server. Raise this only for
     a client whose tool timeout is longer; the tools' own limits (120 s / 300 s) still apply.
@@ -2467,9 +2467,9 @@ async def crew_claim(
 
     claim: zone="pos" (or paths=["src/app/pos/cart.ts"], or task="T-14" for all its zones).
     Answers GRANTED, QUEUED or REFUSED. When REFUSED, do not edit there: work elsewhere or ask
-    the holder with crew_say(to="@holder", kind="request_release"). wait_s (≤300) waits for the
-    grant instead (the call blocks until granted or the time is up; one call waits at most 40 s,
-    then answers QUEUED: call again to keep waiting).
+    the holder with crew_say(to="@holder", kind="request_release"). wait_s waits for the grant
+    instead: one call holds at most 45 seconds in all (a larger wait_s is held that long), then
+    answers QUEUED; you keep your place in line, so call again with wait_s to keep waiting.
     release: zone/paths/task you hold, also one crew_status shows as yours and reserved
     (baton=True keeps an active one reserved for the next pickup).
     adopt: a baton offered to you in your brief: task="T-12", zone="pos" or the reserved
@@ -2491,7 +2491,7 @@ async def crew_claim(
         to: For handover: the receiving session's callsign (@codex-1).
         baton: For release: keep the area reserved for the next agent.
         reason: Short note shown to the crew.
-        wait_s: Seconds to wait for a grant (0–300; one call waits at most 40 s).
+        wait_s: Seconds to wait for a grant; one call holds at most 45.
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
             you work in more than one project or share this MCP server with other conversations (default:
             the only project this session chose with session_brief / crew_status).
@@ -2649,15 +2649,17 @@ async def crew_say(
 
     to="crew" posts to the channel; "@codex-1" (a session), "@codex" (an agent), "@crew" (every
     live session) or "@mani" (the human) mentions them. wait_s waits for the first reply in the
-    thread and returns it as data (one call waits at most 40 s; a later reply reaches you as a
-    crew_notice or in crew_status). A decision stays proposed until a human confirms it.
+    thread and returns it as data: one call holds at most 45 seconds (a larger wait_s is held that
+    long; a later reply reaches you as a crew_notice or in crew_status); the message id comes back
+    either way, so never send the message again after a wait.
+    A decision stays proposed until a human confirms it.
 
     Args:
         body: The message.
         kind: chat | question | answer | note | request_release | decision.
         to: crew, or @callsign / @agent / @crew / @mani.
         thread: Message id to reply in (msg_…).
-        wait_s: Seconds to wait for a reply (0–120; one call waits at most 40 s).
+        wait_s: Seconds to wait for a reply; one call holds at most 45.
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
             you work in more than one project or share this MCP server with other conversations (default:
             the only project this session chose with session_brief / crew_status).

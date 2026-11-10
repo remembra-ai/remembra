@@ -7,10 +7,10 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 | Tool | Parameters (default) | Returns |
 |---|---|---|
 | `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false`, `join=true`, `message?` | joins implicitly (`join=false`: look only, no seat); crew block, deltas since cursor, the YOU self-view, each mention with its message (as data); `verbose` adds the latest five channel messages; `message="msg_…"` returns that message in full with its thread and changes nothing |
-| `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300), `project_id?`, `root_path?` | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
+| `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300 accepted; one call holds ≤45 s in all), `project_id?`, `root_path?` | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
 | `crew_guard` | `paths: [str]` (required), `command?`, `mcp_tool?`, `project_id?`, `root_path?` | `ALLOW` / `DENY <reason>` |
 | `crew_task` | `action="list"` (`list create start update block release`), `task?`, `title?`, `status?`, `zones?: [str]`, `acceptance?: [Criterion]`, `phase?`, `note?`, `project_id?`, `root_path?` | `start` claims the task's zones atomically |
-| `crew_say` | `body` (required), `kind="chat"` (`chat question answer note request_release decision`), `to="crew"`, `thread?`, `wait_s=0` (≤120), `project_id?`, `root_path?` | message id and seq; with `wait_s`, the first reply (as data) or "no reply yet" |
+| `crew_say` | `body` (required), `kind="chat"` (`chat question answer note request_release decision`), `to="crew"`, `thread?`, `wait_s=0` (≤120 accepted; one call holds ≤45 s), `project_id?`, `root_path?` | message id and seq; with `wait_s`, the first reply (as data) or "no reply yet" |
 | `crew_checkpoint` | `files_changed: [str]` (required), `summary?`, `commits?: [str]`, `tests?: [{command, passed, failed}]`, `next_step?`, `task?`, `project_id?`, `root_path?` | collision check plus crew delta |
 | `crew_report` | `task` (required), `sections` (required: `done not_done failing next follow_ups`), `criteria_evidence?`, `commits?`, `tests?`, `summary?`, `release=true`, `project_id?`, `root_path?` | verdict, `accepted`/`review`, unmet criteria (MCP evidence is `agent-declared`) |
 
@@ -29,12 +29,17 @@ transport the answer of each of these six tools carries the line `(in CREW <proj
 An argument
 a tool does not have is refused with the list of the ones it takes.
 
-`wait_s` keeps its contract range (≤300 / ≤120), but one MCP call waits at most `MAX_WAIT_S` (40 s,
-`REMEMBRA_MCP_MAX_WAIT_S`) so it answers inside an MCP client's request timeout; the answer says when a wait
-was cut.
-
 Parameter order in the Python signature is free (required parameters first); names, types,
 defaults, enums and caps are the contract.
+
+**Long-poll hold:** MCP clients give up on a request after 60 s, so the MCP bridge holds a
+`wait_s` long-poll for at most 45 s per call, counted from the start of the call
+(`remembra.mcp.crew.MCP_HOLD_MAX_S`; override with `REMEMBRA_MCP_MAX_WAIT_S`, read when the server
+starts, or `REMEMBRA_MCP_WAIT_MAX_S`, read on every call and the one that wins, for a client with a
+longer timeout). `wait_s` keeps its contract range (≤300 / ≤120), so a larger `wait_s` is not refused:
+it is held that long and the answer says how long was waited. `crew_say` always returns the message
+id; `crew_claim` keeps the queued claim, so calling again continues the wait. The REST routes keep
+their own limits (300 s / 120 s).
 
 **Piggyback:** every Remembra MCP result may get a `crew_notice` suffix ≤300 chars
 (`TEXT_CAPS["piggyback"]`), agent text inside the data block, at most one per 60 s
