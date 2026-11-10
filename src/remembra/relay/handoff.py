@@ -634,6 +634,8 @@ FREE_FORM_CLIP = 2000
 _FACTS_SOURCE_LABELS = {
     "relay-cli:git+transcript": "reported as collected by remembra-relay from git and the session transcript (not checked)",
     "relay-cli:git": "reported as collected by remembra-relay from git (not checked)",
+    # a session outside a git repository: there is no git to read, only the agent's transcript
+    "relay-cli:transcript": "reported as collected by remembra-relay from the session transcript (not checked)",
     "agent-declared": "declared by the agent (not checked)",
     "relay-cli": "collected by remembra-relay",
     "server-inferred": "inferred by the server from crew checkpoints (the agent did not close its session)",

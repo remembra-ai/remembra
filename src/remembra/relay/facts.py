@@ -4,7 +4,9 @@ Nothing here asks a model anything: facts are read from ``git`` and from the
 agent's own tool-call log. The raw transcript never leaves the machine — only
 the extracted commands (clipped), exit codes, test verdicts, edited paths and
 open todo items are sent, and every string is passed through
-``redact_secrets`` before it is returned.
+``redact_secrets`` before it is returned. For a session that left none of
+those, how much it did is sent instead (:func:`activity_note`): the number of
+prompts and of tool calls per tool name, never what was asked or answered.
 
 Stdlib only. Every subprocess call is bounded by a shared deadline so a close
 hook can never hang the agent. The probes a handoff cannot do without (is this
@@ -30,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from remembra.relay.handoff import is_probe_command
+from remembra.relay.handoff import build_sections, is_probe_command, sections_have_substance
 from remembra.relay.testruns import failed_tests, moved_directory, resolve_runs, run_verdict, runner_invocations
 from remembra.security.secrets import redact_secrets
 
@@ -617,6 +619,16 @@ class TranscriptFacts:
     session_id: str | None = None
     # The agent's own message when its last turn stopped on a plan/usage limit (Codex rollouts only).
     usage_limit: str | None = None
+    # How much the session did, for a session that left nothing else (see :func:`activity_note`):
+    # what the user asked for (count only), each tool call once by tool name (the relay's own
+    # bookkeeping left out), and the time of the last record read.
+    prompts: int = 0
+    tool_calls: dict[str, int] = field(default_factory=dict)
+    ended_at: datetime | None = None
+    # The first prompt is a scheduled task's (an automated run leaves no handoff).
+    automated: bool = False
+    # The agent stored its own handoff through the Remembra MCP ``close_session`` tool.
+    agent_handoff: bool = False
 
 
 def _result_text(content: Any) -> str:
@@ -752,6 +764,164 @@ def _finish(
     return facts
 
 
+# ---------------------------------------------------------------------------
+# Activity: what a session did that left no git or file trace
+# ---------------------------------------------------------------------------
+
+# A handoff note is written from the transcript only for a session that asked for something and did
+# at least this much (one lookup or one message is not work to pick up).
+ACTIVITY_MIN_PROMPTS = 1
+ACTIVITY_MIN_TOOL_CALLS = 3
+ACTIVITY_TOOLS_NAMED = 6
+ACTIVITY_NOTE_PREFIX = "Session activity read by remembra-relay from the transcript (not written by the agent): "
+# Tool calls that are not work: looking up tools, the agent's own todo list or plan, and the relay's
+# own start-of-session reads.
+_BOOKKEEPING_TOOLS = frozenset({"ToolSearch", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "update_plan"})
+_REMEMBRA_READS = frozenset(
+    {
+        "session_brief",
+        "crew_status",
+        "get_inbox",
+        "health_check",
+        "list_status",
+        "resolve_project",
+        "remembra_help",
+        "remembra_doctor",
+        "remembra_setup",
+        "close_session",
+    }
+)
+_MCP_TOOL_RE = re.compile(r"^mcp__(?P<server>.+?)__(?P<tool>[^_].*)$")
+_TOOL_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
+_LEADING_REMINDER_RE = re.compile(r"^\s*<system-reminder>.*?</system-reminder>\s*", re.DOTALL)
+# User-role records that are not something the user asked: command output, slash-command wrappers,
+# background-task notices, an interrupt marker.
+_NOT_A_PROMPT_PREFIXES = (
+    "<local-command-",
+    "<command-name>",
+    "<command-message>",
+    "<task-notification",
+    "<user-prompt-submit-hook>",
+    "[Request interrupted",
+)
+_SCHEDULED_PREFIX = "<scheduled-task"
+
+
+def _tool_base(name: str) -> tuple[str, str | None]:
+    """``("navigate", "Claude_Browser")`` for ``mcp__Claude_Browser__navigate``; ``("Bash", None)`` for a built-in."""
+    match = _MCP_TOOL_RE.match(name)
+    if match:
+        return match.group("tool"), match.group("server")
+    return name, None
+
+
+def _counted_tool(name: str) -> str | None:
+    """The name a tool call is counted under, or None for one that is not work (see ``_BOOKKEEPING_TOOLS``)."""
+    base, server = _tool_base(name)
+    if not base or base in _BOOKKEEPING_TOOLS:
+        return None
+    if base in _REMEMBRA_READS and (server is None or "remembra" in server.lower()):
+        return None
+    clean = _TOOL_NAME_UNSAFE_RE.sub("_", base)[:40].strip("_")
+    return clean or None
+
+
+def _is_agent_handoff(name: str) -> bool:
+    base, server = _tool_base(name)
+    return base == "close_session" and (server is None or "remembra" in server.lower())
+
+
+def _prompt_text(content: Any) -> str | None:
+    """The text of a user-role message, or None when it carries tool results (not a prompt)."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_result":
+            return None
+        if block.get("type") in ("text", "input_text") and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "\n".join(parts) if parts else None
+
+
+def _count_prompt(facts: TranscriptFacts, text: str | None) -> None:
+    """Count ``text`` as a prompt when it is something the user asked; note a scheduled task's first prompt."""
+    if text is None:
+        return
+    while True:
+        stripped = _LEADING_REMINDER_RE.sub("", text, count=1)
+        if stripped == text:
+            break
+        text = stripped
+    text = text.strip()
+    if not text or text.startswith(_NOT_A_PROMPT_PREFIXES):
+        return
+    if facts.prompts == 0 and text.startswith(_SCHEDULED_PREFIX):
+        facts.automated = True
+    facts.prompts += 1
+
+
+def _count_tool(facts: TranscriptFacts, name: str) -> None:
+    counted = _counted_tool(name)
+    if counted:
+        facts.tool_calls[counted] = facts.tool_calls.get(counted, 0) + 1
+
+
+def _stamp(facts: TranscriptFacts, value: Any) -> None:
+    """Keep the first and the last record time of the transcript."""
+    if not isinstance(value, str):
+        return
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return
+    if facts.started_at is None:
+        facts.started_at = when
+    try:
+        if facts.ended_at is None or when > facts.ended_at:
+            facts.ended_at = when
+    except TypeError:  # one stamp with a zone, one without: keep the first one read
+        pass
+
+
+def activity_note(transcript: TranscriptFacts | None) -> str | None:
+    """One line saying how much a session did, for a handoff that would otherwise record nothing.
+
+    Browser, inbox, research and read-only work leaves no commit, file change, failed command or
+    todo, so its close used to be dropped as empty. The line names the number of prompts and of
+    tool calls (the most used tool names with their counts) and how long the session ran. It never
+    quotes a prompt, an answer, a tool's input or its output. None for a session that did less than
+    ``ACTIVITY_MIN_PROMPTS`` / ``ACTIVITY_MIN_TOOL_CALLS``, for a scheduled task's run, and for a
+    session whose agent stored its own handoff (``close_session``): that one says more than this.
+    """
+    if transcript is None or transcript.automated or transcript.agent_handoff:
+        return None
+    calls = sum(transcript.tool_calls.values())
+    if transcript.prompts < ACTIVITY_MIN_PROMPTS or calls < ACTIVITY_MIN_TOOL_CALLS:
+        return None
+    ranked = sorted(transcript.tool_calls.items(), key=lambda kv: (-kv[1], kv[0]))
+    named = ", ".join(f"{name} {count}" for name, count in ranked[:ACTIVITY_TOOLS_NAMED])
+    if len(ranked) > ACTIVITY_TOOLS_NAMED:
+        named += f" (+{len(ranked) - ACTIVITY_TOOLS_NAMED} more)"
+    duration = ""
+    if transcript.started_at is not None and transcript.ended_at is not None:
+        try:
+            minutes = round((transcript.ended_at - transcript.started_at).total_seconds() / 60)
+        except TypeError:
+            minutes = 0
+        if minutes >= 1:
+            duration = f" over {minutes} min"
+    prompts = f"{transcript.prompts} prompt{'s' if transcript.prompts != 1 else ''}"
+    return (
+        f"{ACTIVITY_NOTE_PREFIX}{prompts}, {calls} tool calls{duration} ({named}). "
+        "It left no commit, file change, failed command or open todo to report; what was asked and answered is not sent."
+    )
+
+
 def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: str | None = None) -> TranscriptFacts:
     """Extract Bash commands + exit codes, test runs, edited files and open todos.
 
@@ -766,6 +936,12 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
     the tool_use line (the Bash tool keeps its directory between calls),
     moved by a leading ``cd``/``pushd``/subshell or ``git -C``. Commit ids
     printed by ``git commit`` inside the repository are commit evidence.
+
+    Activity (:func:`activity_note`) is counted from the session's own lines
+    only: ``user`` lines that are a prompt, and each ``tool_use`` id once on an
+    ``assistant`` line. The desktop app repeats every message in
+    ``api-request-blob`` records, and a sub-agent's lines are marked
+    ``isSidechain``; neither is counted.
     """
     facts = TranscriptFacts()
     uses: dict[str, tuple[str, dict[str, Any], str | None]] = {}
@@ -774,6 +950,7 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
     pending_task_creates: dict[str, str] = {}
     command_log: list[dict[str, Any]] = []
     files: list[str] = []
+    counted: set[str] = set()  # tool_use ids already counted as activity
 
     for line in _iter_lines(path):
         if deadline is not None and deadline.expired:
@@ -781,6 +958,8 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
         if (
             '"tool_use"' not in line
             and '"tool_result"' not in line
+            and '"type":"user"' not in line
+            and '"type": "user"' not in line
             and (facts.started_at is not None or '"timestamp"' not in line)
         ):
             continue
@@ -790,15 +969,13 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
             continue
         if not isinstance(entry, dict):
             continue
-        ts = entry.get("timestamp")
-        if isinstance(ts, str) and facts.started_at is None:
-            try:
-                facts.started_at = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            except ValueError:
-                pass
+        _stamp(facts, entry.get("timestamp"))
         if facts.session_id is None and isinstance(entry.get("sessionId"), str):
             facts.session_id = entry["sessionId"]
         content = (entry.get("message") or {}).get("content") if isinstance(entry.get("message"), dict) else None
+        own_line = not entry.get("isSidechain") and not entry.get("isMeta")
+        if entry.get("type") == "user" and own_line:
+            _count_prompt(facts, _prompt_text(content))
         if not isinstance(content, list):
             continue
         for block in content:
@@ -809,7 +986,11 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 raw_input = block.get("input")
                 tool_input: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
                 line_cwd = entry.get("cwd")
-                uses[str(block.get("id"))] = (name, tool_input, line_cwd if isinstance(line_cwd, str) else None)
+                use_key = str(block.get("id"))
+                uses[use_key] = (name, tool_input, line_cwd if isinstance(line_cwd, str) else None)
+                if entry.get("type") == "assistant" and own_line and use_key not in counted:
+                    counted.add(use_key)
+                    _count_tool(facts, name)
                 if name == "TodoWrite" and isinstance(tool_input.get("todos"), list):
                     todo_snapshot = [t for t in tool_input["todos"] if isinstance(t, dict)]
                 elif name == "TaskUpdate" and tool_input.get("taskId") is not None:
@@ -827,6 +1008,8 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 name, tool_input, use_cwd = uses[use_id]
                 is_error = bool(block.get("is_error"))
                 text = _result_text(block.get("content"))
+                if not is_error and _is_agent_handoff(name):
+                    facts.agent_handoff = True
                 if name == "Bash":
                     command = str(tool_input.get("command") or "").strip()
                     if not command or tool_input.get("run_in_background"):
@@ -968,6 +1151,9 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
     plan: list[dict[str, Any]] | None = None
     session_cwd: str | None = None
     limit: str | None = None
+    counted: set[str] = set()  # call ids already counted as activity
+    turns = 0
+    handoff_calls: set[str] = set()
 
     def record(key: str, command: str, exit_code: int, output: str, cwd: str | None, event: bool) -> None:
         if key in from_event and not event:
@@ -988,6 +1174,8 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
         if not isinstance(entry, dict) or not isinstance(entry.get("payload"), dict):
             continue
         kind, payload = entry.get("type"), entry["payload"]
+        if kind != "session_meta":
+            _stamp(facts, entry.get("timestamp"))
         if kind == "session_meta":
             sid = payload.get("id") or payload.get("session_id")
             if isinstance(sid, str) and facts.session_id is None:
@@ -1007,6 +1195,7 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
         if kind == "event_msg":
             if ptype == "task_started":
                 limit = None
+                turns += 1
             elif ptype == "task_complete" and isinstance(payload.get("error"), dict):
                 limit = _codex_error(payload)  # this turn's outcome (a different error clears it)
             elif ptype == "error":
@@ -1030,6 +1219,8 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
                     changes = item.get("changes")
                     if isinstance(changes, dict):
                         files.extend(p for p in changes if isinstance(p, str) and p)
+                elif item.get("type") == "UserMessage":
+                    _count_prompt(facts, _prompt_text(item.get("content")))
             elif ptype == "exec_command_end" and isinstance(payload.get("exit_code"), int):
                 output = payload.get("aggregated_output") or payload.get("formatted_output") or ""
                 key = str(payload.get("call_id") or f"line-{n}")
@@ -1044,6 +1235,13 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
             continue
         if kind != "response_item":
             continue
+        if ptype in ("function_call", "custom_tool_call"):
+            call_key = str(payload.get("call_id") or payload.get("id") or f"line-{n}")
+            if call_key not in counted:
+                counted.add(call_key)
+                _count_tool(facts, str(payload.get("name") or ""))
+            if _is_agent_handoff(str(payload.get("name") or "")):
+                handoff_calls.add(call_key)
         if ptype == "function_call":
             name = str(payload.get("name") or "")
             try:
@@ -1059,8 +1257,10 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
                 calls[call_id] = (command, workdir if isinstance(workdir, str) else None)
             elif name == "update_plan" and isinstance(args.get("plan"), list):
                 plan = [p for p in args["plan"] if isinstance(p, dict)]
-        elif ptype == "function_call_output":
+        elif ptype in ("function_call_output", "custom_tool_call_output"):
             call_id = str(payload.get("call_id") or "")
+            if call_id in handoff_calls:
+                facts.agent_handoff = True
             if call_id in calls and call_id not in from_event:
                 command, workdir = calls[call_id]
                 text, code = _codex_output_exit(payload.get("output"))
@@ -1079,6 +1279,8 @@ def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str 
         facts.commit_shas.extend(_COMMIT_LINE_RE.findall(item["output"]))
         command_log.append({**item, "cwd": cwd})
     open_todos = [str(p.get("step") or "") for p in plan or [] if p.get("status") != "completed"]
+    if facts.prompts == 0:
+        facts.prompts = turns  # a rollout without UserMessage items (older versions): one prompt per turn
     facts.usage_limit = _scrub(limit) if limit else None
     return _finish(facts, command_log, files, open_todos)
 
@@ -1126,7 +1328,11 @@ def relativize(paths: Iterable[str], root: str | None) -> list[str]:
 
 
 def merge_facts(git: dict[str, Any], transcript: TranscriptFacts | None, root: str | None) -> dict[str, Any]:
-    """git facts + transcript facts -> the ``/session/close`` facts payload."""
+    """git facts + transcript facts -> the ``/session/close`` facts payload.
+
+    A session whose facts would record nothing but whose transcript shows work
+    gets :func:`activity_note` as its ``notes``; typed notes are never replaced.
+    """
     facts = dict(git)
     how = facts.pop("commit_range", None)
     if how:
@@ -1140,6 +1346,11 @@ def merge_facts(git: dict[str, Any], transcript: TranscriptFacts | None, root: s
         facts["tests"] = transcript.tests
         facts["errors"] = transcript.errors
         facts["todos_open"] = transcript.todos_open
+        if not str(facts.get("notes") or "").strip() and not sections_have_substance(build_sections(facts)):
+            # Nothing above is worth a handoff: say how much the session did, if it did anything.
+            note = activity_note(transcript)
+            if note:
+                facts["notes"] = note
     return cap_close_lists(facts)
 
 

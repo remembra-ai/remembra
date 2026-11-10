@@ -1194,8 +1194,10 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     facts = factlib.merge_facts(git_facts, transcript, ctx.repo.toplevel)
     if ctx.repo.is_git:
         facts["facts_source"] = "relay-cli:git+transcript" if transcript is not None else "relay-cli:git"
+    elif transcript is not None:
+        facts["facts_source"] = "relay-cli:transcript"  # no git: what the transcript shows (and what was typed)
     else:
-        facts["facts_source"] = "agent-declared"  # no git: only what was typed (--notes/--todo/--next)
+        facts["facts_source"] = "agent-declared"  # no git, no transcript: only what was typed (--notes/--todo/--next)
     if args.notes:
         facts["notes"] = args.notes
     if args.next:

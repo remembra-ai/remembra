@@ -20,7 +20,7 @@ through the `session_brief` and `close_session` MCP tools in any other MCP agent
 2. **Close-out.** When a session ends, `remembra-relay close` gathers facts mechanically from git (branch,
    head, this session's commits, changed and uncommitted files, diff stat, unpushed commits) and,
    for Claude Code and Codex, from the session transcript (shell commands and exit codes, test runs,
-   edited files, open todo or plan items, and for Codex a usage-limit stop). The raw transcript never leaves the machine. The server stores **one** handoff
+   edited files, open todo or plan items, and for Codex a usage-limit stop; for a session that left none of these, the number of prompts and of tool calls per tool name). The raw transcript never leaves the machine. The server stores **one** handoff
    with fixed sections: *Done · Not done / open · Failing / errors · Next step*. An agent-written
    summary is optional and is checked against the facts. It is shown as *unverified* or *contradicted*.
 3. **Pickup.** At session start, `remembra-relay brief` (or the `session_brief` MCP tool) leads with one line:
@@ -423,8 +423,19 @@ Without a session id (the AGENTS.md fallback, manual runs), `brief` starts a new
 `close` in the same place within 12 hours updates it. A `close` with no preceding `brief` gets its own
 id, so separate sessions never overwrite each other.
 
+**Work that leaves no file behind is still handed off.** Browser, inbox, research and read-only work
+ends with no commit, changed file, failed command or todo, in a folder without a repository and in a
+clean checkout alike. For Claude Code and Codex, `close` then reads from the transcript how much the
+session did and sends that as the handoff's note: the number of prompts, the number of tool calls with
+the most used tool names, and how long it ran (`2 prompts, 56 tool calls over 73 min (navigate 47,
+WebSearch 8, send_to_inbox 1)`). What was asked and answered, and what a tool was given or returned,
+is never sent. The note is written only for a session with at least one prompt and three tool calls
+(looking up tools, the agent's own todo list and Remembra's own session reads are not counted), never
+for a scheduled task's run, and never when the agent stored its own handoff with `close_session`.
+
 **Empty sessions leave no handoff.** When a session recorded nothing (no summary or notes, no commits,
-no changed or uncommitted files, no tests, errors or failed commands, no todos and no next step: an
+no changed or uncommitted files, no tests, errors or failed commands, no todos and no next step, and
+no work in its transcript as described above: an
 idle or automated run), `close` sends nothing and writes one line to `~/.remembra/relay/relay.log`
 (`close: nothing to hand off for <agent> session <id> …`). Run by hand it also says so on stderr. To
 leave a handoff anyway, pass `--summary` (or `--notes`, `--todo`, `--next`). Git state that could not be

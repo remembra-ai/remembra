@@ -62,7 +62,7 @@ log = structlog.get_logger(__name__)
 
 RELAY_KEY_FIELD = "relay_key"
 MAX_LINKED_IN_BRIEF = 8
-FACTS_SOURCES = ("relay-cli:git+transcript", "relay-cli:git", "agent-declared")
+FACTS_SOURCES = ("relay-cli:git+transcript", "relay-cli:git", "relay-cli:transcript", "agent-declared")
 # Facts the server synthesized (Crew mode: a stalled or lost session's handoff, written
 # by the crew outbox). Accepted only from server callers (``server_facts=True``), never
 # from a client close.
