@@ -29,7 +29,7 @@ import json
 import os
 import tomllib
 from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,7 @@ DEFAULT_URL = "http://localhost:8787"
 @dataclass(frozen=True)
 class RelayConfig:
     url: str
-    api_key: str | None
+    api_key: str | None = field(repr=False)  # never in a repr: tracebacks and assertion diffs print it
     agent_id: str | None
     source: str
     project: str | None = None

@@ -687,7 +687,7 @@ class Seat:
     client_session_id: str
     crew_id: str
     session_id: str
-    token: str
+    token: str = field(repr=False)  # the crew session token: never in a repr
     callsign: str
     verified: bool
     observe_only: bool

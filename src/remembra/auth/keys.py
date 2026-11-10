@@ -6,7 +6,7 @@ import os
 import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -67,7 +67,7 @@ class APIKey:
     """Represents a generated API key."""
 
     id: str
-    key: str  # Full key (only available at creation time)
+    key: str = field(repr=False)  # Full key (only available at creation time); never in a repr
     user_id: str
     name: str | None
     created_at: datetime

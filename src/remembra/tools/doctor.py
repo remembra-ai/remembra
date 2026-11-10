@@ -8,7 +8,7 @@ import re
 import shutil
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ class DoctorTarget:
     config_path: Path
     command: str
     url: str | None
-    api_key: str | None
+    api_key: str | None = field(repr=False)  # never in a repr: tracebacks and assertion diffs print it
     project: str | None
     user_id: str | None
 

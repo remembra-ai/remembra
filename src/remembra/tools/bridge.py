@@ -12,7 +12,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -299,7 +299,7 @@ class BridgeConfig:
     upstream: str
     host: str = DEFAULT_BRIDGE_HOST
     port: int = DEFAULT_BRIDGE_PORT
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)  # never in a repr: tracebacks print it
     timeout: float = 30.0
     agent_name: str = DEFAULT_BRIDGE_AGENT_NAME
 

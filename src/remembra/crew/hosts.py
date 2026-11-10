@@ -30,7 +30,7 @@ import hashlib
 import hmac
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
 
@@ -100,7 +100,7 @@ def host_view(row: dict[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True)
 class RegisteredHost:
     row: dict[str, Any]
-    token: str  # returned once, never stored
+    token: str = field(repr=False)  # returned once, never stored, never in a repr
 
 
 async def _fetchone(conn: aiosqlite.Connection, sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:

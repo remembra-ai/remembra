@@ -22,7 +22,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from remembra.cloud.plans import BillingInterval, PlanTier
@@ -198,9 +198,9 @@ def with_catalog_prices(base: PaddleConfig) -> PaddleConfig:
 class PaddleSettings:
     """Runtime Paddle settings from environment."""
 
-    api_key: str
+    api_key: str = field(repr=False)  # never in a repr: tracebacks and logs print it
     client_token: str | None
-    webhook_secret: str | None
+    webhook_secret: str | None = field(repr=False)
     sandbox: bool
     config: PaddleConfig
 

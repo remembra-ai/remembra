@@ -81,7 +81,7 @@ class ExtractionConfig:
     enabled: bool = True
     provider: str = "openai"
     model: str = "gpt-4o-mini"
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)  # never in a repr: tracebacks print it
     max_facts_per_input: int = 25  # per chunk; truncation is flagged, not silent
     chunk_chars: int = 8000
     temperature: float = 0.1  # Low for consistency

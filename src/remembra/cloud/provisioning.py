@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from remembra.auth.keys import APIKeyManager
@@ -39,7 +39,7 @@ class ProvisionResult:
     """Result of provisioning a new tenant."""
 
     user_id: str
-    api_key: str
+    api_key: str = field(repr=False)  # returned once to the tenant; never in a repr or a log line
     api_key_id: str
     plan: PlanTier
     stripe_customer_id: str | None = None
