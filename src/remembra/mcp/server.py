@@ -58,6 +58,7 @@ from remembra.mcp.crew import (
     CrewHttp,
     CrewUsageError,
     clean_client_session_id,
+    hook_adapter_of,
 )
 from remembra.mcp.crew import error_text as crew_error_text
 from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
@@ -322,6 +323,67 @@ def _default_agent_id() -> str:
 
 def _known_agents() -> list[str]:
     return [a.strip() for a in REMEMBRA_KNOWN_AGENTS.split(",") if a.strip()]
+
+
+# ``<remembra-crew> <verb> --hook <adapter> --agent <agent id> # remembra-crew`` (crew_hooks.CrewCommands.command)
+_HOOK_AGENT_RE = re.compile(r"--hook\s+([A-Za-z0-9._-]+)\s+--agent\s+([A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127})\s+# remembra-crew")
+
+
+def _hook_agent_ids(own: str | None) -> list[str]:
+    """Agent ids other than ``own`` that the crew hooks of this agent's own program run as on this machine.
+
+    The hooks of a Claude Code session join the crew, poll the inbox and announce messages as the id in their
+    command line (``--agent``, with Claude Code's key), while the tools the same session calls may be served by
+    another MCP server with another id and key (the Claude desktop app's, for the sessions it starts). Then the
+    hooks say "MESSAGE … for you" about an inbox these tools cannot read. Read from the files the installer
+    recorded; [] on a remote transport (never the server's own home), without hooks, or when nothing differs.
+    """
+    me = (own or "").strip()
+    if not me or _is_remote_transport():
+        return []
+    try:
+        from pathlib import Path
+
+        from remembra.relay.adapters import get_adapter
+        from remembra.relay.crew.verify import read_adapters
+
+        home = Path.home()
+        adapter = hook_adapter_of(me)
+        entry = read_adapters(home)["adapters"].get(adapter)
+        if not isinstance(entry, dict) or not entry.get("installed"):
+            return []
+        listed = entry.get("config")
+        files = [str(f) for f in listed if isinstance(f, str)] if isinstance(listed, list) else []
+        known = get_adapter(adapter)
+        if known is not None:
+            files.append(str(known.spec.config_file(home)))
+        found: list[str] = []
+        for name in dict.fromkeys(files):
+            try:
+                text = Path(name).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for hook, agent in _HOOK_AGENT_RE.findall(text):
+                if hook == adapter and agent != me and agent not in found:
+                    found.append(agent)
+        return found
+    except Exception:
+        return []
+
+
+def _identity_split_warning(own: str | None) -> str | None:
+    """One sentence for ``health_check`` and the inbox tools when the hooks run as another agent id, else None."""
+    others = _hook_agent_ids(own)
+    if not others:
+        return None
+    names = " / ".join(f"'{a}'" for a in others[:3])
+    return (
+        f"The crew hooks on this machine run as {names}, but this MCP server is signed in as '{own}': a session that "
+        f"has both is two agents to Remembra. Messages the hooks announce are in the {names} inbox, which this "
+        f"connection cannot read or acknowledge; messages sent here go out as '{own}' and replies to them are not "
+        "announced by the hooks. To be one agent for the inbox, give this MCP server's entry the same REMEMBRA_AGENT_ID and "
+        "REMEMBRA_API_KEY as the entry the hooked agent itself uses, then restart the client."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +770,9 @@ def _config_warnings(agent_id: str | None, project: str | None, server_version: 
             f"MCP server is {__version__} but the API is {server_version}. Reinstall the MCP server "
             "(pipx install --force 'remembra[mcp]' or an editable install) so tools match the API."
         )
+    split = _identity_split_warning(agent_id)
+    if split:
+        warnings.append(split)
     return warnings
 
 
@@ -1717,6 +1782,14 @@ def send_to_inbox(
             )
         if sender == "unknown":
             warnings.append("Sender is 'unknown' because REMEMBRA_AGENT_ID is not set; the recipient cannot reply.")
+        hook_ids = _hook_agent_ids(sender) if sender != "unknown" else []
+        if hook_ids:
+            names = " / ".join(f"'{a}'" for a in hook_ids[:3])
+            warnings.append(
+                f"This message is sent as '{sender}'. The crew hooks on this machine run as {names}: a reply "
+                f"addressed to '{sender}' is not announced by them (read it with get_inbox here), and one addressed "
+                f"to {names} cannot be read from this connection. See health_check."
+            )
         # A reply goes to its original's project, so it surfaces where the conversation is; otherwise
         # tag the message with this client's project so project-restricted readers (e.g. the
         # Claude/ChatGPT connector) can see it.
@@ -1816,13 +1889,65 @@ def get_inbox(
                 item["body"] = body
                 item["metadata"] = r.get("metadata", {})
             items.append(item)
-        return _dump_data({"ok": True, "agent_id": aid, "count": len(items), "summary": summary, "items": items})
+        out: dict[str, Any] = {"ok": True, "agent_id": aid, "count": len(items), "summary": summary, "items": items}
+        hook_ids = _hook_agent_ids(aid)
+        if hook_ids:
+            names = " / ".join(f"'{a}'" for a in hook_ids[:3])
+            out["warnings"] = [
+                f"This is the '{aid}' inbox. The crew hooks on this machine run as {names}: a message they announce "
+                f'("MESSAGE inbox_… for you") is in the {names} inbox, which this connection cannot read. See health_check.'
+            ]
+        return _dump_data(out)
     except ValueError as e:
         return json.dumps({"ok": False, "error": str(e)})
     except MemoryError as e:
+        mismatch = _inbox_identity_mismatch(e, agent_id)
+        if mismatch is not None:
+            return json.dumps(mismatch)
         return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
         return json.dumps({"ok": False, "error": sanitize_error_message(e)})
+
+
+def _own_inbox_agent() -> str:
+    """The agent id this connection reads and acknowledges as ("" when none is configured)."""
+    try:
+        return str(_get_client().agent_id or _default_agent_id() or "").strip()
+    except Exception:
+        return str(_default_agent_id() or "").strip()
+
+
+def _inbox_identity_mismatch(e: MemoryError, requested: str | None) -> dict[str, Any] | None:
+    """The answer to ``get_inbox(agent_id=<another agent>)`` refused with 404, or None when that is not the case.
+
+    A key scoped to one agent reads only that agent's inbox, and the server answers a request for another one
+    exactly like a missing row ("Inbox not found": nothing to probe). The caller knows its own id, so the tool
+    can say what happened without the server saying more.
+    """
+    asked = (requested or "").strip()
+    own = _own_inbox_agent()
+    if e.status_code != 404 or not asked or not own or asked == own:
+        return None
+    message = (
+        f"This Remembra connection is signed in as '{own}' and reads only its own inbox; '{asked}' is another "
+        f"agent id. Call get_inbox() without agent_id for the '{own}' inbox."
+    )
+    if asked in _hook_agent_ids(own):
+        message += (
+            f" The crew hooks on this machine run as '{asked}', so a message they announced for you is in that "
+            f"inbox: it can be read and acknowledged only by a session whose Remembra tools are signed in as "
+            f"'{asked}' (health_check there says agent_id '{asked}'), or after the two are made one identity "
+            "(health_check here says how)."
+        )
+    return {
+        "ok": False,
+        "error": "identity_mismatch",
+        "code": 404,
+        "this_agent": own,
+        "requested": asked,
+        "message": message,
+        "detail": sanitize_error_message(e),
+    }
 
 
 def _inbox_sender_label(row: dict[str, Any]) -> str:
@@ -1874,6 +1999,21 @@ def ack_inbox(
             }
         )
     except MemoryError as e:
+        own = _own_inbox_agent()
+        if e.status_code == 404 and own:
+            # the server answers "not found" for a row addressed to another agent too (nothing to probe)
+            hook_ids = _hook_agent_ids(own)
+            names = " / ".join(f"'{a}'" for a in hook_ids[:3])
+            hint = (
+                f" This connection is signed in as '{own}' and can acknowledge only messages addressed to '{own}': "
+                "a message addressed to another agent id answers 'not found' here."
+            )
+            if hook_ids:
+                hint += (
+                    f" The crew hooks on this machine run as {names}, so an id they announced is in the {names} "
+                    "inbox. See health_check."
+                )
+            return json.dumps({"ok": False, "error": sanitize_error_message(e) + hint, "code": 404, "this_agent": own})
         return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
         return json.dumps({"ok": False, "error": sanitize_error_message(e)})

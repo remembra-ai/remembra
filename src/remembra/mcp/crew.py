@@ -162,6 +162,12 @@ def local_crew(timeout: float = 1.0) -> LocalCrew | None:
 _HOOK_ADAPTER_OF: Final = {"claude": "claude-code", "claude-desktop": "claude-code"}
 
 
+def hook_adapter_of(agent_id: str | None) -> str:
+    """The crew-hook adapter that is the same program as ``agent_id`` (the id itself unless listed above)."""
+    agent = str(agent_id or "").strip().lower()
+    return _HOOK_ADAPTER_OF.get(agent, agent)
+
+
 def local_hook_sessions(timeout: float = 1.0) -> list[dict[str, Any]]:
     """The live crew-hook sessions on this machine (crewd's ``status``, open to this user's processes), or []."""
     try:
@@ -682,7 +688,7 @@ class CrewBridge:
         if not caller.local or seat.local is not None:
             return None
         agent = str(caller.agent_id or seat.agent_id or "").strip().lower()
-        adapter = _HOOK_ADAPTER_OF.get(agent, agent)
+        adapter = hook_adapter_of(agent)
         rows = [
             r
             for r in local_hook_sessions()
