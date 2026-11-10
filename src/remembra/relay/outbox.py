@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +51,8 @@ MAX_ENTRIES = 50
 MAX_ENTRY_BYTES = 256 * 1024
 MAX_AGE_SECONDS = 14 * 86400
 LOG_MAX_BYTES = 256 * 1024
+LOG_GENERATIONS = 3  # relay.log.1 (newest) to relay.log.3 are kept next to relay.log
+RECENT_FAILURES = 10  # failures kept per agent in status.json, oldest first
 STALE_CLAIM_SECONDS = 120
 ENTRY_VERSION = 1
 # ``config_source`` of an entry the MCP server queued with its own key (remembra.mcp.close_queue). No
@@ -157,14 +159,24 @@ def atomic_write_private(path: Path, text: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def log_files(home: Path) -> list[Path]:
+    """relay.log and its rotated generations, newest first (whether or not they exist)."""
+    path = log_path(home)
+    return [path, *(path.with_name(f"{path.name}.{n}") for n in range(1, LOG_GENERATIONS + 1))]
+
+
 def log(home: Path, message: str) -> None:
-    """Append one line to relay.log (0600, rotated to relay.log.1 past ``LOG_MAX_BYTES``). Never raises."""
+    """Append one line to relay.log (0600). Past ``LOG_MAX_BYTES`` it becomes relay.log.1 and the older
+    generations move up; ``LOG_GENERATIONS`` are kept. Never raises."""
     try:
         path = log_path(home)
         _ensure_dir(path.parent)
         with contextlib.suppress(OSError):
             if path.stat().st_size > LOG_MAX_BYTES:
-                os.replace(path, path.with_name(path.name + ".1"))
+                files = log_files(home)
+                for older, newer in zip(reversed(files), reversed(files[:-1]), strict=False):
+                    with contextlib.suppress(OSError):
+                        os.replace(newer, older)
         line = " ".join(str(redact(message)).split())
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as fh:
@@ -696,6 +708,75 @@ def read_status(home: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+STATUS_LOCK_WAIT_SECONDS = 0.5  # a hook never waits longer for another hook's status write
+STATUS_LOCK_STALE_SECONDS = 5.0
+
+
+@contextlib.contextmanager
+def _status_lock(home: Path) -> Iterator[None]:
+    """Serialise the read-modify-write of status.json across hooks that end in the same second.
+
+    Bounded: after ``STATUS_LOCK_WAIT_SECONDS`` (or when the lock cannot be made) the caller goes ahead
+    without it, as before; a lock left by a killed process is removed after ``STATUS_LOCK_STALE_SECONDS``.
+    Never raises.
+    """
+    path = status_path(home).with_name("status.lock")
+    held = False
+    try:
+        _ensure_dir(path.parent)
+        end = time.monotonic() + STATUS_LOCK_WAIT_SECONDS
+        while True:
+            try:
+                os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+                held = True
+                break
+            except FileExistsError:
+                with contextlib.suppress(OSError):
+                    if time.time() - path.stat().st_mtime > STATUS_LOCK_STALE_SECONDS:
+                        path.unlink()
+                        continue
+                if time.monotonic() >= end:
+                    break
+                time.sleep(0.01)
+    except OSError:
+        pass
+    try:
+        yield
+    finally:
+        if held:
+            with contextlib.suppress(OSError):
+                path.unlink()
+
+
+def _record_key(data: dict[str, Any], config_source: str | None, ok: bool, http_status: int | None) -> None:
+    if not config_source or not (ok or http_status in (401, 403)):
+        return
+    keys = data.get("keys")
+    if not isinstance(keys, dict):
+        keys = data["keys"] = {}
+    keys[config_source] = {
+        "state": "accepted" if ok else ("rejected" if http_status == 401 else "refused"),
+        "http_status": None if ok else http_status,
+        "at": _now_iso(),
+        "ts": time.time(),
+    }
+
+
+def record_key(home: Path, *, config_source: str | None, ok: bool, http_status: int | None = None) -> None:
+    """Remember whether the server accepted the key of ``config_source``, and nothing else.
+
+    For a command that only checks the key (``remembra-relay status``): it is not a brief or a close, so
+    no agent's last result changes. Never raises.
+    """
+    try:
+        with _status_lock(home):
+            data = read_status(home)
+            _record_key(data, config_source, ok, http_status)
+            atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
+    except Exception:
+        pass
+
+
 def record(
     home: Path,
     *,
@@ -706,26 +787,37 @@ def record(
     error: str | None = None,
     http_status: int | None = None,
 ) -> None:
-    """Remember the outcome of one call for ``remembra-relay status``. Never raises."""
+    """Remember the outcome of one call for ``remembra-relay status``. Never raises.
+
+    Per agent: ``last_success`` and ``last_failure`` (the newest of any command, as older readers expect),
+    the same two per command under ``by_command`` (a later close failure does not erase the brief's), and
+    the last ``RECENT_FAILURES`` failures under ``recent_failures``, oldest first.
+    """
     try:
-        data = read_status(home)
-        agents = data.setdefault("agents", {})
-        slot = agents.setdefault(agent_id or "unknown-agent", {})
-        event: dict[str, Any] = {"at": _now_iso(), "ts": time.time(), "command": command}
-        if ok:
-            slot["last_success"] = event
-        else:
-            event["error"] = str(redact(error or ""))[:300]
-            event["http_status"] = http_status
-            slot["last_failure"] = event
-        if config_source and (ok or http_status in (401, 403)):
-            keys = data.setdefault("keys", {})
-            keys[config_source] = {
-                "state": "accepted" if ok else ("rejected" if http_status == 401 else "refused"),
-                "http_status": None if ok else http_status,
-                "at": _now_iso(),
-                "ts": time.time(),
-            }
-        atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
+        with _status_lock(home):
+            data = read_status(home)
+            agents = data.get("agents")
+            if not isinstance(agents, dict):
+                agents = data["agents"] = {}
+            slot = agents.get(agent_id or "unknown-agent")
+            if not isinstance(slot, dict):
+                slot = agents[agent_id or "unknown-agent"] = {}
+            commands = slot.get("by_command")
+            if not isinstance(commands, dict):
+                commands = slot["by_command"] = {}
+            per_command = commands.get(command)
+            if not isinstance(per_command, dict):
+                per_command = commands[command] = {}
+            event: dict[str, Any] = {"at": _now_iso(), "ts": time.time(), "command": command}
+            if ok:
+                slot["last_success"] = per_command["last_success"] = event
+            else:
+                event["error"] = str(redact(error or ""))[:300]
+                event["http_status"] = http_status
+                slot["last_failure"] = per_command["last_failure"] = event
+                recent = slot.get("recent_failures")
+                slot["recent_failures"] = [*(recent if isinstance(recent, list) else []), event][-RECENT_FAILURES:]
+            _record_key(data, config_source, ok, http_status)
+            atomic_write_private(status_path(home), json.dumps(data, indent=2, default=str))
     except Exception:
         pass

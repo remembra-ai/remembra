@@ -884,9 +884,9 @@ def _codex_runs(home: Path, now: float) -> tuple[int, int, int]:
 
 def _skipped_logged(home: Path) -> int:
     count = 0
-    for name in ("relay.log", "relay.log.1"):
+    for path in outbox.log_files(home):  # relay.log and every rotated generation
         with contextlib.suppress(OSError):
-            text = (outbox.relay_dir(home) / name).read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8", errors="replace")
             count += len(re.findall(r"skipped (?:brief|close): codex automation session", text))
     return count
 

@@ -717,6 +717,7 @@ def replay_outbox(
             continue
         if status == 401:
             report.key_rejected.append(config.source)
+        outbox.log(ctx.home, f"outbox: resend failed for {entry.agent_id} session {entry.session_id[:40]} (kept): {detail}")
         stop = True  # unreachable, rate-limited or a rejected key: try again next time
     return report
 
@@ -1107,6 +1108,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
         if response.status_code >= 400:
             message = f"Remembra brief unavailable: {_http_error(response)}"
             _err(message)
+            outbox.log(ctx.home, f"brief: failed for {ctx.agent or 'unknown-agent'} ({_http_error(response)})")
             outbox.record(
                 ctx.home,
                 agent_id=ctx.agent,
@@ -1128,6 +1130,8 @@ def cmd_brief(args: argparse.Namespace) -> int:
             _brief_messages_shown(ctx, hook_session, str(brief.get("rendered") or ""))
     except Exception as e:  # never break the agent's session start
         _err(f"brief failed: {e.__class__.__name__}: {e}")
+        who = (ctx.agent if ctx is not None else None) or getattr(args, "agent", None) or getattr(args, "hook", None)
+        outbox.log(_home(), f"brief: failed for {who or 'unknown-agent'} ({e.__class__.__name__}: {e})")
         try:
             notices = queue_notices(ctx, Replay()) if ctx is not None else []
         except Exception:
@@ -1315,7 +1319,8 @@ def close_sent(home: Path, agent: str, session_id: str) -> bool:
 def _skip_empty_close(ctx: Context, payload: dict[str, Any]) -> None:
     """Send nothing for an empty session: one line in relay.log (and on stderr when run by hand)."""
     agent, session = str(payload.get("agent_id") or ""), str(payload.get("session_id") or "")
-    outbox.log(ctx.home, f"close: nothing to hand off for {agent} session {session[:40]} ({EMPTY_CLOSE_REASON}); not sent")
+    # the reason is always the same (EMPTY_CLOSE_REASON): it is said on stderr, not repeated in every log line
+    outbox.log(ctx.home, f"close: nothing to hand off for {agent} session {session[:40]}; not sent")
     if not ctx.adapter:
         _err(f"nothing to hand off: {EMPTY_CLOSE_REASON}, so nothing was sent. Add --summary to send a handoff anyway.")
 
@@ -2043,6 +2048,13 @@ def _age(ts: Any, now: float) -> str:
     return f"{round(seconds / 86400)}d ago"
 
 
+def _failure_words(failure: dict[str, Any], now: float) -> str:
+    """``brief 28h ago (HTTP 521)`` for one recorded failure."""
+    status = failure.get("http_status")
+    why = f"HTTP {status}" if status else str(failure.get("error") or "no error recorded")[:60]
+    return f"{failure.get('command') or '?'} {_age(failure.get('ts'), now)} ({why})"
+
+
 def _check_key(config: RelayConfig) -> dict[str, Any]:
     """Ask the server whether the key is accepted (a read-only call). Bounded by the hook budget."""
     ns = argparse.Namespace(hook=None, agent=config.agent_id, cwd=None, project=None, session_id=None)
@@ -2293,14 +2305,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         key = _check_key(config)
         if key["state"] in ("accepted", "rejected", "refused"):
-            outbox.record(
-                home,
-                agent_id=config.agent_id,
-                command="status",
-                ok=key["state"] == "accepted",
-                config_source=config.source,
-                error=key.get("error"),
-                http_status=key.get("http_status"),
+            # only the key's state: `status` is neither a brief nor a close, so no agent's last result changes
+            outbox.record_key(
+                home, config_source=config.source, ok=key["state"] == "accepted", http_status=key.get("http_status")
             )
             recorded = outbox.read_status(home)
     now = time.time()
@@ -2368,6 +2375,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                     code = ""
                 parts.append(f"last failure: {bad.get('command')} {_age(bad.get('ts'), now)} ({code}{error[:160]})")
             print(f"    {agent:<14} " + " · ".join(parts))
+            recent = slot.get("recent_failures")
+            older = [f for f in recent if isinstance(f, dict) and f != bad] if isinstance(recent, list) else []
+            if older:  # what the single "last failure" above replaced
+                shown = ", ".join(_failure_words(f, now) for f in older[-4:])
+                print(f"    {'':<14} recent failures: {strip_controls(shown)}")
     else:
         print("  agents: no brief or close recorded on this machine yet")
     print(f"  log: {outbox.log_path(home)}")
