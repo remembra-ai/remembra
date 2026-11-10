@@ -81,7 +81,7 @@ def test_session_brief_as_the_instructions_say_to_call_it_fits_and_leads_with_th
     # What an agent needs first comes first: a client that shows only the start of a result shows the brief.
     assert list(out)[:6] == ["status", "project_id", "agent_id", "handoff_id", "inbox_unread", "brief"]
     assert raw.index('"brief"') < 400
-    assert "rendered" not in out  # the same text as "brief"; it used to be sent twice
+    assert out["rendered"] == out["brief"]  # still returned while the result fits with it (it goes first)
     # Every key the default response had is still there.
     assert {"handoff", "inbox", "status_items", "recent", "known_agents", "warnings", "linked_projects"} <= set(out)
 
@@ -171,7 +171,7 @@ def test_session_brief_never_exceeds_the_cap_whatever_the_server_sends(monkeypat
     # A text brief far over the server's own cap is clipped rather than sent whole.
     client.session_brief.return_value = {"project_id": "alpha", "rendered": "t" * 90_000}
     long = server.session_brief(project_id="alpha")
-    assert len(long) <= server.BRIEF_DETAIL_BUDGET_CHARS and _framed(long)["truncated"] == ["brief"]
+    assert len(long) <= server.BRIEF_DETAIL_BUDGET_CHARS and _framed(long)["truncated"] == ["brief", "rendered"]
 
     # Fields of the wrong type are cut like any other (nothing is assumed about a field's shape).
     wrong = {"project_id": "alpha", "handoff": "h" * 90_000, "inbox": ["i" * 90_000], "recent": "r" * 9}
