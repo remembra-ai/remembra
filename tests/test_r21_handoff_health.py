@@ -97,9 +97,15 @@ def test_contradicted_summary_is_conflicted_with_its_text(repo):
     grounding = check_summary_grounding("All tests pass and it is pushed; see commit deadbeef1234", facts)
     health = assess_handoff(facts, grounding)
     assert health["status"] == HEALTH_CONFLICTED
-    assert health["missing"][0] == "the agent's summary contradicts the recorded facts (3 claim(s))"
-    assert "summary contradicted: mentions commit deadbeef1234, which is not among this session's commits" in health["warnings"]
-    assert "summary contradicted: claims tests pass, but no test run was recorded" in health["warnings"]
+    # F18: only a recorded fact contradicts (the commit is recorded as not pushed). A commit id that is
+    # not among the recorded commits and a test run nobody recorded cannot be checked: unverifiable.
+    assert health["missing"][0] == "the agent's summary contradicts the recorded facts (1 claim(s))"
+    assert "summary contradicted: claims pushed/deployed, but 1 commit(s) are not pushed to origin/main" in health["warnings"]
+    assert (
+        "summary claim not checkable: mentions commit deadbeef1234, which is not among this session's recorded commits"
+        " (unverifiable)" in health["warnings"]
+    )
+    assert "summary claim not checkable: claims tests pass, but no test run was recorded (unverifiable)" in health["warnings"]
 
 
 def test_failing_tests_or_low_trust_block(repo):

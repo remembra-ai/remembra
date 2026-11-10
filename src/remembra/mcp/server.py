@@ -41,6 +41,7 @@ import os
 import re
 import socket
 import sys
+import time
 import uuid
 import weakref
 from typing import Annotated, Any, Literal, cast
@@ -861,7 +862,7 @@ def session_brief(
             head_commit=(checkout or {}).get("head_commit"),
         )
         if brief.get("project_id"):
-            _remember_session_project(brief["project_id"], locator if use_locator else None)
+            _remember_session_project(brief["project_id"], locator if use_locator else None, checkout)
         handoff = brief.get("handoff") or {}
         inbox = brief.get("inbox") or {}
         summary = {
@@ -902,6 +903,21 @@ def _hostname() -> str:
 _session_projects: dict[str, dict[str, Any]] = {}
 _MAX_SESSION_PROJECTS = 256
 _MAX_BRIEFED_PROJECTS = 32
+_MAX_SESSION_STARTS = 32  # checkouts one session briefed in
+_CLOSE_GIT_SECONDS = 3.0
+# What a close reads from git when the agent did not declare it.
+_CLOSE_GIT_KEYS = (
+    "branch",
+    "head_commit",
+    "upstream",
+    "unpushed_commits",
+    "no_upstream",
+    "uncommitted_files",
+    "diff_stat",
+    "incomplete",
+)
+# Only with the session's start HEAD (the first session_brief in the checkout): this session's own commits.
+_CLOSE_GIT_SESSION_KEYS = ("commits", "files_changed", "commit_evidence")
 
 
 def _session_scope() -> str:
@@ -912,14 +928,23 @@ def _session_scope() -> str:
     return f"session:{id(session)}"
 
 
-def _remember_session_project(project_id: str, locator: dict[str, Any] | None) -> None:
+def _remember_session_project(project_id: str, locator: dict[str, Any] | None, checkout: dict[str, Any] | None = None) -> None:
     if len(_session_projects) >= _MAX_SESSION_PROJECTS:
         _session_projects.clear()
+    scope = _session_scope()
     seen = [p for p in _briefed_projects() if p != project_id]
-    _session_projects[_session_scope()] = {
+    # Where each checkout stood when this session first briefed in it: close_session reads
+    # "this session's commits" from there (the first brief wins; a later one is mid-session).
+    starts: dict[str, dict[str, Any]] = dict((_session_projects.get(scope) or {}).get("starts") or {})
+    root = (locator or {}).get("root_path")
+    head = (checkout or {}).get("head_commit")
+    if root and head and str(root) not in starts and len(starts) < _MAX_SESSION_STARTS:
+        starts[str(root)] = {"head": str(head), "ts": time.time()}
+    _session_projects[scope] = {
         "project_id": project_id,
         "locator": dict(locator) if locator else None,
         "projects": [*seen, project_id][-_MAX_BRIEFED_PROJECTS:],
+        "starts": starts,
     }
     try:  # the crew tools follow the latest project chosen here (CrewBridge.note_project)
         _crew.note_project(_crew_caller(), project_id)
@@ -1140,6 +1165,64 @@ def _crew_evidence(
     return out_commits, out_tests, summary
 
 
+def _close_git_facts(root_path: str | None, project_id: str | None) -> dict[str, Any]:
+    """Git state of the checkout a close is about, read on a local (stdio) server.
+
+    The checkout is ``root_path``, else the one the session's ``session_brief``
+    resolved (only for that brief's project). Branch, HEAD, push state and
+    uncommitted files are read as they are now. This session's commits and the
+    files they changed are read only when the session briefed in this checkout
+    first (its HEAD then is the start): with no start nothing says which
+    commits are this session's, so none are reported. ``{}`` on a remote
+    server (it never reads its own filesystem for a caller's path), outside a
+    git repository, or when git does not answer.
+    """
+    if _is_remote_transport():
+        return {}
+    remembered = _session_project()
+    root = root_path
+    if not root:
+        if project_id and project_id != remembered.get("project_id"):
+            return {}
+        root = (remembered.get("locator") or {}).get("root_path")
+    if not root:
+        return {}
+    from pathlib import Path
+
+    from remembra.relay import facts as relay_facts
+
+    try:
+        where = Path(str(root)).expanduser()
+        info = relay_facts.repo_info(where, relay_facts.Deadline(_CLOSE_GIT_SECONDS))
+        if not info.is_git:
+            return {}
+        start = (remembered.get("starts") or {}).get(str(info.toplevel or root))
+        deadline = relay_facts.Deadline(_CLOSE_GIT_SECONDS)
+        if start:
+            found = relay_facts.git_facts(where, deadline, start_head=start.get("head"), info=info, started_at=start.get("ts"))
+            found["commit_evidence"] = found.pop("commit_range", None)
+            keys: tuple[str, ...] = (*_CLOSE_GIT_KEYS, *_CLOSE_GIT_SESSION_KEYS)
+        else:
+            # An empty commit list keeps git_facts from guessing with a time window.
+            found = relay_facts.git_facts(where, deadline, session_commits=[], info=info)
+            keys = _CLOSE_GIT_KEYS
+        return relay_facts.cap_close_lists({k: found[k] for k in keys if found.get(k) not in (None, "", [])})
+    except Exception:
+        return {}
+
+
+def _with_git_facts(declared: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
+    """``declared`` plus every git fact the agent left out (what the agent declared always wins)."""
+    merged = dict(declared)
+    session_keys_free = not merged.get("commits")
+    for key, value in found.items():
+        if key == "commit_evidence" and not session_keys_free:
+            continue  # it describes the commits read from git, not the ones the agent declared
+        if merged.get(key) in (None, "", []):
+            merged[key] = value
+    return merged
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         title="Close Session",
@@ -1202,6 +1285,10 @@ def close_session(
             shas) are read too; the result lists what was rewritten. Inside
             facts, done / open / failing / next are read as done / todos_open /
             errors / next_step; any other key is kept in the notes.
+            A local server reads branch, HEAD, push state and uncommitted
+            files from git itself (from root_path, else the checkout your
+            session_brief resolved), and this session's commits when you
+            called session_brief there first; what you declare here wins.
         end_reason: Why the session ends (e.g. "done", "blocked", "context full").
         project_id: Project. Default: the project your session_brief or
             crew_status resolved, else your crew session's. A local (stdio)
@@ -1247,6 +1334,7 @@ def close_session(
         if next_step:
             merged["next_step"] = next_step
         project_id = project_id or project
+        merged = _with_git_facts(merged, _close_git_facts(root_path, project_id))
         locator = None
         # how the project was found: named on this call, a location on this call (then the server's
         # resolution source), or inherited: remembered / crew-seat / relay-project / configured

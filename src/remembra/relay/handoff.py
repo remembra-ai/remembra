@@ -52,7 +52,9 @@ SUMMARY_LINE_PREFIX = "Agent summary ["  # render_handoff's line for the summary
 MAX_BRIEF_CHARS = 6000  # ~1500 tokens
 MAX_NOTES_SHOWN = 400  # the Last session's notes line in a brief (the handoff keeps up to 1500 characters)
 MAX_SUMMARY_SHOWN = 500  # the Last session's summary line in a brief (verdict + summary)
-_SHA_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
+# A commit id stands on its own: hex glued to ``_`` or ``-`` is one of Remembra's own ids
+# (``inbox_43f6…``), a UUID segment or a hyphenated word, never a commit an agent names.
+_SHA_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z_-])([0-9a-f]{7,40})(?![0-9A-Za-z_-])")
 _PATH_TOKEN_RE = re.compile(
     r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,8}|[\w-]+\.(?:py|ts|tsx|js|jsx|go|rs|md|toml|json|yml|yaml|sql|sh|swift|kt|java|rb|php|css|html))(?![\w/])"
 )
@@ -62,8 +64,38 @@ _TESTS_PASS_RE = re.compile(
 )
 _NO_ERRORS_RE = re.compile(r"\bno\s+(remaining\s+)?(errors?|failures?)\b|\bnothing\s+(is\s+)?failing\b", re.IGNORECASE)
 _PUSHED_RE = re.compile(r"\b(pushed|deployed|merged|shipped|live\s+on)\b", re.IGNORECASE)
-_NEGATED_PUSH_RE = re.compile(r"\b(not|n't|never|un)\s*(yet\s+)?(pushed|deployed|merged|shipped)\b", re.IGNORECASE)
-
+# A push/deploy statement is read clause by clause: "not committed or deployed" denies it,
+# "pushed; docs not merged" still claims it.
+_CLAUSE_SPLIT_RE = re.compile(
+    r"[.!?]+(?=\s|$)|[;\n]+|\s+(?:but|however|although|though|except|whereas)\s+|,\s*(?:but|however|although|though)\s+",
+    re.IGNORECASE,
+)
+_NEGATOR_RE = re.compile(r"\b(?:not|never|nothing|no|none|neither|nor|without)\b|n't\b", re.IGNORECASE)
+# Words a negation reaches across on its way to the verb: list separators, auxiliaries and
+# other participles ("not staged/committed/deployed", "nothing was pushed or deployed").
+_NEGATION_FILLER = frozenset(
+    {
+        *("or", "and", "nor", "yet", "been", "being", "be", "is", "are", "was", "were", "has", "have", "had"),
+        *("get", "got", "gotten", "going", "fully", "actually", "currently", "even", "ever", "either", "both"),
+        *("it", "this", "that", "these", "those", "anything", "any", "of", "the", "by", "me", "us", "to", "still"),
+    }
+)
+_PARTICIPLE_RE = re.compile(r"^[a-z]+(?:ed|en|ne|lt|un|ut|de|wn)$")
+# "pushed: no", "deployed=false", "pushed nothing": the verb is a label or its object is nothing.
+_PUSH_DENIED_AFTER_RE = re.compile(
+    r"^\s*(?:(?:[:=]|->|-)\s*(?:no|false|none|not|pending|todo|n/?a|0)\b|(?:nothing|none)\b)", re.IGNORECASE
+)
+# Not a statement about what happened: "ready to be deployed", "will be merged", "once pushed".
+_PUSH_PROSPECT_RE = re.compile(
+    r"(?:\b(?:to|will|should|can|could|must|would|may|might|shall|won't|cannot|can't)\s+(?:not\s+)?(?:be|get)\s+(?:\w+\s+)?"
+    r"|\b(?:once|until|when|before|unless|if|whether)\s+(?:(?:it|this|that|they|everything|the\s+\w+)\s+)?(?:(?:is|are|gets?|has\s+been|have\s+been)\s+)?"
+    r"|\b(?:needs?|waiting|awaiting|ready|pending)\s+(?:to\s+be\s+|for\s+it\s+to\s+be\s+|being\s+)?)$",
+    re.IGNORECASE,
+)
+# "merged main into the feature branch" is a local git merge, not a statement that work reached a remote.
+_LOCAL_MERGE_RE = re.compile(r"^\s+(?!(?:the\s+)?(?:pr|pull\s+request|mr|#\d))[\w./-]+\s+into\b", re.IGNORECASE)
+_BARE_VERSION_RE = re.compile(r"^\d+$")
+_DOMAIN_RE = re.compile(r"^(?:[\w-]+\.)+[A-Za-z]{2,}$")
 
 # ---------------------------------------------------------------------------
 # Redaction
@@ -218,12 +250,67 @@ def is_probe_command(command: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _negated(before: str) -> bool:
+    """True when a negation earlier in the clause reaches the verb that follows ``before``."""
+    negators = list(_NEGATOR_RE.finditer(before))
+    if not negators:
+        return False
+    gap = before[negators[-1].end() :]
+    words = [w for w in re.split(r"[\s,/&+]+", gap.strip().lower()) if w]
+    return all(w in _NEGATION_FILLER or _PARTICIPLE_RE.match(w) for w in words)
+
+
+def claims_pushed(text: str) -> bool:
+    """True when ``text`` states that work was pushed, deployed, merged, shipped or is live.
+
+    Read clause by clause. Not a claim: a denial ("not committed or deployed",
+    "hasn't been deployed", "nothing pushed", "Pushed: no", "not live on prod"),
+    a prospect ("ready to be deployed", "needs to be pushed", "once merged") and
+    a local merge ("merged main into the branch"). A denial in one clause never
+    covers a claim in another ("Pushed and deployed; docs not merged").
+    """
+    for clause in _CLAUSE_SPLIT_RE.split(text or ""):
+        if not clause:
+            continue
+        for match in _PUSHED_RE.finditer(clause):
+            before, after = clause[: match.start()], clause[match.end() :]
+            if _negated(before) or _PUSH_DENIED_AFTER_RE.match(after) or _PUSH_PROSPECT_RE.search(before):
+                continue
+            if match.group(1).lower() == "merged" and _LOCAL_MERGE_RE.match(after):
+                continue
+            return True
+    return False
+
+
+def _path_claim(path: str) -> bool:
+    """Whether a path-like token names a file of the work (so its absence from the changed files is worth a note).
+
+    A bare name with no directory (``Three.js``, ``deploy-release.sh``) names a
+    library, a tool or a document, a branch ends in a version (``release/3.5.93``)
+    and a host leads a URL (``github.com/acme/repo.git``): none says a file changed.
+    """
+    head, _, name = path.rpartition("/")
+    if not head:
+        return False
+    if _BARE_VERSION_RE.match(name.rsplit(".", 1)[-1]):
+        return False
+    return not _DOMAIN_RE.match(head.split("/", 1)[0])
+
+
 def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[str, Any]:
     """Check an agent-written summary's verifiable claims against the facts.
 
     Returns ``{"status": "none" | "consistent" | "contradicted", "issues": [...],
     "checked": [...]}``. "consistent" means no checkable claim was contradicted —
     the narrative itself stays unverified.
+
+    Only a recorded fact contradicts a claim: commits recorded as not pushed
+    against "pushed", a failed test run against "tests pass", recorded errors
+    against "no errors". What the facts merely do not hold (a commit id that is
+    not among the recorded commits, a file that is not among the changed files,
+    a test or push state nobody recorded) cannot be checked, and its issue says
+    ``(unverifiable)``: a summary may name a commit on another branch or a file
+    it only read.
     """
     text = (summary or "").strip()
     if not text:
@@ -232,7 +319,7 @@ def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[
     issues: list[str] = []
     checked: list[str] = []
     commits = facts.get("commits") or []
-    known_shas = [str(c.get("sha") or "").lower() for c in commits]
+    known_shas = [str(c.get("sha") or "").lower() for c in commits if isinstance(c, dict)]
     head = str(facts.get("head_commit") or "").lower()
     if head:
         known_shas.append(head)
@@ -242,13 +329,15 @@ def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[
             continue  # all-digit tokens are numbers, not commit ids
         checked.append(f"commit {sha}")
         if not any(k.startswith(sha) for k in known_shas if k):
-            issues.append(f"mentions commit {sha}, which is not among this session's commits")
+            issues.append(f"mentions commit {sha}, which is not among this session's recorded commits (unverifiable)")
 
     changed = [str(p) for p in (facts.get("files_changed") or []) + (facts.get("uncommitted_files") or [])]
     for path in dict.fromkeys(m for m in _PATH_TOKEN_RE.findall(text)):
-        checked.append(f"file {path}")
-        if not any(c == path or c.endswith("/" + path) or path.endswith("/" + c) for c in changed):
-            issues.append(f"mentions {path}, which is not in the changed files")
+        if any(c == path or c.endswith("/" + path) or path.endswith("/" + c) for c in changed):
+            checked.append(f"file {path}")
+        elif _path_claim(path):
+            checked.append(f"file {path}")
+            issues.append(f"mentions {path}, which is not in the recorded changed files (unverifiable)")
 
     tests = facts.get("tests") or []
     failing = [t for t in tests if t.get("passed") is False]
@@ -257,14 +346,14 @@ def check_summary_grounding(summary: str | None, facts: dict[str, Any]) -> dict[
         if failing:
             issues.append(f"claims tests pass, but {len(failing)} test run(s) failed: {clip(failing[0].get('cmd'), 80)}")
         elif not tests:
-            issues.append("claims tests pass, but no test run was recorded")
+            issues.append("claims tests pass, but no test run was recorded (unverifiable)")
 
     if _NO_ERRORS_RE.search(text):
         checked.append("no errors")
         if failing or facts.get("errors"):
             issues.append("claims no errors/failures, but errors or failing tests were recorded")
 
-    if _PUSHED_RE.search(text) and not _NEGATED_PUSH_RE.search(text):
+    if claims_pushed(text):
         checked.append("pushed/deployed")
         unpushed = facts.get("unpushed_commits")
         if isinstance(unpushed, int) and unpushed > 0:
@@ -416,6 +505,9 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
         done_part = f"{len(set(files) | set(uncommitted))} file(s) changed, nothing committed"
     elif declared:
         done_part = f"{len(_declared_items(facts))} item(s) declared done (no commits or file changes recorded)"
+    elif facts.get("branch") or facts.get("head_commit"):
+        # Nothing new, but the checkout is known: say where, so it does not read like "no git info".
+        done_part = f"no commits or file changes (at {_where(facts.get('branch'), facts.get('head_commit'))})"
     else:
         done_part = "no commits or file changes"
     open_count = len(todos) + sum(1 for item in not_done if not item.startswith(("TODO: ", "(+")) and "unknown (" not in item)
