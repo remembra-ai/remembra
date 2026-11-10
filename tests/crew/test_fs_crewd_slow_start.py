@@ -400,8 +400,14 @@ def test_crewd_that_dies_during_the_join_is_reported_as_down(tmp_path, monkeypat
     def answer(op: str, args: dict[str, Any]) -> Any:
         if op == "ping":
             return {"ok": True}
-        holder[0].stop.set()
-        holder[0].sock.close()
+        # crewd is gone before the join's connection closes. The accept loop is joined first: closing a
+        # listening socket another thread is still polling leaves it accepting for up to one poll (50 ms)
+        # on Linux, and the client's liveness probe then found a "running" crewd.
+        fake = holder[0]
+        fake.stop.set()
+        fake.thread.join(5)
+        fake.sock.close()
+        fake.path.unlink(missing_ok=True)
         return None  # connection closed without a reply
 
     holder.append(SlowCrewd(layout, answer))
