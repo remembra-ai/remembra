@@ -65,7 +65,8 @@ GIT_GRACE_SECONDS = 2.0
 GIT_PROBE_FLOOR = 1.0
 # ``git diff --numstat HEAD`` reads every changed blob to count lines (about 10 s in a checkout
 # with thousands of deleted binary files). It only feeds the optional diff-stat line, so it runs
-# last and gets this much; the file count then comes from the cheap ``--name-status``.
+# last and gets what is left of the budget, and this much when less is left; the file count
+# then comes from the cheap ``--name-status``.
 DIFF_NUMSTAT_SECONDS = 1.5
 
 _EXIT_RE = re.compile(r"^\s*(?:Error:\s*)?Exit code (\d+)")
@@ -343,14 +344,43 @@ def _resolve_ssh_alias(url: str, deadline: Deadline) -> str:
 
 
 def _reachable(git: Git, shas: list[str]) -> list[str]:
-    """Full ids of the given (short) commit ids that exist and are ancestors of HEAD."""
+    """Full ids of the given (short) commit ids that exist and are ancestors of HEAD.
+
+    Asked in one or two git calls however many ids there are; one that does
+    not exist makes git refuse the whole question, and the ids are then asked
+    one at a time.
+    """
+    wanted = list(dict.fromkeys(shas))
+    if not wanted:
+        return []
+    batched = _reachable_batched(git, wanted)
+    if batched is not None:
+        return batched
+    if git.timed_out:
+        return []  # counted in ``git.timeouts``: the caller reports the commits as unknown
     out: list[str] = []
-    for sha in dict.fromkeys(shas):
+    for sha in wanted:
         # A full id (the reflog's) needs no lookup: merge-base fails for one that does not exist.
         full = sha if _FULL_SHA_RE.match(sha) else git.line("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", grace=True)
         if full and full not in out and git.run("merge-base", "--is-ancestor", full, "HEAD", grace=True) is not None:
             out.append(full)
     return out
+
+
+def _reachable_batched(git: Git, wanted: list[str]) -> list[str] | None:
+    """:func:`_reachable` for ids that all exist; None when git refused (an unknown id) or ran out of time."""
+    full = wanted
+    if not all(_FULL_SHA_RE.match(sha) for sha in wanted):
+        resolved = git.run("rev-parse", *[f"{sha}^{{commit}}" for sha in wanted], grace=True)
+        full = (resolved or "").split()
+        if resolved is None or len(full) != len(wanted):
+            return None
+    # What these commits reach that HEAD does not: a commit listed there is not an ancestor of HEAD.
+    outside = git.run("rev-list", *full, "--not", "HEAD", grace=True)
+    if outside is None:
+        return None
+    strangers = set(outside.split())
+    return [sha for sha in dict.fromkeys(full) if sha not in strangers]
 
 
 def _own_commits_since(git: Git, start_head: str, started_at: float | None) -> list[str] | None:
@@ -484,14 +514,17 @@ def git_facts(
     ``repo`` means git did not even say whether this is a repository (the
     first probe timed out): nothing about it is known.
 
-    The probes run in the order of what the next agent needs most: this
-    session's commits, push state, uncommitted files, then the diff stat. A
-    slow probe therefore costs the ones after it, never push state for a diff
-    stat. Each may run for up to ``GIT_PROBE_FLOOR`` seconds past a spent
-    ``deadline``, ``grace`` seconds in all (0: nothing runs past it). The
-    line counts of the working tree (``git diff --numstat``) get
-    ``DIFF_NUMSTAT_SECONDS`` at most; when that is not enough the diff stat
-    names the changed files only (``git diff --name-status``), which is not a gap.
+    The probes run cheapest and most needed first: push state (two calls),
+    this session's commits (the reflog, one ancestry question for all of
+    them, the log), uncommitted files, then the diff stat. A slow probe
+    therefore costs the ones after it, never push state for a diff stat or
+    for a long session's commits. Each may run for up to ``GIT_PROBE_FLOOR``
+    seconds past a spent ``deadline``, ``grace`` seconds in all (0: nothing
+    runs past it). The line counts of the working tree (``git diff
+    --numstat``) run last and get what is left of the deadline, less the
+    second kept for the fallback, and ``DIFF_NUMSTAT_SECONDS`` when less is
+    left; when that is not enough the diff stat names the changed files only
+    (``git diff --name-status``), which is not a gap.
     """
     git = Git(cwd, deadline, grace)
     info = info or _repo_info(git, deadline)
@@ -518,6 +551,19 @@ def git_facts(
             info = replace(info, branch="(detached)" if branch == "HEAD" else branch)
     facts["branch"] = info.branch
     facts["head_commit"] = info.head_commit
+
+    # Push state first: two cheap calls, what a deploy decision rests on, and nothing that finding
+    # this session's commits costs (a reflog, an ancestry walk, the log) may take their time.
+    upstream = probe("upstream", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if upstream:
+        upstream = upstream.strip().splitlines()[0] if upstream.strip() else None
+    if upstream:
+        facts["upstream"] = upstream
+        ahead = probe("upstream", "rev-list", "--count", "@{u}..HEAD")
+        if ahead is not None and ahead.strip().isdigit():
+            facts["unpushed_commits"] = int(ahead.strip())
+    elif info.head_commit and info.branch != "(detached)" and "upstream" not in incomplete:
+        facts["no_upstream"] = True
 
     commits: list[dict[str, str]] = []
     files: list[str] = []
@@ -547,18 +593,6 @@ def git_facts(
     commits.reverse()  # oldest first
     facts["commits"] = commits
 
-    # Push state before the working tree: two cheap calls, and what a deploy decision rests on.
-    upstream = probe("upstream", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if upstream:
-        upstream = upstream.strip().splitlines()[0] if upstream.strip() else None
-    if upstream:
-        facts["upstream"] = upstream
-        ahead = probe("upstream", "rev-list", "--count", "@{u}..HEAD")
-        if ahead is not None and ahead.strip().isdigit():
-            facts["unpushed_commits"] = int(ahead.strip())
-    elif info.head_commit and info.branch != "(detached)" and "upstream" not in incomplete:
-        facts["no_upstream"] = True
-
     uncommitted: list[str] = []
     status = probe("status", "status", "--porcelain=v1", "-z", "--untracked-files=normal")
     if status:
@@ -580,7 +614,10 @@ def git_facts(
     # it is one optional line.
     lines_unknown = False
     if info.head_commit:
-        worktree = git.run("diff", "--numstat", "HEAD", cap=DIFF_NUMSTAT_SECONDS)
+        # Everything else has been asked, so the line count may use what is left of the budget,
+        # less the time the fallback below needs; ``DIFF_NUMSTAT_SECONDS`` when less than that is left.
+        numstat_cap = max(DIFF_NUMSTAT_SECONDS, deadline.remaining(cap=30.0) - GIT_PROBE_FLOOR)
+        worktree = git.run("diff", "--numstat", "HEAD", cap=numstat_cap)
         if git.timed_out:
             # Counting lines did not finish (or there was no time left to start): the names are cheap.
             names = probe("diff", "diff", "--name-status", "-z", "HEAD")
