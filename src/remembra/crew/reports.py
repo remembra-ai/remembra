@@ -107,6 +107,15 @@ def _ts(value: Any) -> datetime | None:
         return None
 
 
+def _unreportable_step(status: Any) -> str:
+    """What the owner of a task that takes no report does next: only what that status accepts."""
+    if status == "stalled":  # ``start`` refuses a stalled task; its owner takes it back with ``adopt``
+        return "adopt it back before reporting (a stalled task cannot be started)."
+    if status in ("done", "cancelled"):
+        return "it takes no more reports."
+    return "start it before reporting."
+
+
 # ---------------------------------------------------------------------------
 # Evidence
 # ---------------------------------------------------------------------------
@@ -629,7 +638,8 @@ class ReportService:
             if task.get("owner_session_id") != session["id"]:
                 raise _err(403, "not_task_owner", f"Only the session that owns {task_ref(task)} reports on it.")
             if task["status"] not in REPORTABLE_STATUSES:
-                raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}; start it before reporting.")
+                step = _unreportable_step(task["status"])
+                raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}; {step}")
             now = self.clock()
             evidence, zones = await collect_evidence(tx.conn, crew_id, task, body=clean, body_source=body_source, now=now)
             gate = run_gate(task, settings, evidence, live)

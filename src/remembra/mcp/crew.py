@@ -1676,6 +1676,60 @@ class CrewBridge:
                 return _safe(s.get("callsign"))
         return None
 
+    def _fresh_task(self, http: CrewHttp, seat: Seat, row: dict[str, Any]) -> dict[str, Any]:
+        """``row`` re-read from the server (the seat caches the task list); ``row`` itself when that fails."""
+        try:
+            return self._task(http, seat, str(row.get("id") or ""), fresh=True)
+        except (CrewApiError, CrewUsageError):
+            return row
+
+    def _ownership_step(self, http: CrewHttp, seat: Seat, row: Mapping[str, Any]) -> str:
+        """For a task the caller does not own: its state, and the next step the server accepts in that state."""
+        ref = task_ref(row)
+        name = ref or "The task"
+        status = str(row.get("status") or "")
+        owner_id = row.get("owner_session_id")
+        try:
+            who = self._callsign(http, seat, owner_id)
+        except CrewApiError:
+            who = None
+        own = (
+            'To record your work now, create and start a task of your own (crew_task(action="create"), then '
+            'action="start") and report on that, or use crew_checkpoint.'
+        )
+        if status == "stalled":
+            left = f"its owner {who} left" if who else "its owner left"
+            if ref is None:
+                return f"{name} is stalled: {left}. Only a human can hand it over unless it was offered to you. {own}"
+            return (
+                f'{ref} is stalled: {left}. Try crew_claim(action="adopt", task="{ref}") and then '
+                f'crew_task(action="start", task="{ref}"); if the adopt is refused, nothing of it is reserved '
+                f"for you and only a human can hand it over. {own}"
+            )
+        if status == "ready" and not owner_id and ref is not None:
+            return f'{ref} is ready and has no owner: crew_task(action="start", task="{ref}") makes it yours, then report.'
+        if status in ("done", "cancelled"):
+            return f"{name} is {status}; it takes no more reports. {own}"
+        if status in ("claimed", "in_progress", "blocked", "review") and owner_id:
+            ask = f' crew_say(to="@{who}") reaches its owner.' if who else ""
+            return f"{name} is {status}, owned by {who or 'another session'}. {own}{ask}"
+        return own
+
+    def _report_step(self, http: CrewHttp, seat: Seat, row: dict[str, Any], e: CrewApiError) -> str:
+        """The next step after a refused report, from the task's state now ("" when there is nothing to add)."""
+        if e.error not in ("not_task_owner", "invalid_transition"):
+            return ""
+        row = self._fresh_task(http, seat, row)
+        if e.error == "not_task_owner":
+            mine = row.get("owner_session_id") == seat.session_id
+            return "" if mine else " " + self._ownership_step(http, seat, row)
+        ref = task_ref(row)
+        if row.get("status") != "stalled" or ref is None:
+            return ""
+        # servers up to 0.17.6 answer "start it before reporting", which start refuses for a stalled task
+        lead = "A stalled task is not started: " if "start it before reporting" in e.message else ""
+        return f' {lead}crew_claim(action="adopt", task="{ref}") takes it back if it is yours or was offered to you.'
+
     # -- crew_status ------------------------------------------------------------------
 
     def status(
@@ -2437,6 +2491,16 @@ class CrewBridge:
                 f"PARTIAL: {granted} of {len(targets)} granted; the rest hit a claim limit (see above). "
                 "What was granted stays yours: release what you do not need."
             )
+        if task_row is not None and any(ln.startswith("GRANTED ") for ln in lines):
+            # the server tags a claim with any task of the crew; the tag is not ownership
+            if task_row.get("owner_session_id") != seat.session_id:
+                task_row = self._fresh_task(http, seat, task_row)
+            if task_row.get("owner_session_id") != seat.session_id:
+                ref = task_ref(task_row) or "that task"
+                lines.append(
+                    f"NOTE: these claims are tagged {ref}, but you do not own {ref}; crew_report on {ref} will be refused. "
+                    + self._ownership_step(http, seat, task_row)
+                )
         lines.extend(f"- {n}" for n in notes)
         # one target refused or not answered: the caller does not hold everything it asked for
         return _result(join_text(lines, data), failures)
@@ -3399,7 +3463,7 @@ class CrewBridge:
             _, res, _ = http.call("POST", f"/tasks/{row['id']}/reports", token=seat.token, json=body)
         except CrewApiError as e:
             if e.status in (403, 409):
-                return f"REPORT NOT ACCEPTED for {ref}: {e.message}"
+                return f"REPORT NOT ACCEPTED for {ref}: {e.message}" + self._report_step(http, seat, row, e)
             raise
         seat.forget("tasks")
         res = res or {}
