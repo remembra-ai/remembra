@@ -1515,7 +1515,8 @@ def session_brief(
         if still_queued:
             brief["warnings"] = [*(brief.get("warnings") or []), _queued_closes_warning(still_queued)]
         # The crew block's last line is about the reader, whom the server cannot see on this call.
-        brief["rendered"] = brief_for_reader(brief.get("rendered"), brief.get("project_id"), local=_LOCAL_CREW)
+        if "rendered" in brief:  # a key the server did not send is not added (it would be reported as cut)
+            brief["rendered"] = brief_for_reader(brief["rendered"], brief.get("project_id"), local=_LOCAL_CREW)
         handoff = brief.get("handoff") or {}
         inbox = brief.get("inbox") or {}
         if not isinstance(handoff, dict):
@@ -4281,12 +4282,12 @@ _FLAG_FAILURES = _sdk_passes_call_tool_results()
 
 def _finish(result: Any, final: Any) -> Any:
     """What the tool returns to the SDK: ``final`` (the result, with a crew_notice when there is one), flagged
-    ``isError`` when ``result`` reports a failure (a :class:`FailureText`). The text is the same either way;
-    ``structuredContent`` keeps the ``{"result": text}`` shape of every ``-> str`` tool's output schema."""
+    ``isError`` when ``result`` reports a failure (a :class:`FailureText`). The text is the same either way,
+    and it goes out once: like a successful result it has no ``structuredContent`` copy, since no tool here
+    advertises an output schema (:class:`_TextFastMCP`)."""
     if not isinstance(result, FailureText) or not isinstance(final, str) or not _FLAG_FAILURES:
         return final
-    text = str(final)
-    return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent={"result": text}, isError=True)
+    return CallToolResult(content=[TextContent(type="text", text=str(final))], isError=True)
 
 
 def _met_outage(result: Any) -> bool:

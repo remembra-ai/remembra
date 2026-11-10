@@ -39,16 +39,18 @@ def test_no_tool_advertises_an_output_schema() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "args"),
+    ("name", "args", "is_error"),
     [
-        ("remembra_help", {"question": "how do I connect codex?"}),  # registered by marshal/mcp_tools.py
-        ("timeline", {"order": "sideways"}),  # registered in mcp/server.py; answers before any client call
+        ("remembra_help", {"question": "how do I connect codex?"}, False),  # registered by marshal/mcp_tools.py
+        # registered in mcp/server.py; answers before any client call. A refused argument is a failed
+        # call (F23: flagged isError), and a failed result goes out once as well.
+        ("timeline", {"order": "sideways"}, True),
     ],
 )
-def test_a_result_is_sent_once_as_text(monkeypatch: pytest.MonkeyPatch, name: str, args: dict[str, Any]) -> None:
+def test_a_result_is_sent_once_as_text(monkeypatch: pytest.MonkeyPatch, name: str, args: dict[str, Any], is_error: bool) -> None:
     monkeypatch.setattr(server, "REMEMBRA_MCP_TRANSPORT", "stdio")
     result = _call(name, args)
-    assert result.isError is False
+    assert result.isError is is_error
     assert result.structuredContent is None
     assert [block.type for block in result.content] == ["text"]
     text = result.content[0].text  # type: ignore[union-attr]

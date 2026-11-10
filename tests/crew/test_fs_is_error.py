@@ -28,18 +28,25 @@ def api(monkeypatch):
     server._client = None
 
 
-def failed(result) -> str:
-    """The text of a result that must be flagged as an error and still satisfy the tool's output schema."""
+def sent_once(result) -> str:
+    """The result's text, which is all of it: one text block and no ``structuredContent`` copy (F47: no tool
+    advertises an output schema any more, so there is no ``{"result": text}`` wrapper to satisfy)."""
     text = text_of(result)
+    assert [block.type for block in result.content] == ["text"], result.content
+    assert result.structuredContent is None
+    return text
+
+
+def failed(result) -> str:
+    """The text of a result that must be flagged as an error, sent once like a successful one."""
+    text = sent_once(result)
     assert result.isError is True, text
-    assert result.structuredContent == {"result": text}
     return text
 
 
 def succeeded(result) -> str:
-    text = text_of(result)
+    text = sent_once(result)
     assert result.isError is False, text
-    assert result.structuredContent == {"result": text}
     return text
 
 
