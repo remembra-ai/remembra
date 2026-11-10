@@ -11,6 +11,7 @@ key may access (``resolve_project_access``).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -54,6 +55,10 @@ def _require(current_user: Any, permission: str) -> None:
         )
 
 
+# An HTML/JSX tag or comment, as a relay close-out is scored without it (see ``screen_text``).
+_MARKUP_TAG = re.compile(r"<!--.*?-->|</?[A-Za-z][^<>]*>", re.DOTALL)
+
+
 def screen_text(request: Request, text: str, apply_pii: bool = True, xss_penalty: bool = True) -> tuple[str, float, str | None]:
     """Same content protections as POST /memories: credential redaction, PII policy, sanitizer.
 
@@ -69,9 +74,10 @@ def screen_text(request: Request, text: str, apply_pii: bool = True, xss_penalty
     (markup is still removed or escaped), but the score is the prompt-injection
     score alone. A recorded ``sed 's|<span>…'`` or ``on_failure=stop`` is not an
     injection attempt, and the brief's reason says "prompt-injection patterns".
-    The score is the lower of the text as written and the sanitized text: the
-    brief renders the recorded items, so injection text inside a comment, a
-    script tag or a handler value (which the sanitizer removes) still counts.
+    The score is the lowest of the text as written, the sanitized text and the
+    text with its tags taken out: the brief renders the recorded items, so
+    injection text inside a comment, a script tag or a handler value (which the
+    sanitizer removes), or split by an inline tag, still counts.
     """
     text = scrub(text)
     pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
@@ -94,10 +100,12 @@ def screen_text(request: Request, text: str, apply_pii: bool = True, xss_penalty
     if get_settings().sanitization_enabled and sanitizer is not None:
         analysis = sanitizer.analyze(text, source="user_input")
         trust_score = analysis.trust_score
-        if not xss_penalty and analysis.xss_removed:
+        if not xss_penalty and (analysis.xss_removed or "<" in text):
+            # Also with the tags taken out, joined and spaced: "ignore <b></b>all previous
+            # instructions" and "ignore<br>all previous instructions" read as the phrase.
+            variants = (text, analysis.content, _MARKUP_TAG.sub("", text), " ".join(_MARKUP_TAG.sub(" ", text).split()))
             trust_score = min(
-                sanitizer.analyze(text, source="user_input", sanitize=False).trust_score,
-                sanitizer.analyze(analysis.content, source="user_input", sanitize=False).trust_score,
+                sanitizer.analyze(variant, source="user_input", sanitize=False).trust_score for variant in dict.fromkeys(variants)
             )
         text, checksum = analysis.content, analysis.checksum
     return text, trust_score, checksum
