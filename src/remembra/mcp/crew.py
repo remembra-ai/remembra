@@ -1926,6 +1926,13 @@ class CrewBridge:
             t = (res or {}).get("task") or {}
             return f"RELEASED {ref}: now {t.get('status')}."
         if action == "update":
+            # status "claimed" claims the task and "in_progress" starts it (unless it only unblocks a task this seat
+            # already owns): both take the task's zones for the session that asks, like action="start"
+            takes = status == "claimed" or (status == "in_progress" and row.get("status") != "blocked")
+            if takes and status != row.get("status"):
+                shadow = self._shadow(caller, seat)
+                if shadow is not None and shadow.here:
+                    return shadow.refusal("UPDATED", f"remembra-crew task start {ref}")
             return self._update_task(
                 http, seat, row, status=status, title=title, zones=zones, acceptance=acceptance, phase=phase, note=note
             )

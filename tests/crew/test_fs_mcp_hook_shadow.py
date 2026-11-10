@@ -298,3 +298,83 @@ async def test_without_crewd_nothing_changes(tmp_path, monkeypatch):
         assert text.startswith("GRANTED") and "NOTE:" not in text, text
         status = await asyncio.to_thread(bridge.status, caller, project_id=None, checkout=None, verbose=False)
         assert "CREW-HOOK SESSION" not in status and "Claim before editing" in status, status
+
+
+@pytest.mark.parametrize("status", ["in_progress", "claimed"])
+async def test_a_task_update_that_would_claim_is_closed_for_the_shadowed_seat(tmp_path, monkeypatch, hook_agent, status):
+    """crew_task(action="update", status="in_progress" | "claimed") starts / claims the task: the same lock-out."""
+    repo = make_repo(tmp_path / "repo")
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={hook_agent})
+        monkeypatch.setenv("HOME", str(layout.home))
+        hook = await _hook_session(d, repo, hook_agent)
+        crew_id = hook["crew_id"]
+        pos = next(z for z in d.snapshots[crew_id]["zones"] if z["slug"] == "pos")
+        made = await d.api_for(d.sessions[hook["key"]]).call(
+            "POST",
+            f"/crews/{crew_id}/tasks",
+            session_token=d.tokens[hook["key"]],
+            json_body={"title": "Split tender", "zone_ids": [pos["id"]], "acceptance": [], "depends_on": []},
+        )
+        assert made.ok, made.body
+
+        bridge = CrewBridge()
+        caller = _caller(srv, hook["project_id"])
+        args = dict(zones=None, acceptance=None, phase=None)
+        out = await asyncio.to_thread(
+            bridge.task, caller, action="update", task="T-1", status=status, title="Renamed", note="n", **args
+        )
+
+        assert out.startswith("NOT UPDATED"), out
+        assert hook["callsign"] in out and "remembra-crew task start T-1" in out, out
+        assert await _mcp_claims(srv) == []
+        assert (await _hook_guard(d, hook, "src/app/pos/split.ts"))["decision"] != "deny"
+        rows = await srv.rows("SELECT status, title FROM crew_tasks")
+        assert [(r["status"], r["title"]) for r in rows] == [("ready", "Split tender")], rows  # refused whole, not half applied
+
+        # an update that takes nothing stays open on the same seat
+        renamed = await asyncio.to_thread(
+            bridge.task, caller, action="update", task="T-1", status=None, title="Renamed", note=None, **args
+        )
+        assert renamed.startswith("UPDATED T-1"), renamed
+        same = await asyncio.to_thread(
+            bridge.task, caller, action="update", task="T-1", status="ready", title=None, note=None, **args
+        )
+        assert same.startswith("NOTHING TO UPDATE"), same
+
+
+async def test_unblocking_a_task_the_seat_already_owns_stays_open_when_a_hook_session_appears(tmp_path, monkeypatch, hook_agent):
+    """The desktop server started and blocked a task before the hook session existed: unblocking takes no new claim."""
+    repo = make_repo(tmp_path / "repo")
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={hook_agent})
+        monkeypatch.setenv("HOME", str(layout.home))
+        first = await _hook_session(d, repo, hook_agent, "sess-earlier")
+        await d.end(peer(hook_agent), {"key": first["key"], "reason": "exit"})
+        for daemon in srv.daemons:
+            await daemon.drain()
+
+        bridge = CrewBridge()
+        caller = _caller(srv, first["project_id"])
+        args = dict(zones=None, acceptance=None, phase=None)
+        made = await asyncio.to_thread(
+            bridge.task, caller, action="create", task=None, status=None, title="Docs", note=None, **args
+        )
+        assert made.startswith("CREATED T-1"), made
+        started = await asyncio.to_thread(
+            bridge.task, caller, action="start", task="T-1", status=None, title=None, note=None, **args
+        )
+        assert started.startswith("STARTED T-1"), started
+        blocked = await asyncio.to_thread(
+            bridge.task, caller, action="block", task="T-1", status=None, title=None, note="waiting", **args
+        )
+        assert blocked.startswith("BLOCKED T-1"), blocked
+
+        hook = await _hook_session(d, repo, hook_agent, "sess-now")
+        before = await _mcp_claims(srv)
+        out = await asyncio.to_thread(
+            bridge.task, caller, action="update", task="T-1", status="in_progress", title=None, note=None, **args
+        )
+        assert out.startswith("UPDATED T-1"), out
+        assert await _mcp_claims(srv) == before
+        assert hook["callsign"] in await asyncio.to_thread(bridge.status, caller, project_id=None, checkout=None, verbose=False)
