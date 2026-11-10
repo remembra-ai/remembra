@@ -12,8 +12,12 @@ It returns a new payload (JSON value); the input is not mutated. It applies `red
 
 * **Command metadata only.** Raw command strings are dropped (a `command` value becomes verb +
   classified targets); test-runner fingerprints needed for criteria matching are kept, redacted.
-* **Env assignments.** `NAME=value` where NAME matches `KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH`,
-  and `export X=<≥32 high-entropy chars>`, lose the value.
+* **Env assignments.** `NAME=value` where a word of NAME (its `_`-separated parts and their
+  camelCase words) ends in `KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH` (`DB_PASS`, `PGPASSWORD`,
+  `dbUrl`, `authToken`), and `export X=<≥32 high-entropy chars>`, lose the value. A name that
+  only contains such letters keeps it (`passed=41`, `author=`, `bypass=`, `curl=`), and so does a
+  count: a number under 8 digits or `None`/`true`/`false` after `PASS` or a plural
+  (`PASS=120`, `max_tokens=4096`).
 * **Headers and credentials.** `-H 'Authorization: …'`, `--header …`, `-u user:pass`, URL
   credentials (`https://user:token@host`), DSNs (`postgres://user:pass@…`).
 * **No stdout/stderr** of commands that read `.env*`, key or credential files.

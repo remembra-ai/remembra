@@ -367,6 +367,18 @@ _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
+_MIN_TOKEN_CHARS = 32
+# A URL up to the token: "https://www.youtube.com/channel/", "www.facebook.com/".
+_URL_HEAD_RE = re.compile(r"(?i)(?:[a-z][a-z0-9+.\-]*://|(?<![A-Za-z0-9.])www\.)[^\s\"'<>]*$")
+_URL_PART_RE = re.compile(r"[^/=]+")
+_URL_LOOKBACK = 2048
+
+
+def _in_url(text: str, start: int) -> bool:
+    """True when the token at ``start`` continues a URL (``scheme://host/...`` or ``www.host/...``)."""
+    return bool(_URL_HEAD_RE.search(text[max(0, start - _URL_LOOKBACK) : start]))
+
+
 def _entropy(value: str) -> float:
     counts = Counter(value)
     total = len(value)
@@ -402,11 +414,47 @@ def _looks_like_path(token: str) -> bool:
     return all(_PATH_WORD_RE.fullmatch(p) for p in parts)
 
 
+# "TMPDIR=/Volumes/T7/x", "--output=/tmp/x", "--test-name-pattern=Checkout2Flow_x": the token
+# alphabet holds "=", "-" and "/", so a shell word that assigns a value is matched whole.
+_ASSIGN_PREFIX_RE = re.compile(r"^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=(?=[^=])")
+_NAME_SPLIT_RE = re.compile(r"[/_=\-]+")
+# Fewer class changes per character than this and the token is words, not random characters.
+_MAX_NAME_BREAKS = 0.15
+
+
+def _reads_like_names(token: str) -> bool:
+    """True for a path, branch or test name written by a person: ``T7/Codex-Worktrees/bth-ai-setup-20261107``,
+    ``feature/Add-OAuth2-Login-For-Enterprise-SSO``, ``Checkout2Flow_handlesRetries_3x``.
+
+    Such a token is several words joined by ``/``, ``-`` or ``_``, and inside a word the character
+    class seldom changes (``Codex``, ``OAuth2``, ``20261107``). In a random token it changes at
+    about four characters in ten, so a generated credential stays flagged.
+    """
+    parts = [part for part in _NAME_SPLIT_RE.split(token) if part]
+    if len(parts) < 2:
+        return False
+    breaks = 0
+    for part in parts:
+        for prev, cur in zip(part, part[1:], strict=False):
+            if prev.isdigit() != cur.isdigit() or (prev.islower() and cur.isupper()):
+                breaks += 1
+    return breaks <= _MAX_NAME_BREAKS * sum(len(part) for part in parts)
+
+
 def _is_high_entropy_token(token: str) -> bool:
     if _HEX_RE.fullmatch(token) or _UUID_RE.fullmatch(token):
         return False  # commit SHAs, digests, ids
     if _looks_like_path(token):
         return False  # file paths (/Volumes/T7/..., ~/Projects/...) are not credentials
+    assigned = _ASSIGN_PREFIX_RE.match(token)
+    if assigned:
+        # The value decides: a path or a name is not a credential, a random value still is
+        # (a named secret variable is caught by the labelled rules before this fallback).
+        value = token[assigned.end() :]
+        if _looks_like_path(value) or _reads_like_names(value):
+            return False
+    elif _reads_like_names(token):
+        return False
     stripped = token.strip("=")
     classes = sum(
         (
@@ -549,7 +597,12 @@ def _spans(text: str, decode: bool = True, fallback: bool = True) -> list[tuple[
         spans.extend(_encoded_spans(text))
     if fallback:
         for match in _TOKEN_RE.finditer(text):
-            if _is_high_entropy_token(match.group()):
+            if _in_url(text, match.start()):
+                # "com/channel/<id>" is not one token: each path segment and query value is its own.
+                for part in _URL_PART_RE.finditer(match.group()):
+                    if len(part.group()) >= _MIN_TOKEN_CHARS and _is_high_entropy_token(part.group()):
+                        spans.append((match.start() + part.start(), match.start() + part.end(), "high_entropy_token"))
+            elif _is_high_entropy_token(match.group()):
                 spans.append((match.start(), match.end(), "high_entropy_token"))
     return spans
 

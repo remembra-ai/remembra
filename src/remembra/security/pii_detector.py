@@ -70,6 +70,17 @@ _HOST_TAIL = re.compile(r"-[A-Za-z0-9]+(?:\.[A-Za-z0-9-]+){2,}")
 # An account label shortly before the number means it is one, whatever follows it.
 _ACCOUNT_LABEL = re.compile(r"(?i)(?:\b|_)(?:acct|account|a/c|iban|acc(?:t)?\s*(?:no|num|number|#))(?:\b|_)")
 _LABEL_WINDOW = 24
+# A word that names a machine-issued number ("gh run view 42664995945", "migrations 590000000-599999",
+# "App Store Connect app ID 1234567890", "epoch 1762735701"), then at most one short word, then the
+# digits. A bare "id" or "#" is not enough: "Tax ID 123456789" and "check # 12345678" are personal.
+_DEVELOPER_LABEL = re.compile(
+    r"(?i)(?<![A-Za-z0-9])"
+    r"(?:(?:runs?|jobs?|workflows?|builds?|pipelines?|deploy(?:s|ment|ments)?|releases?|migrations?|issues?|"
+    r"prs?|pulls?|commits?|artifacts?|epoch|timestamp|unix\s+time)(?:[\s_-]*ids?)?"
+    r"|(?:app|project|team|org|repo|installation|check|suite|message|thread|channel|chat|trace|span|request)[\s_-]*ids?)"
+    r"(?:[\s:=#(]+[A-Za-z][A-Za-z-]{0,11})?[\s:=#(]*$"
+)
+_URL_START = re.compile(r"(?i)^[\"'(<\[]*(?:[a-z][a-z0-9+.-]*://|www\.)")
 
 
 def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
@@ -108,6 +119,43 @@ def is_identifier_fragment(content: str, start: int, end: int) -> bool:
         return False
     following = re.split(r"[-._]", after[1:], maxsplit=1)[0]
     return bool(_MIXED_PART.fullmatch(following) or _HOST_TAIL.match(after))
+
+
+def _word_around(content: str, start: int, end: int) -> tuple[str, int]:
+    """The whitespace-delimited word containing [start, end), and the offset of ``start`` in it."""
+    left = start
+    while left > 0 and not content[left - 1].isspace():
+        left -= 1
+    right = end
+    while right < len(content) and not content[right].isspace():
+        right += 1
+    return content[left:right], start - left
+
+
+def is_developer_number(content: str, start: int, end: int) -> bool:
+    """True when the bare digit run at [start, end) is a machine-issued number, not a personal one.
+
+    Only these contexts (the false positives seen), and never with an account
+    label (``acct``, ``account``, ``a/c``, ``iban``, ``acc no``) just before:
+
+    * a segment of a URL or a slash-separated path: ``www.facebook.com/100063512345678``,
+      ``.../actions/runs/42664995945/job/7``, ``artifacts/20261110/1234567890123/report.html``;
+    * after a word naming such a number (run, job, workflow, build, deploy, release, migration,
+      issue, PR, commit, artifact, epoch, ``<thing> id``), with at most one short word between:
+      ``gh run view 42664995945``, ``migrations 590000000-599999``, ``app ID 1234567890``.
+    """
+    word, offset = _word_around(content, start, end)
+    # The label window reaches back from the start of the word: a URL can put the digits far from it.
+    if _ACCOUNT_LABEL.search(content[max(0, start - offset - _LABEL_WINDOW) : start]):
+        return False
+    if "/" in word and (_URL_START.match(word) or word[:offset].endswith("/") or word[offset + end - start :].startswith("/")):
+        return True
+    return bool(_DEVELOPER_LABEL.search(content[max(0, start - 2 * _LABEL_WINDOW) : start]))
+
+
+# The patterns that also match a bare run of digits: a CI run id is 11 digits, an epoch or an
+# App Store id 10 (the shape of a phone number), a long id 16 (the shape of a card number).
+_BARE_DIGIT_TYPES = frozenset({"bank_account", "phone_us", "credit_card"})
 
 
 # Severity levels for PII types
@@ -161,6 +209,33 @@ class PIIScanResult:
     @property
     def high_count(self) -> int:
         return sum(1 for m in self.matches if m.severity == "high")
+
+
+_SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1}
+
+
+def _merge_overlaps(matches: list[PIIMatch]) -> list[tuple[int, int, PIIMatch]]:
+    """Overlapping matches as one span each, in text order: ``(start, end, naming match)``.
+
+    Two patterns often match the same digits (a 10-digit run is a phone number and a bank
+    account). Replacing them one by one spliced the placeholders into each other
+    (``[REDACTED_BANK_ACCOUNT]PHONE_US]``). The span is the union; the most severe match names
+    it, then the longest, then the earliest.
+    """
+
+    def rank(m: PIIMatch) -> tuple[int, int, int]:
+        return (_SEVERITY_RANK.get(m.severity, 0), m.end - m.start, -m.start)
+
+    merged: list[tuple[int, int, PIIMatch]] = []
+    for match in sorted(matches, key=lambda m: (m.start, -(m.end - m.start))):
+        if match.end <= match.start:
+            continue
+        if merged and match.start < merged[-1][1]:
+            start, end, named = merged[-1]
+            merged[-1] = (start, max(end, match.end), match if rank(match) > rank(named) else named)
+            continue
+        merged.append((match.start, match.end, match))
+    return merged
 
 
 # ============================================================================
@@ -234,6 +309,8 @@ class PIIDetector:
                     start, end = match.start(), match.end()
                     if pii_type == "bank_account" and is_identifier_fragment(content, start, end):
                         continue
+                    if pii_type in _BARE_DIGIT_TYPES and original.isdigit() and is_developer_number(content, start, end):
+                        continue
 
                 severity = PII_SEVERITY.get(pii_type, "medium")
 
@@ -286,13 +363,10 @@ class PIIDetector:
 
     def _redact_all(self, content: str, matches: list[PIIMatch]) -> str:
         """Replace all PII matches with redaction placeholders."""
-        # Sort matches by start position in reverse to replace from end
-        sorted_matches = sorted(matches, key=lambda m: m.start, reverse=True)
-
         result = content
-        for match in sorted_matches:
+        for start, end, match in reversed(_merge_overlaps(matches)):
             placeholder = f"[REDACTED_{match.type.upper()}]"
-            result = result[: match.start] + placeholder + result[match.end :]
+            result = result[:start] + placeholder + result[end:]
 
         return result
 
@@ -320,14 +394,12 @@ class PIIDetector:
         if not result.has_pii:
             return content
 
-        sorted_matches = sorted(result.matches, key=lambda m: m.start, reverse=True)
-
         hashed = content
-        for match in sorted_matches:
-            # Create deterministic hash
-            hash_value = hashlib.sha256(match.original.encode()).hexdigest()[:12]
+        for start, end, match in reversed(_merge_overlaps(result.matches)):
+            # Create deterministic hash (of the whole replaced span: overlapping matches are one value)
+            hash_value = hashlib.sha256(content[start:end].encode()).hexdigest()[:12]
             placeholder = f"[HASH_{match.type.upper()}:{hash_value}]"
-            hashed = hashed[: match.start] + placeholder + hashed[match.end :]
+            hashed = hashed[:start] + placeholder + hashed[end:]
 
         return hashed
 

@@ -19,9 +19,10 @@ Rules, applied recursively to every value:
   already carries a salted host label).
 * **Strings** go through: absolute paths under ``repo_root`` → repo-relative;
   other paths under ``home`` → ``~/…`` (without ``home``, as on the server, any
-  ``/Users/<name>`` or ``/home/<name>`` prefix → ``~``); env assignments whose name contains
-  ``KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH`` (and ``export X=<≥32 random
-  chars>``) lose their value; ``Authorization``-style headers, ``-u user:pass``
+  ``/Users/<name>`` or ``/home/<name>`` prefix → ``~``); env assignments whose name has a
+  word ending in ``KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH`` (``DB_PASS``,
+  ``dbUrl``, ``PGPASSWORD``; not ``passed``, ``author``, ``max_tokens=4096``),
+  and ``export X=<≥32 random chars>``, lose their value; ``Authorization``-style headers, ``-u user:pass``
   and URL credentials lose their secret part; then
   :func:`remembra.security.secrets.redact_secrets` (provider keys, JWTs, PEM
   keys, high-entropy tokens) and, when given, the per-request PII scrubber.
@@ -64,7 +65,43 @@ _FINGERPRINT_KEYS: Final = frozenset({"fingerprint"})
 # Lists whose items are test results (their command is a fingerprint).
 _TEST_LIST_KEYS: Final = frozenset({"tests"})
 
-_ENV_NAME_SECRET: Final = re.compile(r"KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH", re.IGNORECASE)
+# A name is a secret's when one of its words ENDS in a credential word: ``DB_PASS``, ``PGPASSWORD``,
+# ``REDISURL``, ``encryptionKey``, ``authToken``. A substring test also hit ``passed`` (the server's own
+# ``passed=41 failed=0`` test line), ``author``, ``bypass``, ``curl`` and ``max_tokens``.
+_ENV_SECRET_WORD: Final = re.compile(
+    r"(?:keys?|tokens?|secrets?|pass|passwords?|passwd|passphrase|passcode|pwd|dsn|urls?|auth|authorization|authentication)$"
+)
+# Words that end like a credential word and are not one.
+_ENV_PLAIN_WORDS: Final = frozenset(
+    {
+        "bypass",
+        "compass",
+        "surpass",
+        "trespass",
+        "overpass",
+        "underpass",
+        "encompass",
+        "monkey",
+        "monkeys",
+        "hotkey",
+        "hotkeys",
+        "turkey",
+        "donkey",
+        "hockey",
+        "jockey",
+        "whiskey",
+        "curl",
+        "curls",
+        "furl",
+        "unfurl",
+        "hurl",
+        "purl",
+    }
+)
+# A count as often as a credential: ``PASS=120``, ``TESTS_PASS=128``, ``max_tokens=4096``, ``keys=3``.
+_ENV_COUNT_WORD: Final = re.compile(r"(?:pass|keys|tokens|secrets|passwords|urls)$")
+_ENV_NOT_A_VALUE: Final = frozenset({"none", "null", "nil", "true", "false", "yes", "no", "on", "off"})
+_CAMEL_WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 _ENV_ASSIGN: Final = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|'\"`]+)")
 _EXPORT_ASSIGN: Final = re.compile(r"\bexport\s+([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|'\"`]+)")
 _HEADER: Final = re.compile(
@@ -85,9 +122,35 @@ def _looks_random(value: str) -> bool:
     return classes >= 2
 
 
+def _name_words(name: str) -> list[str]:
+    """The lower-case words of an assignment name: ``_``-separated parts, and each part's camelCase words."""
+    words: list[str] = []
+    for part in name.split("_"):
+        if not part:
+            continue
+        words.append(part.lower())
+        words.extend(w.lower() for w in _CAMEL_WORD.findall(part))
+    return words
+
+
+def _env_secret_name(name: str, value: str) -> bool:
+    """True when ``name=value`` assigns a credential: a word of the name ends in a credential word.
+
+    A short number or a literal such as ``None``/``true`` after a word that also names a count
+    (``PASS=120``, ``max_tokens=4096``) is a count, not a credential.
+    """
+    hits = [w for w in _name_words(name) if w not in _ENV_PLAIN_WORDS and _ENV_SECRET_WORD.search(w)]
+    if not hits:
+        return False
+    bare = value.strip("'\"")
+    if (bare.isdigit() and len(bare) < 8) or bare.lower() in _ENV_NOT_A_VALUE:
+        return not all(_ENV_COUNT_WORD.search(w) for w in hits)
+    return True
+
+
 def _env_sub(match: re.Match[str]) -> str:
     name, value = match.group(1), match.group(2)
-    if _ENV_NAME_SECRET.search(name) and value.strip("'\"") and not value.startswith("[REDACTED:"):
+    if value.strip("'\"") and not value.startswith("[REDACTED:") and _env_secret_name(name, value):
         return f"{name}={_REDACTED.format(kind='env')}"
     return match.group(0)
 
