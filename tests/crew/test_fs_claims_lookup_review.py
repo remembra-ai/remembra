@@ -22,6 +22,7 @@ from remembra.client.memory import Memory
 from remembra.mcp import crew as crew_mod
 from remembra.mcp.crew import CrewApiError, CrewBridge, error_text
 from tests.crew.gatecore_support import find, run, snapshot
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import LiveServer, live_server
 from tests.crew.test_mcp_crew import (
     Clock,
@@ -131,13 +132,13 @@ def _zone_with_exclude(live: LiveServer, prefix: str) -> tuple[str, Memory, str,
 def test_release_by_zone_slug_leaves_a_path_claim_the_zone_excludes(live, clock):
     project, a, a_sign, b, b_sign = _zone_with_exclude(live, "exclrel")
     released = call("crew_claim", action="release", zone="lib")
-    assert released == "RELEASED path lib/sales.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path lib/sales.ts (exclusive, active) → released", released
     assert _states(live, project, "c.path_glob = 'lib/vendor/x.ts'") == [("lib/vendor/x.ts", "active", a_sign)]
     again = call("crew_claim", action="release", zone="lib")
     assert again.startswith(OLD_EMPTY), again
     assert "You hold: path lib/vendor/x.ts (exclusive, active" in again, again
     # the claim is still released by its own name
-    assert call("crew_claim", action="release", paths=["lib/vendor/x.ts"]) == (
+    assert untagged(call("crew_claim", action="release", paths=["lib/vendor/x.ts"]), project) == (
         "RELEASED path lib/vendor/x.ts (exclusive, active) → released"
     )
 
@@ -156,7 +157,7 @@ def test_adopt_by_zone_slug_leaves_a_reserved_path_claim_the_zone_excludes(live,
     use(b)
     writes = _writes(monkeypatch)
     out = call("crew_claim", action="adopt", zone="lib")
-    assert out == "NOT ADOPTED zone lib: nothing is reserved there.", out
+    assert untagged(out, project) == "NOT ADOPTED zone lib: nothing is reserved there.", out
     assert writes == [], writes
     assert _states(live, project, "c.path_glob = 'lib/vendor/x.ts'") == [("lib/vendor/x.ts", "reserved", a_sign)]
 
@@ -192,7 +193,10 @@ def test_release_of_one_file_leaves_a_wider_claim_that_covers_it(live, clock, mo
     handed = call("crew_claim", action="handover", paths=["art/one.psd"], to=f"@{b_sign}")
     assert handed.startswith("NOT HANDED OVER: you hold no active claim on that."), handed
     # its own spelling and the folder above it both name it
-    assert call("crew_claim", action="release", paths=["art"]) == "RELEASED path art/** (exclusive, active) → released"
+    assert (
+        untagged(call("crew_claim", action="release", paths=["art"]), project)
+        == "RELEASED path art/** (exclusive, active) → released"
+    )
 
 
 def test_the_empty_answer_still_names_the_holder_of_a_wider_claim(live, clock):

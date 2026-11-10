@@ -583,29 +583,31 @@ Agents with crew hooks get the same checks from the hooks; for MCP-only agents t
 | Tool | Purpose |
 |------|---------|
 | `crew_status(project_id?, git_remote?, root_path?, verbose=false, join=true)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. `join=false` only looks: the crew block, with no seat taken, no presence and nothing marked as read. |
-| `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0, project_id?)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
-| `crew_guard(paths, command?, mcp_tool?, project_id?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
-| `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?, project_id?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
-| `crew_say(body, kind="chat", to="crew", thread?, wait_s=0, project_id?)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
-| `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?, project_id?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
-| `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true, project_id?)` | The completion report (done / not done / failing / next) a task needs before it is done. |
+| `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0, project_id?, root_path?)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
+| `crew_guard(paths, command?, mcp_tool?, project_id?, root_path?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
+| `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?, project_id?, root_path?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
+| `crew_say(body, kind="chat", to="crew", thread?, wait_s=0, project_id?, root_path?)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
+| `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?, project_id?, root_path?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
+| `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true, project_id?, root_path?)` | The completion report (done / not done / failing / next) a task needs before it is done. |
 
 ### One server, several conversations
 
 On stdio one MCP server process is one MCP session. Some clients start one process per conversation; a
 desktop app can start a single process for all its conversations, which then share that session.
 
-- Every crew tool that writes takes `project_id`. A write that names its project goes to that project's crew
-  and does not change which project later calls default to.
-- The answer of every crew write ends with the crew it used and your callsign there, for example
-  `(in CREW my-project as cd-1)`.
-- Once a server has been used for more than one project (through `session_brief`, `crew_status` or a crew
-  write), a crew write, `store_memory` or `close_session` that names no project is refused with a message
-  asking for `project_id` (for `close_session`, `root_path` or `git_remote` also work). Nothing is written.
-  Before, such a call followed the project chosen last, which could be another conversation's.
+- Every crew tool that writes takes `project_id` (or `root_path`, your repository checkout). A write that
+  names its project goes to that project's crew, for that call only: it does not change which project later
+  calls default to and does not count as choosing a project.
+- The answer of every crew write names the crew it used and your callsign there, for example
+  `(in CREW my-project as cd-1)`; a stdio server adds `(project my-project)` as the last line.
+- Once a server has chosen more than one project (through `session_brief`, `crew_status` or a crew write
+  that named none), a crew write, `store_memory` or `close_session` that names no project is refused with a
+  message asking for `project_id` (for `close_session`, `root_path` or `git_remote` also work). Nothing is
+  written. Before, such a call followed the project chosen last, which could be another conversation's.
 - The answer of `store_memory` carries `project_id`: the project the memory went into.
 - `close_session` ends the crew session of the project it closes, not the one used last. With no brief and
-  one crew seat, a `close_session` that names no project closes that seat's project.
+  one crew seat chosen with `crew_status` (or a write that named no project), a `close_session` that names
+  no project closes that seat's project.
 - A server that crewd recognises as part of one agent's process tree (the agent has crew hooks) serves one
   conversation, so there the project chosen last is still the default.
 - `crew_status` without a project still shows the project chosen last; its first line names the crew.

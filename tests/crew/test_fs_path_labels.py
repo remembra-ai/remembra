@@ -17,6 +17,7 @@ import pytest
 import remembra.mcp.server as server
 from remembra.crew import schemas as S
 from remembra.mcp.crew import CrewBridge, _safe_path
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import live_server
 from tests.crew.test_mcp_crew import Clock, agent, assert_clean, call, project_name, use
 
@@ -100,7 +101,7 @@ def test_other_text_is_not_printed_as_a_path(path):
 
 
 def test_bracket_and_group_routes_are_named_in_claim_status_and_release(live, clock):
-    _solo(live, "routes")
+    project = _solo(live, "routes")
     got = call("crew_claim", paths=ROUTES)
     lines = got.split("\n")
     assert re.fullmatch(r"GRANTED path app/api/assets/\[id\]/route\.ts \(exclusive, epoch 1, clm_\w+\)", lines[0]), got
@@ -113,16 +114,16 @@ def test_bracket_and_group_routes_are_named_in_claim_status_and_release(live, cl
     ), status
     assert "(see verbose)" not in status, status
     released = call("crew_claim", action="release", paths=ROUTES)
-    assert released.split("\n") == [
+    assert untagged(released, project).split("\n") == [
         "RELEASED path app/api/assets/[id]/route.ts (exclusive, active) → released",
         "RELEASED path app/(shop)/page.tsx (exclusive, active) → released",
     ], released
 
 
 def test_an_adopted_route_is_named(live, clock):
-    _solo(live, "routeadopt")
+    project = _solo(live, "routeadopt")
     call("crew_claim", paths=ROUTES[:1])
-    assert call("crew_claim", action="release", paths=ROUTES[:1], baton=True) == (
+    assert untagged(call("crew_claim", action="release", paths=ROUTES[:1], baton=True), project) == (
         "RELEASED path app/api/assets/[id]/route.ts (exclusive, active) → reserved"
     )
     adopted = call("crew_claim", action="adopt", paths=ROUTES[:1])

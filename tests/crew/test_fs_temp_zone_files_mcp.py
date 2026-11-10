@@ -10,6 +10,7 @@ import pytest
 import remembra.mcp.server as server
 from remembra.crew import claims as C
 from remembra.mcp.crew import CrewBridge
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import live_server
 from tests.crew.test_mcp_crew import (
     OWNER_EMAIL,
@@ -179,5 +180,5 @@ def test_a_path_claim_that_a_zone_now_covers_can_still_be_released(live, clock):
     status = call("crew_status")
     assert "holding path tools/sales-research.ts (exclusive, active)" in status, status
     released = call("crew_claim", action="release", paths=["tools/sales-research.ts"])
-    assert released == "RELEASED path tools/sales-research.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path tools/sales-research.ts (exclusive, active) → released", released
     assert _claims(live, project) == []

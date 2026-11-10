@@ -20,6 +20,7 @@ import remembra.mcp.server as server
 from remembra.client.memory import Memory
 from remembra.mcp import crew as crew_mod
 from remembra.mcp.crew import CrewBridge
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import LiveServer, live_server
 from tests.crew.test_mcp_crew import (
     Clock,
@@ -117,13 +118,13 @@ def test_release_frees_the_sessions_own_reserved_path_claim(live, clock):
     use(a)
     assert "GRANTED path art/x.psd" in call("crew_claim", paths=["art/x.psd"])
     parked = call("crew_claim", action="release", paths=["art/x.psd"], baton=True)
-    assert parked.startswith("RELEASED path art/x.psd") and parked.endswith("→ reserved"), parked
+    assert parked.startswith("RELEASED path art/x.psd") and untagged(parked, project).endswith("→ reserved"), parked
     status = call("crew_status")
     assert "holding path art/x.psd (exclusive, reserved)" in status, status
 
     released = call("crew_claim", action="release", paths=["art/x.psd"])
     assert released.startswith("RELEASED path art/x.psd (exclusive, reserved)"), released
-    assert released.endswith("→ released"), released
+    assert untagged(released, project).endswith("→ released"), released
     assert _claims(live, project, "c.path_glob = 'art/x.psd'") == [
         {"path_glob": "art/x.psd", "zone_id": None, "resource": None, "state": "released", "callsign": a_sign}
     ]
@@ -136,9 +137,11 @@ def test_release_frees_the_sessions_own_reserved_zone_claim(live, clock):
     project, a, a_sign, b, b_sign = _pair(live, "ownreszone")
     use(a)
     assert call("crew_claim", zone="pos").startswith("GRANTED zone pos")
-    assert call("crew_claim", action="release", zone="pos", baton=True).endswith("→ reserved")
+    assert untagged(call("crew_claim", action="release", zone="pos", baton=True), project).endswith("→ reserved")
     released = call("crew_claim", action="release", zone="pos")
-    assert released.startswith("RELEASED zone pos (exclusive, reserved)") and released.endswith("→ released"), released
+    assert released.startswith("RELEASED zone pos (exclusive, reserved)") and untagged(released, project).endswith(
+        "→ released"
+    ), released
     use(b)
     assert call("crew_claim", zone="pos").startswith("GRANTED zone pos")
 
@@ -210,7 +213,7 @@ def test_release_by_path_frees_a_path_claim_a_zone_covered_later(live, clock):
     project, a, a_sign, b, b_sign = _orphan(live, "orphanpath")
     assert "holding path lib/sales.ts (exclusive, active)" in call("crew_status")
     released = call("crew_claim", action="release", paths=["lib/sales.ts"])
-    assert released == "RELEASED path lib/sales.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path lib/sales.ts (exclusive, active) → released", released
     assert [r["state"] for r in _claims(live, project, "c.path_glob = 'lib/sales.ts'")] == ["released"]
     use(b)
     assert call("crew_claim", zone="lib").startswith("GRANTED zone lib")
@@ -219,7 +222,7 @@ def test_release_by_path_frees_a_path_claim_a_zone_covered_later(live, clock):
 def test_release_by_zone_slug_frees_a_path_claim_inside_that_zone(live, clock):
     project, a, a_sign, b, b_sign = _orphan(live, "orphanzone")
     released = call("crew_claim", action="release", zone="lib")
-    assert released == "RELEASED path lib/sales.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path lib/sales.ts (exclusive, active) → released", released
     use(b)
     assert call("crew_claim", zone="lib").startswith("GRANTED zone lib")
 
@@ -227,7 +230,7 @@ def test_release_by_zone_slug_frees_a_path_claim_inside_that_zone(live, clock):
 def test_release_by_folder_frees_the_path_claims_under_it(live, clock):
     project, a, a_sign, b, b_sign = _orphan(live, "orphandir")
     released = call("crew_claim", action="release", paths=["lib"])
-    assert released == "RELEASED path lib/sales.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path lib/sales.ts (exclusive, active) → released", released
 
 
 def test_adopt_then_release_by_path_under_a_later_zone(live, clock):
@@ -237,7 +240,7 @@ def test_adopt_then_release_by_path_under_a_later_zone(live, clock):
     adopted = call("crew_claim", action="adopt", paths=["lib/sales.ts"])
     assert adopted.startswith("ADOPTED lib/sales.ts: you now hold path lib/sales.ts (exclusive, active)"), adopted
     released = call("crew_claim", action="release", paths=["lib/sales.ts"])
-    assert released == "RELEASED path lib/sales.ts (exclusive, active) → released", released
+    assert untagged(released, project) == "RELEASED path lib/sales.ts (exclusive, active) → released", released
     assert "holding nothing" in call("crew_status")
 
 
@@ -261,11 +264,11 @@ def test_a_zone_claim_is_not_released_by_a_path_outside_it(live, clock):
     call("crew_claim", zone="pos")
     call("crew_claim", paths=["art/x.psd", "docs/notes.md"])
     got = call("crew_claim", action="release", paths=["art/x.psd"])
-    assert got == "RELEASED path art/x.psd (exclusive, active) → released", got
+    assert untagged(got, project) == "RELEASED path art/x.psd (exclusive, active) → released", got
     status = call("crew_status")
     assert "zone pos (exclusive, active)" in status and "path docs/notes.md (exclusive, active)" in status, status
     got = call("crew_claim", action="release", zone="pos")
-    assert got == "RELEASED zone pos (exclusive, active) → released", got
+    assert untagged(got, project) == "RELEASED zone pos (exclusive, active) → released", got
     assert "path docs/notes.md (exclusive, active)" in call("crew_status")
 
 
@@ -317,7 +320,7 @@ def test_the_empty_answer_explains_a_prefixed_target(live, clock):
 def test_a_session_that_holds_nothing_gets_the_plain_answer(live, clock):
     project, a, a_sign, b, b_sign = _pair(live, "plain")
     use(a)
-    assert call("crew_claim", action="release", zone="pos") == OLD_EMPTY
+    assert untagged(call("crew_claim", action="release", zone="pos"), project) == OLD_EMPTY
 
 
 def test_a_zone_added_after_the_zone_list_was_read_is_found(live, clock):
@@ -328,5 +331,8 @@ def test_a_zone_added_after_the_zone_list_was_read_is_found(live, clock):
     assert call("crew_claim", zone="pos").startswith("GRANTED zone pos")  # reads and caches the zone list
     add_zone(live, project, "late", "late/**")
     assert call("crew_claim", zone="late").startswith("GRANTED zone late")
-    assert call("crew_claim", action="release", zone="late") == "RELEASED zone late (exclusive, active) → released"
+    assert (
+        untagged(call("crew_claim", action="release", zone="late"), project)
+        == "RELEASED zone late (exclusive, active) → released"
+    )
     assert call("crew_claim", zone="nosuchzone").startswith("CREW: Unknown zone")

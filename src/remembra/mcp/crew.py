@@ -969,7 +969,7 @@ class CrewBridge:
                 with self._lock:
                     if sticky:
                         self._current[scope] = project
-                    self._point(scope, project)
+                        self._point(scope, project)
                 return existing, None
             return self._join(caller, scope, project, existing, checkout, sticky=sticky)
 

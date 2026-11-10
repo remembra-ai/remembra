@@ -13,6 +13,7 @@ import pytest
 import remembra.mcp.server as server
 from remembra.crew import claims as C
 from remembra.mcp.crew import CrewBridge
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import live_server
 from tests.crew.test_mcp_crew import OWNER_EMAIL, Clock, agent, assert_clean, call, callsign_in, crew_id_of, project_name, use
 
@@ -127,10 +128,10 @@ def test_release_reaches_an_own_reserved_claim_and_frees_the_slot(live, clock):
     _codex(live, project, 1)
     assert call("crew_claim", paths=["public/hardware/studio.js"]).startswith("GRANTED path public/hardware/studio.js")
     kept = call("crew_claim", action="release", paths=["public/hardware/studio.js"], baton=True)
-    assert kept.startswith("RELEASED path public/hardware/studio.js") and kept.endswith("→ reserved"), kept
+    assert kept.startswith("RELEASED path public/hardware/studio.js") and untagged(kept, project).endswith("→ reserved"), kept
     # baton=True on a claim that is already a baton keeps it (the server would end it)
     again = call("crew_claim", action="release", paths=["public/hardware/studio.js"], baton=True)
-    assert again == (
+    assert untagged(again, project) == (
         "ALREADY RESERVED path public/hardware/studio.js (exclusive, reserved): it is kept as a baton for the next pickup. "
         "Release it with baton=false to free the area."
     ), again
@@ -140,7 +141,7 @@ def test_release_reaches_an_own_reserved_claim_and_frees_the_slot(live, clock):
     )
     assert rows == [{"state": "reserved"}]
     released = call("crew_claim", action="release", paths=["public/hardware/studio.js"])
-    assert released == "RELEASED path public/hardware/studio.js (exclusive, reserved) → released", released
+    assert untagged(released, project) == "RELEASED path public/hardware/studio.js (exclusive, reserved) → released", released
     rows = live.crew_rows(
         "SELECT state FROM crew_claims WHERE crew_id = ? AND path_glob = ?",
         (crew_id_of(live, project), "public/hardware/studio.js"),
@@ -154,10 +155,12 @@ def test_nothing_released_says_what_the_session_does_hold(live, clock):
     assert call("crew_claim", paths=["app/shop/page.tsx"]).startswith("GRANTED")
     got = call("crew_claim", action="release", paths=["app/other.tsx"])
     assert got.startswith("NOTHING RELEASED: you hold no live claim on that."), got
-    assert re.search(r"You hold: path app/shop/page\.tsx \(exclusive, active, clm_[A-Za-z0-9]+\)\.$", got), got
+    held = untagged(got, project)
+    assert re.search(r"You hold: path app/shop/page\.tsx \(exclusive, active, clm_[A-Za-z0-9]+\)\.$", held), got
     assert call("crew_claim", action="release", paths=["app/shop/page.tsx"]).startswith("RELEASED path app/shop/page.tsx")
     assert (
-        call("crew_claim", action="release", paths=["app/shop/page.tsx"]) == "NOTHING RELEASED: you hold no live claim on that."
+        untagged(call("crew_claim", action="release", paths=["app/shop/page.tsx"]), project)
+        == "NOTHING RELEASED: you hold no live claim on that."
     )
 
 

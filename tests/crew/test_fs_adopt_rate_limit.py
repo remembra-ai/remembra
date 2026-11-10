@@ -22,6 +22,7 @@ from remembra.crew import limits as limits_mod
 from remembra.crew.limits import BucketSpec, CrewRateLimiter, set_crew_rate_limiter
 from remembra.mcp import crew as crew_mod
 from remembra.mcp.crew import CrewApiError, CrewBridge, error_text
+from tests.crew.fs_crew_tag import untagged
 from tests.crew.mcp_support import LiveServer, live_server
 from tests.crew.test_mcp_crew import Clock, add_zone, agent, assert_clean, call, callsign_in, project_name, use
 
@@ -78,7 +79,7 @@ def _parked(live: LiveServer, prefix: str, paths: list[str]) -> tuple[str, Memor
     add_zone(live, project, "pos", "src/app/pos/**")
     for p in paths:
         assert f"GRANTED path {p}" in call("crew_claim", paths=[p])
-        assert call("crew_claim", action="release", paths=[p], baton=True).endswith("→ reserved")
+        assert untagged(call("crew_claim", action="release", paths=[p], baton=True), project).endswith("→ reserved")
     d = agent(live, "claude-desktop", f"{project}-d", project)
     use(d)
     call("crew_status", project_id=project)
@@ -222,7 +223,9 @@ def test_taking_back_your_own_reservation_does_not_use_the_takeover_budget(live,
     call("crew_status", project_id=project)
     assert "GRANTED path docs/route.md" in call("crew_claim", paths=["docs/route.md"])
     for i in range(8):
-        assert call("crew_claim", action="release", paths=["docs/route.md"], baton=True).endswith("→ reserved"), i
+        assert untagged(call("crew_claim", action="release", paths=["docs/route.md"], baton=True), project).endswith(
+            "→ reserved"
+        ), i
         got = call("crew_claim", action="adopt", paths=["docs/route.md"])
         assert got.startswith("ADOPTED docs/route.md: you now hold path docs/route.md (exclusive, active)"), (i, got)
 
@@ -236,8 +239,8 @@ def test_releasing_your_own_reservation_needs_no_adopt(live, clock, limited, mon
     for i in range(8):
         path = f"docs/n{i}.md"
         assert f"GRANTED path {path}" in call("crew_claim", paths=[path])
-        assert call("crew_claim", action="release", paths=[path], baton=True).endswith("→ reserved")
-        assert call("crew_claim", action="release", paths=[path]).endswith("→ released"), i
+        assert untagged(call("crew_claim", action="release", paths=[path], baton=True), project).endswith("→ reserved")
+        assert untagged(call("crew_claim", action="release", paths=[path]), project).endswith("→ released"), i
     assert not [w for w in writes if w[1].endswith("/adopt")], writes
 
 
@@ -272,4 +275,4 @@ def test_against_a_server_that_limits_own_retakes_the_answer_points_to_claim_and
     # and both ways out work against that server
     assert call("crew_claim", paths=["docs/route.md"]).startswith("GRANTED path docs/route.md"), "plain claim re-takes"
     call("crew_claim", action="release", paths=["docs/route.md"], baton=True)
-    assert call("crew_claim", action="release", paths=["docs/route.md"]).endswith("→ released")
+    assert untagged(call("crew_claim", action="release", paths=["docs/route.md"]), project).endswith("→ released")
