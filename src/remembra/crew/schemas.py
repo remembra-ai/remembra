@@ -2105,6 +2105,14 @@ def split_mcp_name(name: str) -> tuple[str, str]:
     return "", name
 
 
+def is_remembra_mcp_server(server: str) -> bool:
+    """The server part of ``mcp__<server>__<tool>`` names Remembra's MCP server: ``remembra``, or a name
+    that starts or ends with that word (``remembra-mcp``, ``plugin_remembra_remembra``); case and ``-``/``_``
+    do not matter. Another server that merely reuses a tool name stays gated."""
+    norm = server.strip().lower().replace("-", "_")
+    return norm == "remembra" or norm.startswith("remembra_") or norm.endswith("_remembra")
+
+
 def _words(tool: str) -> list[str]:
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", tool)
     return [w for w in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if w]
@@ -2128,11 +2136,16 @@ def classify_mcp_tool(
 ) -> McpClassification:
     """Reference MCP tool map (§8.2). ``zone_rules`` = [(zone_slug, {"tool": pattern, "service": ...}), ...].
 
-    Order: read-like fast exit, zone mappings from zones.yml, migrations and
-    DDL, deploys, filesystem tools, GitHub file tools, then any path-like field.
+    Order: Remembra's own crew tools (never gated as writes), read-like fast exit, zone mappings
+    from zones.yml, migrations and DDL, deploys, filesystem tools, GitHub file tools, then any
+    path-like field.
     """
     args: Mapping[str, Any] = tool_input or {}
     server, tool = split_mcp_name(name)
+    if tool in CREW_MCP_TOOL_NAMES and is_remembra_mcp_server(server):
+        # Remembra's own coordination tools: ``paths`` names what to claim, release, adopt or check, not
+        # files this call writes. The server answers them (it alone honours ``action`` and ``mode``).
+        return McpClassification("other")
     words = _words(tool)
     wordset = set(words)
     if wordset & MCP_READ_WORDS and not wordset & MCP_WRITE_WORDS:
@@ -2497,6 +2510,8 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
         "Verdict, accepted or review, unmet criteria. MCP evidence is agent-declared.",
     ),
 )
+# The gate never reads these tools' arguments as file writes (:func:`classify_mcp_tool`).
+CREW_MCP_TOOL_NAMES: Final = frozenset(spec.name for spec in MCP_TOOLS)
 MCP_REPORT_SECTIONS: Final = ("done", "not_done", "failing", "next", "follow_ups")
 MCP_TEST_RESULT = Shape("McpTestResult", {"command": _s(256), "passed": _i(0), "failed": _i(0)})
 MCP_PIGGYBACK_MIN_INTERVAL_S: Final = 60
