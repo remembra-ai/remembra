@@ -49,6 +49,15 @@ still lists what was granted. `QUEUED`, `NOTHING RELEASED` and `NOTHING TO CLAIM
 `health_check` and `remembra_doctor` report faults as their result and are never flagged. Never put
 `crew_claim` and an edit in one batched script: read the claim's result first.
 
+**Outages:** `CREW UNAVAILABLE: …` ends with what the outage means for the call. "This call was not
+carried out" (the request never left, or a gateway had no server to give it to); "Nothing was changed"
+(a read); "Whether this call was carried out is not known. Repeating the same call is safe" for a
+write the server deduplicates: checkpoints, tasks, claims and their actions carry an `Idempotency-Key`,
+a message its `client_msg_id`, and the same call made again after an outage carries the same one, so it
+is recorded once. Anything else says the outcome is unknown and to check `crew_status` first. Nothing
+is retried automatically and, except for `close_session`, nothing is queued: repeat the call once the
+server answers.
+
 **Piggyback:** every Remembra MCP result may get a `crew_notice` suffix ≤300 chars
 (`TEXT_CAPS["piggyback"]`), agent text inside the data block, at most one per 60 s
 (`MCP_PIGGYBACK_MIN_INTERVAL_S`) except server-generated collisions, overrides and pause.

@@ -33,6 +33,8 @@ item, tags neutralised; nothing ever names a destructive command or the bypass m
 from __future__ import annotations
 
 import functools
+import hashlib
+import json as jsonlib
 import math
 import os
 import re
@@ -167,6 +169,9 @@ class CrewApiError(Exception):
         self.body: dict[str, Any] = dict(body or {})
         # the request never left this machine (connection refused, no route, connect timeout)
         self.not_sent = not_sent
+        # what the failed request was (set by CrewHttp.call): "read" changes nothing; "repeatable" is a
+        # write the server recognises when it is sent again (same Idempotency-Key, or a re-join)
+        self.kind: str = ""
 
 
 def no_answer(e: CrewApiError) -> bool:
@@ -368,6 +373,73 @@ class HookShadow:
         )
 
 
+IDEMPOTENCY_HEADER: Final = "Idempotency-Key"
+# The crew writes the server deduplicates: by ``Idempotency-Key`` (checkpoints, tasks and their actions,
+# claims and their actions; 72 h per session and route) or, for a message, by its ``client_msg_id``.
+_KEYED_ROUTE_RE: Final = re.compile(
+    r"/crews/[^/]+/(?:checkpoints|tasks|claims|messages)|/claims/[^/]+/[a-z-]+|/tasks/[^/]+(?:/[a-z-]+)?"
+)
+_REPEAT_TTL_S: Final = 24 * 3600.0
+_REPEAT_MAX: Final = 256
+
+
+def is_keyed(method: str, path: str) -> bool:
+    """Whether the server recognises a repeat of this request (see :data:`_KEYED_ROUTE_RE`)."""
+    return method in ("POST", "PATCH") and _KEYED_ROUTE_RE.fullmatch(path) is not None
+
+
+class _Repeats:
+    """The idempotency keys of writes that met an outage, so the same request made again carries the same key.
+
+    In memory, per MCP process: a key is kept only while the outcome of its request is unknown, for at
+    most a day (the server remembers a key for 72 h) and for at most 256 requests.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._kept: dict[str, tuple[str, float]] = {}
+
+    def key_for(self, mark: str) -> str:
+        with self._lock:
+            kept = self._kept.get(mark)
+            if kept is not None and self._clock() - kept[1] < _REPEAT_TTL_S:
+                return kept[0]
+        return f"mcp-{uuid.uuid4().hex}"
+
+    def keep(self, mark: str, key: str) -> None:
+        with self._lock:
+            first = self._kept.pop(mark, None)
+            # the age counts from the first failure: a key is never offered past the server's memory of it
+            self._kept[mark] = (key, first[1] if first is not None and first[0] == key else self._clock())
+            while len(self._kept) > _REPEAT_MAX:
+                self._kept.pop(next(iter(self._kept)))
+
+    def settle(self, mark: str) -> None:
+        with self._lock:
+            self._kept.pop(mark, None)
+
+
+_REPEATS: Final = _Repeats()
+
+
+def _request_mark(
+    http: CrewHttp, method: str, path: str, token: str | None, body: Mapping[str, Any] | None, if_match: str | None
+) -> str:
+    """A digest of who sends what where: two requests with the same mark are the same call made again."""
+    content = {k: v for k, v in (body or {}).items() if k != "client_msg_id"}
+    parts = [
+        str(getattr(http.client, "base_url", "") or ""),
+        str(getattr(http.client, "agent_id", "") or ""),
+        token or str(getattr(http, "key", "")),
+        method,
+        path,
+        if_match or "",
+        jsonlib.dumps(content, sort_keys=True, default=str),
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
 class CrewHttp:
     """Crew REST calls with the caller's own client (key, agent header, base URL)."""
 
@@ -386,7 +458,52 @@ class CrewHttp:
         etag: str | None = None,
         if_match: str | None = None,
     ) -> tuple[int, Any, str | None]:
-        """``(status, body, etag)``; ``body`` is None for 304. Raises :class:`CrewApiError` on ≥400 or no answer."""
+        """``(status, body, etag)``; ``body`` is None for 304. Raises :class:`CrewApiError` on ≥400 or no answer.
+
+        A write the server deduplicates (:func:`is_keyed`) carries an ``Idempotency-Key``. When it meets an
+        outage the key is remembered, and the same request made again carries the same key, so an agent
+        that repeats a call whose outcome it could not learn does not record it twice.
+        """
+        mark: str | None = None
+        idem: str | None = None
+        if is_keyed(method, path):
+            mark = _request_mark(self, method, path, token, json, if_match)
+            idem = _REPEATS.key_for(mark)
+            if json is not None and "client_msg_id" in json:  # a message is deduplicated by this id, not the header
+                json = {**json, "client_msg_id": idem[:28]}
+        try:
+            out = self._send(
+                method, path, token=token, json=json, params=params, timeout=timeout, etag=etag, if_match=if_match, idem=idem
+            )
+        except CrewApiError as e:
+            if mark is not None and idem is not None:
+                if is_outage(e):
+                    _REPEATS.keep(mark, idem)
+                    e.kind = "repeatable"
+                else:
+                    _REPEATS.settle(mark)  # the server answered: a later identical call is a new call
+            elif method == "GET" or path.endswith("/match"):
+                e.kind = "read"
+            elif path == "/crews/join":
+                e.kind = "repeatable"  # a re-join of the same client session is the same seat
+            raise
+        if mark is not None:
+            _REPEATS.settle(mark)
+        return out
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
+        timeout: float | None = None,
+        etag: str | None = None,
+        if_match: str | None = None,
+        idem: str | None = None,
+    ) -> tuple[int, Any, str | None]:
         headers: dict[str, str] = {}
         agent = _header_agent_id(self.client.agent_id)
         if agent:
@@ -397,6 +514,8 @@ class CrewHttp:
             headers["If-None-Match"] = etag
         if if_match:
             headers["If-Match"] = if_match
+        if idem:
+            headers[IDEMPOTENCY_HEADER] = idem
         try:
             res = self.client._client.request(
                 method,
@@ -437,7 +556,7 @@ class LocalCrewHttp(CrewHttp):
         self.layout = layout
         self.key = key
 
-    def call(
+    def _send(
         self,
         method: str,
         path: str,
@@ -448,11 +567,12 @@ class LocalCrewHttp(CrewHttp):
         timeout: float | None = None,
         etag: str | None = None,
         if_match: str | None = None,
+        idem: str | None = None,
     ) -> tuple[int, Any, str | None]:
         from remembra.relay.crew.gate import rpc
 
         if not path.startswith(self.CREWD_PREFIXES) or path == "/crews/join":
-            return super().call(method, path, json=json, params=params, timeout=timeout, etag=etag)
+            return super()._send(method, path, json=json, params=params, timeout=timeout, etag=etag, idem=idem)
         wait = float(timeout or 15.0)
         res = rpc(
             self.layout,
@@ -465,6 +585,7 @@ class LocalCrewHttp(CrewHttp):
                 "params": dict(params or {}),
                 "if_match": if_match,
                 "timeout": wait,
+                **({"idem": idem} if idem else {}),  # crewd sends it as the Idempotency-Key
             },
             timeout=wait + 2.0,
         )
@@ -772,6 +893,11 @@ GATEWAY_STATUSES: Final = frozenset({502, 503, 504, 520, 521, 522, 523, 524})
 _NOT_REACHED_STATUSES: Final = frozenset({503, 521, 522, 523})
 NOT_CARRIED_OUT: Final = "This call was not carried out: repeat it once the server answers."
 OUTCOME_UNKNOWN: Final = "Whether this call was carried out is not known: check (crew_status) before repeating it."
+NOTHING_CHANGED: Final = "Nothing was changed: repeat it once the server answers."
+REPEAT_SAFE: Final = (
+    "Whether this call was carried out is not known. Repeating the same call is safe: "
+    "the server recognises it and does not carry it out twice."
+)
 
 
 def is_outage(e: CrewApiError) -> bool:
@@ -783,7 +909,11 @@ def is_outage(e: CrewApiError) -> bool:
 
 def outage_outcome(e: CrewApiError) -> str:
     """What an outage means for the call that hit it: certainly not carried out, or unknown."""
-    return NOT_CARRIED_OUT if e.not_sent or e.status in _NOT_REACHED_STATUSES else OUTCOME_UNKNOWN
+    if e.not_sent or e.status in _NOT_REACHED_STATUSES:
+        return NOT_CARRIED_OUT
+    if e.kind == "read":
+        return NOTHING_CHANGED
+    return REPEAT_SAFE if e.kind == "repeatable" else OUTCOME_UNKNOWN
 
 
 def _not_tried(labels: Iterable[str]) -> list[str]:

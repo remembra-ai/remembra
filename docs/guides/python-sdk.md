@@ -298,6 +298,25 @@ except MemoryError as e:
         print(f"Error: {e}")
 ```
 
+A request the server does not answer in time raises `remembra.MemoryTimeoutError`, a `MemoryError` with
+`status_code` `None`. For a write the message says that the request may still have been carried out, so
+check (recall or list) before you repeat it.
+
+```python
+from remembra import MemoryTimeoutError
+
+try:
+    memory.store("content")
+except MemoryTimeoutError as e:
+    print(f"No answer in time: {e}")  # e.__cause__ is the httpx.ReadTimeout or httpx.WriteTimeout
+```
+
+!!! note "Changed after 0.17.6"
+    Earlier versions let `httpx.ReadTimeout` and `httpx.WriteTimeout` through. Code that catches
+    `httpx.TimeoutException` around `Memory` calls should catch `MemoryTimeoutError` (or `MemoryError`)
+    as well. A server that cannot be reached at all still raises `httpx.ConnectError` or
+    `httpx.ConnectTimeout`, as before.
+
 ## Best Practices
 
 ### 1. Store Facts, Not Conversations

@@ -42,6 +42,7 @@ import os
 import re
 import socket
 import sys
+import threading
 import time
 import uuid
 import weakref
@@ -934,6 +935,8 @@ def session_brief(
     """
     try:
         client = _get_client()
+        # a handoff this machine could not deliver earlier belongs in this brief: send it first
+        still_queued = _deliver_queued_closes(client)
         locator, checkout = _locator(git_remote=git_remote, root_path=root_path, root_commit=root_commit)
         use_locator = bool(locator) and not project_id
         brief = client.session_brief(
@@ -948,6 +951,8 @@ def session_brief(
             _remember_session_project(
                 brief["project_id"], locator if use_locator else None, checkout, root=(locator or {}).get("root_path")
             )
+        if still_queued:
+            brief["warnings"] = [*(brief.get("warnings") or []), _queued_closes_warning(still_queued)]
         handoff = brief.get("handoff") or {}
         inbox = brief.get("inbox") or {}
         summary = {
@@ -1925,7 +1930,14 @@ def _queue_close(client: Memory, seat: Any, body: dict[str, Any], e: Exception) 
                 else "A milestone: your crew session and its claims are kept, also after the handoff is delivered."
             ),
         }
-    return _dump(out)
+    return _ThroughOutage(_dump(out))
+
+
+class _ThroughOutage(str):
+    """A result that is not a failure (so not flagged ``isError``) but was reached because the server did not
+    answer: nothing more is asked of the server on this call (the crew notice would wait out the same timeout)."""
+
+    outage = True
 
 
 def _queued_close_token(agent_id: str, session_id: str) -> str | None:
@@ -1957,6 +1969,47 @@ def _close_delivered(body: dict[str, Any]) -> None:
         relay_outbox.discard(home, *key)
     except Exception:
         return
+
+
+# Seconds the opening brief waits for a queued close to be taken. Short: the brief is what the agent is
+# waiting for, and a close that is not taken in this time stays queued for the background thread.
+_BRIEF_DRAIN_TIMEOUT_S = 10.0
+
+
+def _deliver_queued_closes(client: Memory) -> int:
+    """Before a session brief: send the closes of this agent that are queued on this machine, on the calling
+    thread, so the brief that follows includes them. How many are still queued afterwards. Never raises.
+
+    The usual case is the first call of a new session after one that ended during an outage. Each send
+    waits at most ``_BRIEF_DRAIN_TIMEOUT_S`` and the first one the server does not take ends the pass;
+    what is left goes to the background thread.
+    """
+    home = _CLOSE_QUEUE_HOME
+    if home is None:
+        return 0
+    try:
+        if not close_queue.has_entries(home) or not close_queue.waiting(home, client):
+            return 0
+        _, left = close_queue.drain(
+            home,
+            client,
+            token_for=_queued_close_token,
+            on_delivered=_queued_close_delivered,
+            timeout=min(float(client.timeout), _BRIEF_DRAIN_TIMEOUT_S),
+        )
+        if left:
+            _close_drainer.kick(home, client, token_for=_queued_close_token, on_delivered=_queued_close_delivered)
+        return left
+    except Exception:
+        return 0
+
+
+def _queued_closes_warning(count: int) -> str:
+    what = "1 closing handoff from this machine is" if count == 1 else f"{count} closing handoffs from this machine are"
+    return (
+        f"{what} still queued: the server did not take it just now, so this brief may not include the last "
+        "session's work. It is sent again automatically; `remembra-relay status` shows what is waiting."
+    )
 
 
 def _kick_close_queue() -> None:
@@ -2700,7 +2753,7 @@ def send_to_inbox(
     except ValueError as e:
         return _fail({"ok": False, "error": str(e)})
     except MemoryError as e:
-        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
+        return _inbox_error(e)
     except Exception as e:
         return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
@@ -2793,7 +2846,7 @@ def get_inbox(
         mismatch = _inbox_identity_mismatch(e, agent_id)
         if mismatch is not None:
             return _fail(mismatch)
-        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
+        return _inbox_error(e)
     except Exception as e:
         return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
@@ -2851,6 +2904,14 @@ def _reply_link(row: dict[str, Any]) -> str | None:
         if isinstance(value, str) and _INBOX_ID_RE.fullmatch(value):
             return value
     return None
+
+
+def _inbox_error(e: MemoryError) -> str:
+    """The inbox tools' error envelope; ``timed_out`` when the server gave no answer in time (no code then)."""
+    out: dict[str, Any] = {"ok": False, "error": sanitize_error_message(e), "code": e.status_code}
+    if isinstance(e, MemoryTimeoutError):
+        out["timed_out"] = True
+    return _fail(out, outage=_is_outage(e))
 
 
 def _inbox_sender_label(row: dict[str, Any]) -> str:
@@ -2934,7 +2995,7 @@ def ack_inbox(
                     ),
                 }
             )
-        return _fail({"ok": False, "error": sanitize_error_message(e), "code": e.status_code}, outage=_is_outage(e))
+        return _inbox_error(e)
     except Exception as e:
         return _fail({"ok": False, "error": sanitize_error_message(e)}, outage=_is_outage(e))
 
@@ -3034,16 +3095,19 @@ def _as_crew_api_error(e: Exception) -> CrewApiError | None:
     one of ``CrewHttp``, instead of the memory tools' JSON envelope. Other failures of the SDK client
     (a missing or rejected key, a refused project) keep that envelope.
     """
+    found: CrewApiError | None = None
     if isinstance(e, MemoryTimeoutError):
-        return CrewApiError(0, "timeout", "The Remembra server did not answer in time.")
-    if isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES:
+        found = CrewApiError(0, "timeout", "The Remembra server did not answer in time.")
+    elif isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES:
         message = str(e)
         if message.startswith("Request failed: "):
             message = message[len("Request failed: ") :]
-        return CrewApiError(int(e.status_code), f"http_{int(e.status_code)}", _crew_clean_message(message.strip()))
-    if isinstance(e, httpx.HTTPError):
-        return _crew_transport_error(e)
-    return None
+        found = CrewApiError(int(e.status_code), f"http_{int(e.status_code)}", _crew_clean_message(message.strip()))
+    elif isinstance(e, httpx.HTTPError):
+        found = _crew_transport_error(e)
+    if found is not None:
+        found.kind = "read"  # the only SDK request a crew tool makes is the project lookup (a GET)
+    return found
 
 
 async def _run_crew(
@@ -3621,7 +3685,13 @@ def _finish(result: Any, final: Any) -> Any:
 def _met_outage(result: Any) -> bool:
     """The call just failed because the server is not answering: the notice poll behind it would only wait out
     the same timeout again (and the liveness touch with it), tripling the time the tool takes to say so."""
-    return isinstance(result, FailureText) and result.outage
+    return isinstance(result, FailureText | _ThroughOutage) and result.outage
+
+
+# session_brief sends queued closes itself, before its own request (:func:`_deliver_queued_closes`); a
+# background delivery started just before it would race it for the same entry.
+_DELIVERS_QUEUE_ITSELF = frozenset({"session_brief"})
+_SYNC_TOOL_LOCK = threading.Lock()
 
 
 def _install_crew_notice() -> None:
@@ -3632,10 +3702,11 @@ def _install_crew_notice() -> None:
             continue
         original = tool.fn
         with_notice = name not in _NO_CREW_NOTICE
+        kicks_queue = name not in _DELIVERS_QUEUE_ITSELF
         if tool.is_async:
 
             async def async_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
-                _kick_close_queue()
+                _kick_close_queue()  # one directory listing at most every 30 s; the sending is the thread's
                 result = await __fn(*a, **kw)
                 caller, seated = _crew_notice_now() if __notice and not _met_outage(result) else (None, False)
                 if caller is None or not seated:
@@ -3646,15 +3717,26 @@ def _install_crew_notice() -> None:
             wrapper: Any = functools.update_wrapper(cast(Any, async_wrapper), original)
         else:
 
-            def sync_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
-                _kick_close_queue()
-                result = __fn(*a, **kw)
-                caller, seated = _crew_notice_now() if __notice and not _met_outage(result) else (None, False)
-                if caller is None or not seated:
-                    return _finish(result, result)
-                return _finish(result, _with_crew_notice(result, _crew.notice(caller)))
+            def sync_wrapper(
+                *a: Any, __fn: Any = original, __notice: bool = with_notice, __kick: bool = kicks_queue, **kw: Any
+            ) -> Any:
+                with _SYNC_TOOL_LOCK:  # one at a time, as when they ran on the event loop
+                    if __kick:
+                        _kick_close_queue()
+                    result = __fn(*a, **kw)
+                    caller, seated = _crew_notice_now() if __notice and not _met_outage(result) else (None, False)
+                    if caller is None or not seated:
+                        return _finish(result, result)
+                    return _finish(result, _with_crew_notice(result, _crew.notice(caller)))
 
-            wrapper = functools.update_wrapper(cast(Any, sync_wrapper), original)
+            async def off_loop_wrapper(*a: Any, __sync: Any = sync_wrapper, **kw: Any) -> Any:
+                # The SDK calls a sync tool on the event loop, so one that waits for a server that does not
+                # answer would stall every other call of this MCP server (and its pings) for as long. In a
+                # worker thread it does not; anyio hands the thread a copy of this request's context.
+                return await anyio.to_thread.run_sync(functools.partial(__sync, *a, **kw))
+
+            wrapper = functools.update_wrapper(cast(Any, off_loop_wrapper), original)
+            tool.is_async = True
         wrapper.__failure_flag__ = True
         if with_notice:
             wrapper.__crew_notice__ = True

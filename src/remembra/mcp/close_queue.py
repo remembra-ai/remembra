@@ -87,8 +87,12 @@ def drain(
     *,
     token_for: TokenFor | None = None,
     on_delivered: OnDelivered | None = None,
+    timeout: float | None = None,
 ) -> tuple[int, int]:
     """Send the queued closes ``client`` may deliver, oldest first. ``(delivered, still waiting)``. Never raises.
+
+    ``timeout``: seconds to wait for each send instead of the client's own (a caller that has an agent
+    waiting on it passes a short one).
 
     Stops at the first entry the server does not take for a reason that passes (it is still down). An
     entry the server rejects for good (400, 404, 413, 422) is dropped and logged: sending the same
@@ -108,7 +112,7 @@ def drain(
             except Exception:
                 token = None
         try:
-            _, body, _ = CrewHttp(client).call("POST", "/session/close", token=token, json=entry.payload)
+            _, body, _ = CrewHttp(client).call("POST", "/session/close", token=token, json=entry.payload, timeout=timeout)
         except CrewApiError as e:
             status = e.status or None
             detail = f"HTTP {e.status}: {e.message}" if e.status else e.message

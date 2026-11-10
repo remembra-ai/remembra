@@ -20,7 +20,7 @@ Quick Start:
 __version__ = "0.17.6"
 
 # SDK exports (client-side)
-from remembra.client.memory import Memory, MemoryError
+from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
 from remembra.client.types import (
     ChangelogIngestResult,
     EntityItem,
@@ -34,6 +34,7 @@ __all__ = [
     # Core
     "Memory",
     "MemoryError",
+    "MemoryTimeoutError",
     # Types
     "StoreResult",
     "RecallResult",

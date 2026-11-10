@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 import remembra.mcp.server as server
-from remembra.mcp.crew import NOT_CARRIED_OUT, OUTCOME_UNKNOWN, TOUCH_INTERVAL_S, CrewBridge
+from remembra.mcp.crew import NOT_CARRIED_OUT, REPEAT_SAFE, TOUCH_INTERVAL_S, CrewBridge
 from tests.crew.fs_outage_support import Clock, FakeApi, call, call_result, mock_client, notice_event, text_of
 
 
@@ -57,7 +57,9 @@ def test_a_crew_write_that_hangs_is_one_request_and_says_the_outcome_is_unknown(
     seated(api)
     api.down = "hang"
     out = call("crew_checkpoint", files_changed=["src/app.py"], summary="tests pass")
-    assert out == f"CREW UNAVAILABLE: The Remembra server did not answer in time. {OUTCOME_UNKNOWN}", out
+    # unknown, and (a checkpoint carries an idempotency key) safe to repeat: tests/crew/test_fs_outage_review.py
+    assert out == f"CREW UNAVAILABLE: The Remembra server did not answer in time. {REPEAT_SAFE}", out
+    assert REPEAT_SAFE.startswith("Whether this call was carried out is not known.")
     assert api.paths() == ["/crews/crew_1/checkpoints"], api.paths()  # no notice poll behind it
 
 
