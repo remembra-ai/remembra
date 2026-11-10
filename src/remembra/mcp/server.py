@@ -46,6 +46,7 @@ import threading
 import time
 import uuid
 import weakref
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -795,14 +796,20 @@ def forget_memories(
     )
 )
 def health_check() -> str:
-    """Check Remembra server health and this agent's configuration.
+    """Check that the Remembra server is up, that it accepts this client's API key, and this agent's configuration.
 
-    Reports the configured agent_id, project, user_id and session_id, the
+    ``GET /health`` needs no key, so it is followed by one authenticated read (the same auth check as
+    store and recall). A key the server rejects (HTTP 401) makes the result ``"status": "error"`` with
+    ``"code": 401``, because every other tool would fail the same way. ``auth.state`` is one of
+    ``accepted``, ``rejected``, ``limited`` (accepted, but the key's scope refused the read) or
+    ``unchecked`` (the read did not answer the question: an older server, a firewall, a timeout).
+
+    Also reports the configured agent_id, project, user_id and session_id, the
     MCP server version vs the API version, and warnings for misconfiguration
     (e.g. no REMEMBRA_AGENT_ID, which makes this agent's inbox unreachable).
 
     Returns:
-        JSON with status, server, agent/project identity, versions, warnings, health.
+        JSON with status, server, agent/project identity, versions, warnings, health, auth.
     """
     identity: dict[str, Any] = {
         "agent_id": _default_agent_id() or None,
@@ -818,10 +825,11 @@ def health_check() -> str:
         )
         health = client.health()
         warnings = _config_warnings(client.agent_id, client.project, health.get("version"))
-        out: dict[str, Any] = {"status": "ok", "server": client.base_url, **identity, "warnings": warnings, "health": health}
+        auth = _auth_check(client)
+        report: dict[str, Any] = {"server": client.base_url, **identity, "warnings": warnings, "health": health, "auth": auth}
         readiness = _readiness(client)
         if readiness is not None:
-            out["readiness"] = readiness
+            report["readiness"] = readiness
             degraded = readiness.get("degraded")
             if degraded:
                 parts = ", ".join(f"{name} ({why})" if why else name for name, why in degraded.items())
@@ -829,7 +837,12 @@ def health_check() -> str:
                     f"The server is up but not fully ready: {parts}. Stores and recalls may fail or run degraded "
                     "until the operator fixes it."
                 )
-        return _dump(out)
+        if auth["state"] == "rejected":
+            return _dump({"status": "error", "error": _rejected_key_message(client, auth), "code": 401, **report})
+        note = _auth_warning(auth)
+        if note:
+            warnings.append(note)
+        return _dump({"status": "ok", **report})
     except Exception as e:
         payload = json.loads(_error(e))
         payload.update({"server": REMEMBRA_URL, **identity})
@@ -860,6 +873,79 @@ def _readiness(client: Memory) -> dict[str, Any] | None:
             for name in names[:10]
         }
     return out
+
+
+# The read that tests the key: the route the relay's own key check and the doctor use. It goes through the
+# same auth dependency as store and recall, exists on every server since 0.16, and writes nothing.
+_AUTH_PROBE_PATH = "/api/v1/trail/summary"
+
+
+def _auth_check(client: Memory) -> dict[str, Any]:
+    """Whether the server accepts ``client``'s API key, from one authenticated GET. Never raises.
+
+    Only a 401 says the key is rejected. A 403 written by Remembra means the key authenticated and its
+    scope refused this read (a store-only key): accepted, with limits. Anything else (a firewall's 403,
+    a 404 from an older server, 429, 5xx, a timeout, a page instead of JSON) leaves the key unchecked:
+    it is reported, and never turned into a failure the key did not cause.
+    """
+    from remembra.marshal.signals import clean_text, is_firewall_block
+
+    out: dict[str, Any] = {"state": "accepted", "checked_with": f"GET {_AUTH_PROBE_PATH}"}
+    try:
+        body = client._request("GET", _AUTH_PROBE_PATH, params={"days": 1})
+    except MemoryError as e:
+        code = e.status_code
+        raw = str(e).removeprefix("Request failed: ")
+        head = raw.lstrip()[:600].lower()
+        page = head.startswith("<!doctype") or "<html" in head or "<head" in head
+        detail = "a web page, not Remembra's JSON" if page else clean_text(raw, 160)
+        if code == 401:
+            return {**out, "state": "rejected", "http_status": 401, "detail": detail}
+        if code == 403 and not is_firewall_block(403, raw)[0]:
+            return {**out, "state": "limited", "http_status": 403, "detail": detail}
+        return {**out, "state": "unchecked", "http_status": code, "error": f"HTTP {code}: {detail}"}
+    except ValueError:  # a 2xx or 3xx whose body is not JSON: a redirect, a login page
+        return {**out, "state": "unchecked", "error": "the answer was not Remembra's JSON"}
+    except Exception as e:  # no answer: a timeout, a dropped connection
+        return {**out, "state": "unchecked", "error": e.__class__.__name__}
+    if not isinstance(body, dict):
+        return {**out, "state": "unchecked", "error": "the answer was not Remembra's JSON"}
+    return out
+
+
+def _rejected_key_message(client: Memory, auth: Mapping[str, Any]) -> str:
+    """What a rejected key means and where it is replaced: this server's env on stdio, the request on a remote transport."""
+    text = (
+        f"The server is up, but it rejected this client's API key (HTTP 401: {auth.get('detail') or 'no detail'}). "
+        "Every store, recall, brief and handoff from this client fails until that is fixed."
+    )
+    if _is_remote_transport():
+        return f"{text} Reconnect with a valid key in the X-API-Key header (or Authorization: Bearer rem_...)."
+    if not client.api_key:
+        return (
+            f"{text} This MCP server has no API key: set REMEMBRA_API_KEY in its entry in the client's config "
+            "(remembra-install --all asks for the key at a hidden prompt; never paste a key into a chat), then "
+            "restart the client."
+        )
+    return (
+        f"{text} Replace REMEMBRA_API_KEY in this MCP server's entry in the client's config "
+        "(remembra-install --all asks for the key at a hidden prompt; never paste a key into a chat), then "
+        "restart the client: the key is read once, when the MCP server starts."
+    )
+
+
+def _auth_warning(auth: Mapping[str, Any]) -> str | None:
+    if auth.get("state") == "limited":
+        return (
+            f"The API key was accepted, but its scope refused the check read (HTTP 403: {auth.get('detail')}). "
+            "Tools the key's permissions do not cover will answer 403."
+        )
+    if auth.get("state") == "unchecked":
+        return (
+            f"The API key could not be checked ({auth.get('error')}); only the server's liveness was. "
+            "Call session_brief or list_memories to test the key."
+        )
+    return None
 
 
 def _config_warnings(agent_id: str | None, project: str | None, server_version: str | None) -> list[str]:
@@ -3802,9 +3888,10 @@ def setup_check_prompt() -> list[dict[str, str]]:
         {
             "role": "user",
             "content": (
-                "Run the health_check tool: confirm the connection works and show the agent_id and project this "
-                "client uses, with any warnings. Then call remembra_doctor and show its rendered slip verbatim in a "
-                "code block. Offer its fixes one at a time and run one only after I say yes."
+                "Run the health_check tool: it checks that the server is up and that it accepts this client's API "
+                "key (auth.state). Show the agent_id and project this client uses, with any warnings. Then call "
+                "remembra_doctor and show its rendered slip verbatim in a code block. Offer its fixes one at a time "
+                "and run one only after I say yes."
             ),
         }
     ]
@@ -3846,15 +3933,18 @@ def memory_status() -> str:
     try:
         client = _get_client()
         health = client.health()
-        return _dump(
-            {
-                "server": client.base_url,
-                "user_id": client.user_id,
-                "project": client.project,
-                "agent_id": client.agent_id,
-                "health": health,
-            }
-        )
+        auth = _auth_check(client)
+        status: dict[str, Any] = {
+            "server": client.base_url,
+            "user_id": client.user_id,
+            "project": client.project,
+            "agent_id": client.agent_id,
+            "health": health,
+            "auth": auth,
+        }
+        if auth["state"] == "rejected":
+            status["error"] = _rejected_key_message(client, auth)
+        return _dump(status)
     except Exception as e:
         return json.dumps(
             {

@@ -173,7 +173,12 @@ confirm: "DELETE ALL MEMORIES IN scratch"
 
 ### health_check
 
-Check Remembra server health and connection status.
+Check that the Remembra server is up and that it accepts this client's API key.
+
+`GET /health` needs no key, so the tool also makes one authenticated read. `auth.state` is `accepted`,
+`rejected` (the server answered 401: the result is `"status": "error"` with `"code": 401`, as every other
+tool would be), `limited` (the key was accepted, but its scope refused the read) or `unchecked` (an older
+server, a firewall or a timeout: the key was not tested, and a warning says so).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -193,7 +198,8 @@ Result:
     "dependencies": {
       "qdrant": {"status": "ok"}
     }
-  }
+  },
+  "auth": {"state": "accepted", "checked_with": "GET /api/v1/trail/summary"}
 }
 ```
 

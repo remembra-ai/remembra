@@ -1047,6 +1047,11 @@ def collect(
     groups: dict[str, tuple[RelayConfig, list[str]]] = {_key_digest(primary): (primary, [])}
     for name, config in per_agent_config.items():
         groups.setdefault(_key_digest(config), (config, []))[1].append(name)
+    if wanted:
+        # The read budget covers two keys: the agents named with --agent get theirs checked before the rest.
+        first = _key_digest(primary)
+        ranked = sorted(groups.items(), key=lambda g: 0 if g[0] == first else 1 if set(g[1][1]) & set(wanted) else 2)
+        groups = dict(ranked)
 
     entries, unreadable = _outbox(home, env)
     queued = [e for e in entries if not e.held]
@@ -1092,6 +1097,9 @@ def collect(
                     recorded=recorded,
                 )
             )
+            used_by = ", ".join(names) or "no agent here"
+            again = f"; to check it: remembra-relay doctor --agent {names[0]}" if names else ""
+            unchecked.append(f"the key from {source} (used by {used_by}): a run sends at most {MAX_GETS} GETs{again}")
             continue
         reader = ServerReader(config.url, config.api_key, budget, transport)
         summary_path = "/api/v1/trail/summary"

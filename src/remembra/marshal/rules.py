@@ -1045,13 +1045,23 @@ def rule_server_entries(sig: Signals) -> list[Finding]:
             evidence.append(f"{waiting} handoff{'s' if waiting != 1 else ''} from other agents waited for it{since}")
         if not server.trail_read:
             evidence.append("the trail could not be read: who waited for it is unknown")
+        own_key = sig.key_for(name)
+        if own_key is not None and own_key.state != "accepted":
+            # "The key works" is only said of a key that was asked about: this agent's own was not.
+            what = (
+                f"Nothing from {agent.display} has reached Remembra{' in 7 days' if last else ''}, and its own key"
+                f" (from {own_key.source}) was not checked."
+            )
+            evidence.append(f"key from {own_key.source}: {own_key.error or own_key.state}")
+        else:
+            what = words.say("HOOKS_NOT_FIRING", "what", name=agent.display, since=" in 7 days" if last else "")
         out.append(
             Finding(
                 "HOOKS_NOT_FIRING",
                 # It worked before: a week without it is as likely a week it wasn't used, so a note, not a to-do.
                 INFO if last else WARN,
                 name,
-                words.say("HOOKS_NOT_FIRING", "what", name=agent.display, since=" in 7 days" if last else ""),
+                what,
                 tuple(evidence),
                 inferred=True,
                 fix=check,

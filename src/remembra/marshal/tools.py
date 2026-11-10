@@ -8,6 +8,7 @@ is only ever shown through ``RelayConfig.redacted()`` and paths with ``~``.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import textwrap
 from collections.abc import Callable, Mapping
@@ -28,6 +29,7 @@ LOCAL_ONLY: dict[str, str] = {
         "Marshal reads this machine's files; it runs in the local MCP server only. Run remembra-relay doctor in a terminal."
     ),
 }
+_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")  # an agent id is shown only when it looks like one
 HELP_FOOTER = "Quoted from docs.remembra.dev pages bundled in remembra {version}; the page governs. No model wrote this."
 
 
@@ -42,6 +44,35 @@ def _environment(environ: Mapping[str, str] | None) -> tuple[dict[str, str], str
     if full.get("REMEMBRA_API_KEY") and not load_config(environ=hooks, home=Path(hooks.get("HOME") or Path.home())).api_key:
         return full, "the key checked is the one this MCP server uses; the hooks' own environment isn't visible from here"
     return hooks, None
+
+
+def _own_key_note(environ: Mapping[str, str] | None, home: Path | None) -> str | None:
+    """A note when this MCP server's own key is one no config the doctor reads holds: the doctor never asks about it.
+
+    The doctor checks the keys the hooks use (the agents' config files and ``~/.remembra/credentials``). An MCP
+    server started with another key, Claude Desktop's for one, is outside that: ``health_check`` tests it.
+    Keys are only compared here, never returned.
+    """
+    full = dict(os.environ if environ is None else environ)
+    own = full.get("REMEMBRA_API_KEY")
+    if not own:
+        return None
+    hooks = hooks_environ(full)
+    root = Path(home or hooks.get("HOME") or Path.home())
+    try:
+        held = {load_config(environ=hooks, home=root).api_key}
+        held |= {
+            load_config(environ=hooks, home=root, prefer=adapter.spec.config_source).api_key
+            for adapter in REGISTRY.values()
+            if adapter.spec.config_source
+        }
+    except Exception:
+        return None
+    if own in held or held == {None}:  # the same key as a config's; or no other key at all (already noted)
+        return None
+    agent = (full.get("REMEMBRA_AGENT_ID") or "").strip()
+    who = f" ({agent})" if agent and _AGENT_ID_RE.match(agent) else ""
+    return f"the key this MCP server{who} itself uses: it is in none of the configs read here; call health_check, which tests it"
 
 
 def _bad_agents(agents: list[str]) -> dict[str, Any] | None:
@@ -68,13 +99,14 @@ def doctor_payload(
     env, note = _environment(environ)
     report = doctor.run(home, agents or None, check_server, environ=env, transport=transport, which=which, now=now)
     data = report.json()
+    notes = [n for n in (note, None if note else _own_key_note(environ, home)) if n]
     payload: dict[str, Any] = {
         "status": "ok",
         "rendered": report.text(Style()),
         "findings": data["findings"],
         "agents": data["agents"],
         "reads": data["reads"],
-        "unchecked": data["unchecked"] + ([note] if note else []),
+        "unchecked": data["unchecked"] + notes,
         "things_to_do": data["things_to_do"],
         "exit_code": data["exit_code"],
         "version": data["version"],
