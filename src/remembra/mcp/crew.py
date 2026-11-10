@@ -202,6 +202,11 @@ class FailureText(str):
         return self
 
 
+def same_kind(result: str, text: str) -> str:
+    """``text`` (``result`` with a line added) as what ``result`` was: a failure stays a :class:`FailureText`."""
+    return FailureText(text, outage=result.outage) if isinstance(result, FailureText) else text
+
+
 def _clean_message(text: Any, limit: int = 300) -> str:
     return S.clip_item(sanitize_error_message(Exception(str(text or ""))), limit)
 
@@ -339,7 +344,7 @@ class HookShadow:
             if cli
             else f"ask the sender to hand it over to {'that session' if many else '@' + self.who} instead"
         )
-        return (
+        return FailureText(  # the caller does not hold what it asked for
             f"NOT {verb}: {'crew-hook sessions are' if many else 'a crew-hook session is'} live in this project on this "
             f"machine ({self.who}) and this MCP server runs outside {'their' if many else 'its'} process tree as "
             f"'{self.agent_id}', so it cannot act as {'one of them' if many else 'that session'}. Anything taken here "
@@ -400,12 +405,16 @@ class _Repeats:
         self._lock = threading.Lock()
         self._kept: dict[str, tuple[str, float]] = {}
 
-    def key_for(self, mark: str) -> str:
+    def kept(self, mark: str) -> str | None:
+        """The key of this request's earlier attempt whose outcome is unknown, or None."""
         with self._lock:
             kept = self._kept.get(mark)
             if kept is not None and self._clock() - kept[1] < _REPEAT_TTL_S:
                 return kept[0]
-        return f"mcp-{uuid.uuid4().hex}"
+        return None
+
+    def key_for(self, mark: str) -> str:
+        return self.kept(mark) or f"mcp-{uuid.uuid4().hex}"
 
     def keep(self, mark: str, key: str) -> None:
         with self._lock:
@@ -468,9 +477,15 @@ class CrewHttp:
         idem: str | None = None
         if is_keyed(method, path):
             mark = _request_mark(self, method, path, token, json, if_match)
-            idem = _REPEATS.key_for(mark)
-            if json is not None and "client_msg_id" in json:  # a message is deduplicated by this id, not the header
-                json = {**json, "client_msg_id": idem[:28]}
+            own = json.get("client_msg_id") if json is not None else None
+            if json is not None and isinstance(own, str) and own:
+                # A message is deduplicated by this id, not the header. The caller's own id stands (one call
+                # may post it twice on purpose: a wait cut short is recovered by the same id), unless this is
+                # a call that met an outage made again: then it is the id of that first attempt.
+                idem = _REPEATS.kept(mark) or own
+                json = {**json, "client_msg_id": idem}
+            else:
+                idem = _REPEATS.key_for(mark)
         try:
             out = self._send(
                 method, path, token=token, json=json, params=params, timeout=timeout, etag=etag, if_match=if_match, idem=idem
@@ -986,9 +1001,8 @@ def _names_crew(fn: _F) -> _F:
             return text
         with seat.lock:  # a write (not crew_status) took this seat over from an earlier process: say so, once
             resumed, seat.resumed_write = seat.resumed_write, None
-        if resumed:
-            text = f"{text}\n{resumed_text(resumed, on_write=True)}"
-        return f"{text}\n{crew_tag(seat)}"
+        tagged = f"{text}\n{resumed_text(resumed, on_write=True)}" if resumed else text
+        return same_kind(text, f"{tagged}\n{crew_tag(seat)}")
 
     return cast(_F, wrapper)
 

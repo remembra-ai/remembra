@@ -97,6 +97,7 @@ def test_a_claim_of_several_paths_stops_at_the_first_outage(api):
     assert lines[1:] == [
         "NOT TRIED: path src/b.py (the server is not answering)",
         "NOT TRIED: path src/c.py (the server is not answering)",
+        "(in CREW outageproj as codex-1)",  # every crew write's answer names its crew (F6)
     ], lines
     assert api.count("POST", "/claims") == 1, api.paths()
 

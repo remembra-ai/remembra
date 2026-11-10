@@ -77,6 +77,7 @@ from remembra.mcp.crew import (
 from remembra.mcp.crew import _clean_message as _crew_clean_message
 from remembra.mcp.crew import error_text as crew_error_text
 from remembra.mcp.crew import is_outage as crew_is_outage
+from remembra.mcp.crew import same_kind as crew_same_kind
 from remembra.mcp.crew import transport_error as _crew_transport_error
 from remembra.relay import outbox as relay_outbox
 from remembra.relay.declared_facts import normalize_close_facts, normalize_crew_evidence
@@ -3143,8 +3144,7 @@ async def _run_crew(
             out = _crew_error(e)
         used = _crew.used_project()
         if used and _STDIO_SERVER and tool != "crew_status":
-            named_out = f"{out}\n(project {used})"
-            out = FailureText(named_out, outage=out.outage) if isinstance(out, FailureText) else named_out
+            out = crew_same_kind(out, f"{out}\n(project {used})")
         return out
 
     try:

@@ -46,6 +46,8 @@ their own limits (300 s / 120 s).
 MCP result flag `isError: true`, so a client or a script can tell it from a success without parsing the
 text. A claim of several targets is a failure when any target was refused or not answered; the text
 still lists what was granted. `QUEUED`, `NOTHING RELEASED` and `NOTHING TO CLAIM` are not failures.
+The refusal of an MCP seat that runs beside a crew-hook session (`NOT CLAIMED: a crew-hook session is live …`)
+is a failure too. The `(in CREW …)` and `(project …)` lines a result ends with do not change the flag.
 `health_check` and `remembra_doctor` report faults as their result and are never flagged. Never put
 `crew_claim` and an edit in one batched script: read the claim's result first.
 
