@@ -206,6 +206,11 @@ class FlushResult:
     errors: list[str] = field(default_factory=list)
 
 
+# ``last_error`` of a record the sender asked to retry without raising (unreachable server, 5xx, 429,
+# or a record the sender cannot place, such as a leave for a session it no longer holds).
+NO_REASON = "retry: not delivered, the sender gave no error"
+
+
 def _backoff(attempts: int) -> float:
     return float(min(BACKOFF_MAX_S, BACKOFF_BASE_S * (2 ** min(attempts, 8))))
 
@@ -226,6 +231,12 @@ async def flush(
     kept with exponential backoff). With ``stop_on_retry`` a retry holds back the later records of
     the same kind, so each kind is replayed in spool order while the server is down, and one kind
     that cannot be delivered never blocks the others.
+
+    The records are read once, then sent one by one, and each send is awaited: a record's owner may
+    deliver and remove it in the meantime (a session's own ``end()`` removes its ``leave-<key>``).
+    Such a record is neither sent from the stale copy nor written back after a "retry": writing it
+    back made a record nobody owned, retried until ``MAX_ATTEMPTS``. Only the file's existence is
+    checked: a same-name record spooled again during the send keeps its attempts and backoff.
     """
     t = time.time() if now is None else now
     result = FlushResult()
@@ -240,12 +251,16 @@ async def flush(
             if stop_on_retry:
                 held.add(entry.kind)
             continue
+        if not entry.path.exists():  # delivered and removed by its owner while an earlier record was awaited
+            result.dropped += 1
+            continue
+        failure: str | None = None
         try:
             outcome = await send(entry)
         except Exception as e:  # a sender bug must not wedge the outbox
             outcome = "retry"
-            entry.last_error = f"{e.__class__.__name__}"
-            result.errors.append(entry.last_error)
+            failure = f"{e.__class__.__name__}"
+            result.errors.append(failure)
         if outcome == "done":
             remove(entry)
             result.sent += 1
@@ -253,6 +268,11 @@ async def flush(
             remove(entry)
             result.dropped += 1
         else:
+            if not entry.path.exists():  # removed during its own send: its owner is done with it
+                result.dropped += 1
+                continue
+            # a plain "retry" carries no reason; say so, so a record that keeps retrying is not silent
+            entry.last_error = failure or NO_REASON
             entry.attempts += 1
             entry.next_attempt_at = t + _backoff(entry.attempts)
             try:
