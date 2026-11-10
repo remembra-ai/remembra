@@ -33,6 +33,7 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,10 @@ MAX_AGE_SECONDS = 14 * 86400
 LOG_MAX_BYTES = 256 * 1024
 STALE_CLAIM_SECONDS = 120
 ENTRY_VERSION = 1
+# ``config_source`` of an entry the MCP server queued with its own key (remembra.mcp.close_queue). No
+# config file is named by it, so a relay that does not know the value holds the entry instead of
+# sending it with whatever key it finds; one that does sends it only with the key marked in ``key_fp``.
+MCP_SOURCE = "mcp"
 CLAIM_MARK = ".sending-"
 
 # HTTP answers worth retrying later; anything else (400, 404, 413, 422) will
@@ -254,11 +259,14 @@ def enqueue(
     error: str,
     http_status: int | None = None,
     api_key: str | None = None,
+    extra: Mapping[str, Any] | None = None,
 ) -> Path | None:
     """Queue a close body that could not be delivered. Returns the entry path, or None when it was not kept.
 
     ``api_key`` is the key the close was tried with. It is never stored: when the server refused the close
     (403), the entry keeps that key's :func:`key_mark` as ``refused_key_fp`` until it is delivered or dropped.
+    ``extra`` adds fields of the queuing program to the entry (the MCP server's ``key_fp``, see
+    :mod:`remembra.mcp.close_queue`); it never replaces a field written here.
     """
     agent_id = str(payload.get("agent_id") or "unknown-agent")
     session_id = str(payload.get("session_id") or "")
@@ -269,6 +277,7 @@ def enqueue(
         path = entry_path(home, agent_id, session_id)
         previous = read_entry(path)
         data: dict[str, Any] = {
+            **{str(k): v for k, v in (extra or {}).items()},
             "v": ENTRY_VERSION,
             "agent_id": agent_id,
             "session_id": session_id,

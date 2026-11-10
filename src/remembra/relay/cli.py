@@ -553,10 +553,19 @@ def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
     """
     recorded = entry.data.get("config_source")
     agent = entry.agent_id or None
-    if recorded and recorded != "none":
+    if recorded and recorded not in ("none", outbox.MCP_SOURCE):
         config = load_config_from_source(str(recorded), agent=agent)
         if config is None or not config.api_key:
             return None, f"its key source ({recorded}) has no key now"
+    elif recorded == outbox.MCP_SOURCE:
+        # queued by the MCP server with its own key: the relay may send it when it holds that same key
+        config = load_config(agent=agent)
+        queued_with = entry.data.get("key_fp")
+        if not queued_with or not config.api_key or outbox.key_mark(config.api_key) != queued_with:
+            return None, (
+                "the MCP server queued it with a key the relay does not have here; the MCP server sends it itself"
+                " once the server answers (delete the file to drop it)"
+            )
     else:
         config = load_config(agent=agent)
         if not config.api_key:

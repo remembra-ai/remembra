@@ -45,6 +45,7 @@ import sys
 import time
 import uuid
 import weakref
+from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
 import anyio
@@ -58,6 +59,7 @@ from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
 from remembra.client.project import aliases_from_env, normalize_project_id
 from remembra.crew import schemas as crew_schemas
 from remembra.crew.schemas import MCP_INSTRUCTIONS as CREW_MCP_INSTRUCTIONS
+from remembra.mcp import close_queue
 from remembra.mcp.crew import GATEWAY_STATUSES as CREW_GATEWAY_STATUSES
 from remembra.mcp.crew import (
     MAX_WAIT_S,
@@ -75,6 +77,7 @@ from remembra.mcp.crew import _clean_message as _crew_clean_message
 from remembra.mcp.crew import error_text as crew_error_text
 from remembra.mcp.crew import is_outage as crew_is_outage
 from remembra.mcp.crew import transport_error as _crew_transport_error
+from remembra.relay import outbox as relay_outbox
 from remembra.relay.declared_facts import normalize_close_facts, normalize_crew_evidence
 from remembra.relay.identity import canonical_git_remote
 from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
@@ -308,7 +311,7 @@ def _is_outage(e: BaseException) -> bool:
     """The server did not answer, or a gateway answered for it: nothing this caller did wrong."""
     if isinstance(e, MemoryTimeoutError | httpx.HTTPError):
         return True
-    return isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES
+    return isinstance(e, MemoryError) and (e.status_code in CREW_GATEWAY_STATUSES or bool(getattr(e, "outage", False)))
 
 
 def _error(e: Exception) -> str:
@@ -1508,18 +1511,8 @@ def close_session(
             else:
                 origin = "configured"
 
-        def send(payload: dict[str, Any], leave: bool) -> dict[str, Any]:
-            if seat is None:
-                return client.close_session(
-                    facts=payload,
-                    summary=summary,
-                    end_reason=end_reason,
-                    session_id=session_id,
-                    agent_id=_default_agent_id() or None,
-                    project_id=project_id,
-                    locator=locator,
-                )
-            return _close_crew_session(
+        def body_for(payload: dict[str, Any], leave: bool) -> dict[str, Any]:
+            return _close_body(
                 client,
                 seat,
                 facts=payload,
@@ -1531,11 +1524,36 @@ def close_session(
                 leave=leave,
             )
 
+        def send(payload: dict[str, Any], leave: bool) -> dict[str, Any]:
+            if seat is None:
+                return client.close_session(
+                    facts=payload,
+                    summary=summary,
+                    end_reason=end_reason,
+                    session_id=session_id,
+                    agent_id=_default_agent_id() or None,
+                    project_id=project_id,
+                    locator=locator,
+                )
+            return _close_crew_session(client, seat, body_for(payload, leave))
+
         declared = [d for d in merged.get("done") or [] if isinstance(d, str) and d.strip()]
         # A server from before declared work had a field drops facts.done without a word. Once this
         # client has seen such an answer, the items go into the notes up front (one request).
         up_front = bool(declared) and _server_lacks_done(client)
-        result = send(_done_in_notes(merged, declared) if up_front else merged, is_final)
+        first = _done_in_notes(merged, declared) if up_front else merged
+        try:
+            result = send(first, is_final)
+        except Exception as e:
+            # The server did not take it: the handoff is kept on this machine and sent again. A server
+            # not yet known to have a field for declared work gets the items in the notes as well, so
+            # a late delivery to an older server does not lose them.
+            keep = first if up_front or not declared or _server_has_done(client) else _done_also_in_notes(merged, declared)
+            queued = _queue_close(client, seat, body_for(keep, is_final), e)
+            if queued is None:
+                raise
+            return queued
+        _close_delivered(body_for(first, is_final))
         superseded = [str(h) for h in result.get("superseded") or []]
         old_server = "facts_normalized" not in result
         _remember_server_lacks_done(client, old_server)
@@ -1647,6 +1665,16 @@ _SESSION_OVER_RE = re.compile(
 )
 # Clients whose server last answered a close without ``facts_normalized`` (it predates facts.done).
 _servers_without_done: weakref.WeakSet[Any] = weakref.WeakSet()
+# ... and those seen to read it (a close that is queued for later needs to know which it is)
+_servers_with_done: weakref.WeakSet[Any] = weakref.WeakSet()
+
+
+def _server_has_done(client: Any) -> bool:
+    """This process has seen the server answer a close as one that reads ``facts.done``."""
+    try:
+        return client in _servers_with_done
+    except TypeError:
+        return False
 
 
 def _server_lacks_done(client: Any) -> bool:
@@ -1661,8 +1689,10 @@ def _remember_server_lacks_done(client: Any, lacks: bool) -> None:
     try:
         if lacks:
             _servers_without_done.add(client)
+            _servers_with_done.discard(client)
         else:
             _servers_without_done.discard(client)
+            _servers_with_done.add(client)
     except TypeError:
         pass
 
@@ -1674,6 +1704,12 @@ def _done_in_notes(facts: dict[str, Any], declared: list[str]) -> dict[str, Any]
     out = {k: v for k, v in facts.items() if k != "done"}
     out["notes"] = "\n".join([line, *([notes] if isinstance(notes, str) and notes.strip() else [])])
     return out
+
+
+def _done_also_in_notes(facts: dict[str, Any], declared: list[str]) -> dict[str, Any]:
+    """``facts`` with ``done`` kept and the declared items first in the notes too: for a close that is
+    delivered later, to a server that may or may not have a field for declared work."""
+    return {**facts, "notes": _done_in_notes(facts, declared)["notes"]}
 
 
 def _items(value: Any) -> list[Any]:
@@ -1751,7 +1787,7 @@ def _crew_mark_left(seat: Any = None) -> None:
         return
 
 
-def _close_crew_session(
+def _close_body(
     client: Memory,
     seat: Any,
     *,
@@ -1763,17 +1799,19 @@ def _close_crew_session(
     locator: dict[str, Any] | None,
     leave: bool = True,
 ) -> dict[str, Any]:
-    """``POST /session/close`` as :meth:`Memory.close_session` does, plus the crew session token.
+    """The ``POST /session/close`` body, as :meth:`Memory.close_session` builds it.
 
-    The close carries this MCP session's crew id (``session_id`` defaults to it) and token, so the
-    server ends the crew session with the handoff (claims released or reserved, tasks stalled).
+    With a crew seat, ``session_id`` defaults to the seat's id, so the server ends that crew session
+    with the handoff (claims released or reserved, tasks stalled). The same body is what gets queued
+    when the close cannot be delivered.
 
-    ``leave=False`` (a milestone) sends ``leave: false`` and no token. A server that predates the
-    ``leave`` field ignores it, but it never ends a crew session without that session's token, so
-    the seat and its claims are kept on old and new servers alike.
+    ``leave=False`` (a milestone) sends ``leave: false``, and :func:`_close_crew_session` then sends no
+    token. A server that predates the ``leave`` field ignores it, but it never ends a crew session
+    without that session's token, so the seat and its claims are kept on old and new servers alike.
     """
-    payload: dict[str, Any] = {"session_id": session_id or seat.client_session_id, "facts": facts}
-    if not leave:
+    default_session = seat.client_session_id if seat is not None else client.session_id
+    payload: dict[str, Any] = {"session_id": session_id or default_session, "facts": facts}
+    if seat is not None and not leave:
         payload["leave"] = False
     agent = (_default_agent_id() or client.agent_id or "").strip()
     if agent:
@@ -1786,11 +1824,160 @@ def _close_crew_session(
         payload["summary"] = summary
     if end_reason:
         payload["end_reason"] = end_reason
+    return payload
+
+
+def _close_crew_session(client: Memory, seat: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """``POST /session/close`` with the crew session token, so the server ends the crew session with
+    the handoff (claims released or reserved, tasks stalled). A milestone body (``leave: false``) goes
+    without the token: the seat and its claims are kept."""
+    token = seat.token if _close_leaves(payload) else None
     try:
-        _, body, _ = CrewHttp(client).call("POST", "/session/close", token=seat.token if leave else None, json=payload)
+        _, body, _ = CrewHttp(client).call("POST", "/session/close", token=token, json=payload)
     except CrewApiError as e:
-        raise MemoryError(f"Request failed: {e.message}", status_code=e.status or None) from None
+        raise _CrewCloseError(e) from None
     return dict(body or {})
+
+
+def _close_leaves(payload: dict[str, Any]) -> bool:
+    """Whether a close body ends the crew session (every close but a milestone's ``leave: false``)."""
+    return payload.get("leave") is not False
+
+
+class _CrewCloseError(MemoryError):
+    """A failed seated close, in the memory tools' error shape; ``outage`` when the server did not answer."""
+
+    def __init__(self, e: CrewApiError) -> None:
+        super().__init__(f"Request failed: {e.message}", status_code=e.status or None)
+        self.outage = crew_is_outage(e)
+
+
+# ---------------------------------------------------------------------------
+# A close the server did not take is queued on this machine and sent again (remembra.mcp.close_queue)
+# ---------------------------------------------------------------------------
+
+# The home whose relay outbox keeps undelivered closes. Set by main() for a stdio server (it runs on the
+# agent's machine as the agent's user). None in-process (tests) and on remote transports: a hosted MCP
+# server has no machine of the caller to keep anything on, and the close fails as before.
+_CLOSE_QUEUE_HOME: Path | None = None
+_close_drainer = close_queue.Drainer()
+# (agent, session) -> the crew seat of a queued close that ends its crew session (not a milestone's), and the
+# caller it belongs to, while this process lives: its token ends the crew session
+_queued_close_seats: dict[tuple[str, str], tuple[Any, CallerInfo | None]] = {}
+_CLOSE_QUEUE_CHECK_EVERY_S = 30.0
+_close_queue_checked_at = 0.0
+
+CLOSE_QUEUED_NOTE = (
+    "The Remembra server did not take this handoff, so it is NOT visible to other agents yet. It is saved on this "
+    "machine and is sent again automatically: by this MCP server as soon as the server answers, otherwise by the "
+    "next Remembra session or relay hook of this agent on this machine. Calling close_session again replaces it. "
+    "`remembra-relay status` shows what is waiting."
+)
+
+
+def _close_failure_status(e: Exception) -> tuple[bool, int | None]:
+    """``(worth sending again, HTTP status or None)`` for a failed close."""
+    if isinstance(e, MemoryTimeoutError | httpx.HTTPError):
+        return True, None
+    if isinstance(e, MemoryError):
+        if e.status_code is None:
+            return bool(getattr(e, "outage", False)), None
+        return close_queue.is_retryable(e.status_code), e.status_code
+    return False, None
+
+
+def _queue_close(client: Memory, seat: Any, body: dict[str, Any], e: Exception) -> str | None:
+    """Keep a close the server did not take. The tool result that says so, or None when it is not queued
+    (no local queue on this transport, a failure that sending again cannot fix, or the file could not be written)."""
+    home = _CLOSE_QUEUE_HOME
+    retryable, status = _close_failure_status(e)
+    if home is None or not retryable or not body.get("agent_id") or not body.get("session_id"):
+        return None
+    error = sanitize_error_message(e)
+    path = close_queue.enqueue(home, body, client, error=error, http_status=status)
+    if path is None:
+        return None
+    key = (str(body["agent_id"]), str(body["session_id"]))
+    leaves = _close_leaves(body)
+    if seat is not None and leaves:
+        try:
+            owner: CallerInfo | None = _crew_caller()
+        except Exception:
+            owner = None
+        _queued_close_seats[key] = (seat, owner)
+    else:
+        _queued_close_seats.pop(key, None)  # a milestone replaces a queued final close: no token goes with it
+    _close_drainer.kick(home, client, token_for=_queued_close_token, on_delivered=_queued_close_delivered)
+    out: dict[str, Any] = {
+        "status": "queued",
+        "delivered": False,
+        "session_id": body["session_id"],
+        "error": error,
+        "code": status,
+        "note": CLOSE_QUEUED_NOTE,
+    }
+    if seat is not None:
+        out["crew"] = {
+            "session_left": False,
+            "note": (
+                "Your crew session and its claims stay as they are until the handoff is delivered."
+                if leaves
+                else "A milestone: your crew session and its claims are kept, also after the handoff is delivered."
+            ),
+        }
+    return _dump(out)
+
+
+def _queued_close_token(agent_id: str, session_id: str) -> str | None:
+    seat, _ = _queued_close_seats.get((agent_id, session_id)) or (None, None)
+    return str(seat.token) if seat is not None and not seat.left else None
+
+
+def _queued_close_delivered(agent_id: str, session_id: str, result: dict[str, Any]) -> None:
+    """A queued close reached the server: when it carried the crew token, the crew session ended with it."""
+    seat, owner = _queued_close_seats.pop((agent_id, session_id), None) or (None, None)
+    crew = result.get("crew")
+    if seat is not None and isinstance(crew, dict) and crew.get("session_left"):
+        if owner is not None:
+            _crew.mark_left(owner, seat)  # also drops the stored seat, so a restart does not resume it
+            return
+        with seat.lock:
+            seat.left = True
+            seat.pending.clear()
+
+
+def _close_delivered(body: dict[str, Any]) -> None:
+    """This close reached the server: a queued earlier close of the same session is superseded."""
+    home = _CLOSE_QUEUE_HOME
+    if home is None or not body.get("agent_id") or not body.get("session_id"):
+        return
+    key = (str(body["agent_id"]), str(body["session_id"]))
+    _queued_close_seats.pop(key, None)
+    try:
+        relay_outbox.discard(home, *key)
+    except Exception:
+        return
+
+
+def _kick_close_queue() -> None:
+    """On a tool call: deliver closes a previous run of this MCP server left queued. Costs one directory
+    listing at most every 30 s; the sending happens in the background thread. Never raises."""
+    global _close_queue_checked_at
+    home = _CLOSE_QUEUE_HOME
+    if home is None or _close_drainer.running():
+        return
+    now = time.monotonic()
+    if now - _close_queue_checked_at < _CLOSE_QUEUE_CHECK_EVERY_S:
+        return
+    _close_queue_checked_at = now
+    try:
+        if not close_queue.has_entries(home):
+            return
+        client = _get_client()
+        if close_queue.waiting(home, client):
+            _close_drainer.kick(home, client, token_for=_queued_close_token, on_delivered=_queued_close_delivered, now=True)
+    except Exception:
+        return
 
 
 @mcp.tool(
@@ -3431,6 +3618,12 @@ def _finish(result: Any, final: Any) -> Any:
     return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent={"result": text}, isError=True)
 
 
+def _met_outage(result: Any) -> bool:
+    """The call just failed because the server is not answering: the notice poll behind it would only wait out
+    the same timeout again (and the liveness touch with it), tripling the time the tool takes to say so."""
+    return isinstance(result, FailureText) and result.outage
+
+
 def _install_crew_notice() -> None:
     """Wrap every registered tool: its result carries the crew_notice (§7 piggyback), except for the tools in
     ``_NO_CREW_NOTICE``, and a result that reports a failure is flagged ``isError`` (:func:`_finish`)."""
@@ -3442,8 +3635,9 @@ def _install_crew_notice() -> None:
         if tool.is_async:
 
             async def async_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
+                _kick_close_queue()
                 result = await __fn(*a, **kw)
-                caller, seated = _crew_notice_now() if __notice else (None, False)
+                caller, seated = _crew_notice_now() if __notice and not _met_outage(result) else (None, False)
                 if caller is None or not seated:
                     return _finish(result, result)
                 notice = await anyio.to_thread.run_sync(functools.partial(_crew.notice, caller))
@@ -3453,8 +3647,9 @@ def _install_crew_notice() -> None:
         else:
 
             def sync_wrapper(*a: Any, __fn: Any = original, __notice: bool = with_notice, **kw: Any) -> Any:
+                _kick_close_queue()
                 result = __fn(*a, **kw)
-                caller, seated = _crew_notice_now() if __notice else (None, False)
+                caller, seated = _crew_notice_now() if __notice and not _met_outage(result) else (None, False)
                 if caller is None or not seated:
                     return _finish(result, result)
                 return _finish(result, _with_crew_notice(result, _crew.notice(caller)))
@@ -3780,10 +3975,12 @@ def main() -> None:
         uvicorn.run(_build_remote_app(transport), host=host, port=port, log_level="info")
         return
 
-    global _LOCAL_CREW, _STDIO_SERVER
+    global _LOCAL_CREW, _STDIO_SERVER, _CLOSE_QUEUE_HOME
     _STDIO_SERVER = transport == "stdio"
     _LOCAL_CREW = transport == "stdio" and os.environ.get("REMEMBRA_MCP_LOCAL_CREW", "1") != "0"
     _enable_seat_store(transport)
+    if transport == "stdio" and os.environ.get("REMEMBRA_MCP_CLOSE_QUEUE", "1") != "0":
+        _CLOSE_QUEUE_HOME = Path(os.environ.get("HOME") or Path.home())
     mcp.run(transport=transport)  # type: ignore[arg-type]
 
 

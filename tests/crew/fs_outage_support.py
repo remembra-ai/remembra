@@ -37,6 +37,8 @@ class FakeApi:
         self.events: list[dict[str, Any]] = []
         self.closes: list[dict[str, Any]] = []
         self.recall_status = 200
+        self.rejoin_status = 0  # when set, a re-join (the liveness touch) is refused with this status
+        self.close_status = 0  # when set, POST /session/close answers this status (a JSON detail)
 
     # -- inspection -------------------------------------------------------------
 
@@ -62,7 +64,13 @@ class FakeApi:
             return httpx.Response(503, text="no available server\n")
         body = json.loads(request.content) if request.content else {}
         if path == "/crews/join":
+            if self.rejoin_status and request.headers.get("x-remembra-crew-session"):
+                return httpx.Response(self.rejoin_status, json={"detail": {"error": "stale", "message": "try later"}})
             return httpx.Response(200, json=JOIN)
+        if path == "/crews/crew_1/checkpoints":
+            return httpx.Response(201, json={"checkpoint": {"id": "ckp_1"}, "created": True, "seq": 9})
+        if path == "/crews/crew_1/collisions":
+            return httpx.Response(200, json={"collisions": []})
         if path == "/crews/crew_1/match":
             return httpx.Response(200, json={"paths": [{"path": p} for p in body.get("paths") or []]})
         if path == "/crews/crew_1/claims" and request.method == "POST":
@@ -82,6 +90,8 @@ class FakeApi:
         if path == "/crews/crew_1/events":
             events, self.events = self.events, []
             return httpx.Response(200, json={"events": events, "last_seq": 5 + len(events), "has_more": False})
+        if path == "/session/close" and self.close_status:
+            return httpx.Response(self.close_status, json={"detail": "close refused by the test server"})
         if path == "/session/close":
             self.closes.append({"body": body, "token": request.headers.get("x-remembra-crew-session")})
             left = bool(request.headers.get("x-remembra-crew-session"))
@@ -104,6 +114,19 @@ class FakeApi:
         if request.url.path == "/health/ready":
             return httpx.Response(200, json={"status": "ok", "degraded_components": [], "components": {}})
         return httpx.Response(404, json={"detail": "Not Found"})
+
+
+class Clock:
+    """The bridge's clock, so a test decides when the liveness touch and the notice poll are due."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 def notice_event(title: str = "codex-2 asks you to release pos", kind: str = "mention") -> dict[str, Any]:

@@ -40,7 +40,7 @@ import shlex
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final, TypeVar, cast
 
@@ -784,6 +784,11 @@ def is_outage(e: CrewApiError) -> bool:
 def outage_outcome(e: CrewApiError) -> str:
     """What an outage means for the call that hit it: certainly not carried out, or unknown."""
     return NOT_CARRIED_OUT if e.not_sent or e.status in _NOT_REACHED_STATUSES else OUTCOME_UNKNOWN
+
+
+def _not_tried(labels: Iterable[str]) -> list[str]:
+    """Lines for the targets a call did not send after one of them met an outage."""
+    return [f"NOT TRIED: {label} (the server is not answering)" for label in labels]
 
 
 def _result(text: str, failures: Sequence[CrewApiError]) -> str:
@@ -1883,8 +1888,10 @@ class CrewBridge:
         http = self._http(caller, seat)
         try:
             self.touch(caller, seat)
-        except CrewApiError:
-            pass  # liveness is best effort; the notice still goes out
+        except CrewApiError as failed:
+            if is_outage(failed):
+                return None  # the server is not answering: the poll would only wait out the same timeout
+            # otherwise liveness is best effort; the notice still goes out
         now = self._clock()
         with seat.lock:
             due = force or now - seat.last_poll >= POLL_INTERVAL_S
@@ -2035,10 +2042,17 @@ class CrewBridge:
         return ", ".join(out)
 
     def _touch_quietly(self, caller: CallerInfo, seat: Seat) -> None:
+        """The liveness touch before a tool's own requests: best effort, unless it meets an outage.
+
+        A touch the server refuses changes nothing for the call. A touch that gets no answer (or a
+        gateway's) ends the call here: its own requests would wait out the same timeout one after the
+        other, and this way the answer is certain, the call itself was never sent.
+        """
         try:
             self.touch(caller, seat)
-        except CrewApiError:
-            pass
+        except CrewApiError as e:
+            if is_outage(e):
+                raise CrewApiError(e.status, e.error, e.message, e.body, not_sent=True) from None
 
     def _targets(
         self,
@@ -2179,6 +2193,9 @@ class CrewBridge:
                 capped += 1 if e.status == 409 and e.error == "claim_cap" else 0
                 lines.append(self._refused(http, seat, label, e, data))
                 failures.append(e)
+                if is_outage(e):  # the other targets would each wait out the same timeout
+                    lines.extend(_not_tried(rest for rest, _ in queue))
+                    break
                 continue
             waited = int(round(time.monotonic() - posted))
             claim = (res or {}).get("claim") or {}
@@ -2459,7 +2476,7 @@ class CrewBridge:
         lines = []
         data: list[str] = []
         failures: list[CrewApiError] = []
-        for c in claims:
+        for index, c in enumerate(claims):
             label = self._claim_label(http, seat, c, data)
             if c.get("state") == "reserved" and c.get("reserve_reason") == "human_hold":
                 lines.append(f"NOT RELEASED {label}: a human put it on hold. Ask @mani with crew_say.")
@@ -2479,6 +2496,9 @@ class CrewBridge:
             except CrewApiError as e:
                 lines.append(error_text(e, f"release {c['id']}"))
                 failures.append(e)
+                if is_outage(e):
+                    lines.extend(_not_tried(f"release {rest['id']}" for rest in claims[index + 1 :]))
+                    break
                 continue
             state = ((res or {}).get("claim") or {}).get("state") or "released"
             line = f"RELEASED {label} → {state}"
@@ -2646,7 +2666,7 @@ class CrewBridge:
         lines = []
         data: list[str] = []
         failures: list[CrewApiError] = []
-        for c in claims:
+        for index, c in enumerate(claims):
             body: dict[str, Any] = {"to": target}
             if reason:
                 body["note"] = reason[:280]
@@ -2655,6 +2675,9 @@ class CrewBridge:
             except CrewApiError as e:
                 lines.append(error_text(e, f"handover {c['id']}"))
                 failures.append(e)
+                if is_outage(e):
+                    lines.extend(_not_tried(f"handover {rest['id']}" for rest in claims[index + 1 :]))
+                    break
                 continue
             lines.append(f"OFFERED {self._claim_label(http, seat, c, data)} to {who} (they accept or decline within 10 min).")
         return _result(join_text(lines, data), failures)
@@ -2673,13 +2696,16 @@ class CrewBridge:
             return f"NOTHING TO {action.upper()}: no handover is offered to you."
         lines = []
         failures: list[CrewApiError] = []
-        for c in claims:
+        for index, c in enumerate(claims):
             label = self._claim_label(http, seat, c)
             try:
                 http.call("POST", f"/claims/{c['id']}/{action}", token=seat.token)
             except CrewApiError as e:
                 lines.append(error_text(e, f"{action} {c['id']}"))
                 failures.append(e)
+                if is_outage(e):
+                    lines.extend(_not_tried(f"{action} {rest['id']}" for rest in claims[index + 1 :]))
+                    break
                 continue
             lines.append(f"{'ACCEPTED' if action == 'accept' else 'DECLINED'} {label}")
         return _result("\n".join(lines), failures)
