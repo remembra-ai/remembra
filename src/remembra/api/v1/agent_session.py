@@ -54,7 +54,7 @@ def _require(current_user: Any, permission: str) -> None:
         )
 
 
-def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[str, float, str | None]:
+def screen_text(request: Request, text: str, apply_pii: bool = True, xss_penalty: bool = True) -> tuple[str, float, str | None]:
     """Same content protections as POST /memories: credential redaction, PII policy, sanitizer.
 
     Credentials are redacted first, as ``StoreRequest`` does for a memory, so
@@ -63,6 +63,15 @@ def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[st
     blocks the content outright. ``apply_pii=False`` is for text assembled
     from values that were already PII-scrubbed one by one (relay close-out):
     the PII policy is skipped.
+
+    ``xss_penalty=False`` is for a relay close-out, whose score decides whether
+    a brief shows the handoff: the returned text and checksum are the same
+    (markup is still removed or escaped), but the score is the prompt-injection
+    score alone. A recorded ``sed 's|<span>…'`` or ``on_failure=stop`` is not an
+    injection attempt, and the brief's reason says "prompt-injection patterns".
+    The score is the lower of the text as written and the sanitized text: the
+    brief renders the recorded items, so injection text inside a comment, a
+    script tag or a handler value (which the sanitizer removes) still counts.
     """
     text = scrub(text)
     pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
@@ -84,7 +93,13 @@ def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[st
     sanitizer = getattr(request.app.state, "sanitizer", None)
     if get_settings().sanitization_enabled and sanitizer is not None:
         analysis = sanitizer.analyze(text, source="user_input")
-        text, trust_score, checksum = analysis.content, analysis.trust_score, analysis.checksum
+        trust_score = analysis.trust_score
+        if not xss_penalty and analysis.xss_removed:
+            trust_score = min(
+                sanitizer.analyze(text, source="user_input", sanitize=False).trust_score,
+                sanitizer.analyze(analysis.content, source="user_input", sanitize=False).trust_score,
+            )
+        text, checksum = analysis.content, analysis.checksum
     return text, trust_score, checksum
 
 

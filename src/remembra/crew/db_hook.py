@@ -88,7 +88,7 @@ def _relay_filters(app: FastAPI) -> tuple[Any, Any]:
     from remembra.api.v1.relay import pii_scrubber
 
     request = cast("Request", SimpleNamespace(app=app))
-    return (lambda text: screen_text(request, text, apply_pii=False)), pii_scrubber(request)
+    return (lambda text: screen_text(request, text, apply_pii=False, xss_penalty=False)), pii_scrubber(request)
 
 
 async def _start_outbox(app: FastAPI, rt: startup.CrewRuntime) -> None:

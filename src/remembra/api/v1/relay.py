@@ -744,7 +744,7 @@ async def close_session(
                 summary=body.summary,
                 end_reason=body.end_reason,
                 agent_verified=verified,
-                screen=lambda text: screen_text(request, text, apply_pii=False),
+                screen=lambda text: screen_text(request, text, apply_pii=False, xss_penalty=False),
                 scrub=pii_scrubber(request),
                 closed_at=body.closed_at,
                 location=location,
