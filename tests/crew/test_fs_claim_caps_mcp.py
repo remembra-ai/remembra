@@ -6,6 +6,8 @@ Runs the real API over HTTP (``tests/crew/mcp_support``) through ``FastMCP.call_
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import remembra.mcp.server as server
@@ -128,7 +130,10 @@ def test_release_reaches_an_own_reserved_claim_and_frees_the_slot(live, clock):
     assert kept.startswith("RELEASED path public/hardware/studio.js") and kept.endswith("→ reserved"), kept
     # baton=True on a claim that is already a baton keeps it (the server would end it)
     again = call("crew_claim", action="release", paths=["public/hardware/studio.js"], baton=True)
-    assert again == "ALREADY RESERVED path public/hardware/studio.js (exclusive, reserved): kept as a baton.", again
+    assert again == (
+        "ALREADY RESERVED path public/hardware/studio.js (exclusive, reserved): it is kept as a baton for the next pickup. "
+        "Release it with baton=false to free the area."
+    ), again
     rows = live.crew_rows(
         "SELECT state FROM crew_claims WHERE crew_id = ? AND path_glob = ?",
         (crew_id_of(live, project), "public/hardware/studio.js"),
@@ -149,7 +154,7 @@ def test_nothing_released_says_what_the_session_does_hold(live, clock):
     assert call("crew_claim", paths=["app/shop/page.tsx"]).startswith("GRANTED")
     got = call("crew_claim", action="release", paths=["app/other.tsx"])
     assert got.startswith("NOTHING RELEASED: you hold no live claim on that."), got
-    assert "You hold: path app/shop/page.tsx (exclusive, active)" in got
+    assert re.search(r"You hold: path app/shop/page\.tsx \(exclusive, active, clm_[A-Za-z0-9]+\)\.$", got), got
     assert call("crew_claim", action="release", paths=["app/shop/page.tsx"]).startswith("RELEASED path app/shop/page.tsx")
     assert (
         call("crew_claim", action="release", paths=["app/shop/page.tsx"]) == "NOTHING RELEASED: you hold no live claim on that."

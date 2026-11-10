@@ -137,7 +137,7 @@ def test_shared_claim_is_not_denied_by_the_exclusive_cap():
     snap = _capped_snapshot()
     # control: a real file write there is still held to the cap
     edit, _ = _run("Write", {"file_path": "/w/yaadbooks-a/src/app/invoices/list.tsx", "content": "x"}, caller="cs_a", snap=snap)
-    assert edit.decision == "deny" and "maximum number of exclusive zones" in (edit.reason or "")
+    assert edit.decision == "deny" and "you hold 3 of 3 exclusive claims, the per-session limit" in (edit.reason or "")
     v, calls = _run(
         CLAIM, {"action": "claim", "mode": "shared", "paths": ["src/app/invoices/list.tsx"]}, caller="cs_a", snap=snap
     )

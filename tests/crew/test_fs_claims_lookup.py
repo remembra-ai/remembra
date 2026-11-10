@@ -200,7 +200,8 @@ def _orphan(live: LiveServer, prefix: str) -> tuple[str, Memory, str, Memory, st
         {"path_glob": "lib/sales.ts", "zone_id": None, "resource": None, "state": "active", "callsign": a_sign}
     ]
     use(b)  # the orphan blocks the other agent's zone claim
-    assert call("crew_claim", zone="lib").startswith(f"REFUSED: zone lib held EXCLUSIVELY by {a_sign}")
+    refused = call("crew_claim", zone="lib")
+    assert refused.startswith(f"REFUSED: zone lib: {a_sign} holds path lib/sales.ts inside it (exclusive)."), refused
     use(a)
     return project, a, a_sign, b, b_sign
 
