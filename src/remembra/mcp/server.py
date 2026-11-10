@@ -880,30 +880,68 @@ def _readiness(client: Memory) -> dict[str, Any] | None:
 _AUTH_PROBE_PATH = "/api/v1/trail/summary"
 
 
+# Keys of an RFC 9457 problem document, which is what a proxy or firewall writes (Cloudflare's JSON errors carry
+# a text ``detail`` too). Remembra's own 401 and 403 are ``{"detail": "<text>"}`` and nothing else.
+_PROBLEM_KEYS = frozenset({"type", "title", "instance", "error_code", "ray_id", "cloudflare_error"})
+
+
+def _remembra_detail(response: Any) -> str | None:
+    """The ``detail`` text of an error Remembra itself wrote, or None when someone else answered.
+
+    Response headers are not used: production sits behind a proxy that stamps its headers on every answer,
+    Remembra's included, so they do not say who wrote the body.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return None
+    if not isinstance(body, dict) or _PROBLEM_KEYS & body.keys():
+        return None
+    detail = body.get("detail")
+    return detail if isinstance(detail, str) and detail.strip() else None
+
+
 def _auth_check(client: Memory) -> dict[str, Any]:
     """Whether the server accepts ``client``'s API key, from one authenticated GET. Never raises.
 
-    Only a 401 says the key is rejected. A 403 written by Remembra means the key authenticated and its
-    scope refused this read (a store-only key): accepted, with limits. Anything else (a firewall's 403,
-    a 404 from an older server, 429, 5xx, a timeout, a page instead of JSON) leaves the key unchecked:
-    it is reported, and never turned into a failure the key did not cause.
+    Only a 401 written by Remembra says the key is rejected. A 403 written by Remembra means the key
+    authenticated and its scope refused this read (a store-only key): accepted, with limits. Anything else
+    (a proxy's 401 page, a firewall's 403 in HTML or JSON, a 404 from an older server, 429, 5xx, a timeout,
+    a page instead of JSON) leaves the key unchecked: it is reported, and never turned into a claim about
+    the key that the answer does not establish.
     """
-    from remembra.marshal.signals import clean_text, is_firewall_block
+    from remembra.client.memory import _header_agent_id
+    from remembra.marshal.signals import clean_text
 
     out: dict[str, Any] = {"state": "accepted", "checked_with": f"GET {_AUTH_PROBE_PATH}"}
     try:
-        body = client._request("GET", _AUTH_PROBE_PATH, params={"days": 1})
-    except MemoryError as e:
-        code = e.status_code
-        raw = str(e).removeprefix("Request failed: ")
-        head = raw.lstrip()[:600].lower()
-        page = head.startswith("<!doctype") or "<html" in head or "<head" in head
-        detail = "a web page, not Remembra's JSON" if page else clean_text(raw, 160)
-        if code == 401:
-            return {**out, "state": "rejected", "http_status": 401, "detail": detail}
-        if code == 403 and not is_firewall_block(403, raw)[0]:
-            return {**out, "state": "limited", "http_status": 403, "detail": detail}
-        return {**out, "state": "unchecked", "http_status": code, "error": f"HTTP {code}: {detail}"}
+        # The SDK client's own connection (its key header, its declared agent), read raw: ``Memory._request``
+        # folds an error into one string, which cannot tell Remembra's JSON from a proxy's page.
+        agent = _header_agent_id(getattr(client, "agent_id", None))
+        response = client._client.request(
+            "GET",
+            f"{client.base_url}{_AUTH_PROBE_PATH}",
+            params={"days": 1},
+            headers={"X-Remembra-Agent-Id": agent} if agent else None,
+        )
+        code = response.status_code
+        if code >= 400:
+            detail = _remembra_detail(response)
+            if detail is not None and code in (401, 403):
+                state = "rejected" if code == 401 else "limited"
+                return {**out, "state": state, "http_status": code, "detail": clean_text(detail, 160)}
+            raw = response.text or ""
+            head = raw.lstrip()[:600].lower()
+            if head.startswith("<!doctype") or "<html" in head or "<head" in head:
+                said = "a web page, not Remembra's JSON"
+            elif detail is not None:
+                said = clean_text(detail, 160)
+            elif code in (401, 403):
+                said = "not an answer from Remembra (a proxy or firewall in front of it?)"
+            else:
+                said = clean_text(raw, 160) or "no body"
+            return {**out, "state": "unchecked", "http_status": code, "error": f"HTTP {code}: {said}"}
+        body = response.json()
     except ValueError:  # a 2xx or 3xx whose body is not JSON: a redirect, a login page
         return {**out, "state": "unchecked", "error": "the answer was not Remembra's JSON"}
     except Exception as e:  # no answer: a timeout, a dropped connection
