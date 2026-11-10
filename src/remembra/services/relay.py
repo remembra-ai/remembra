@@ -527,6 +527,7 @@ class RelayService:
         server_facts: bool = False,
         crew_session_token: str | None = None,
         location: dict[str, Any] | None = None,
+        crew_leave: bool = True,
     ) -> dict[str, Any]:
         """Store (or update) the ONE handoff for ``(agent_id, session_id)``.
 
@@ -549,8 +550,9 @@ class RelayService:
         records the crew side (:func:`remembra.crew.closeout.on_relay_close`)
         and the result carries ``crew`` (None when the project has no crew). The
         crew session leaves only when ``crew_session_token`` (the caller's
-        ``X-Remembra-Crew-Session`` header) proves it; otherwise only
-        ``handoff.created`` is recorded.
+        ``X-Remembra-Crew-Session`` header) proves it and ``crew_leave`` is true;
+        otherwise only ``handoff.created`` is recorded (``crew_leave=False`` is a
+        mid-session milestone: the session and its claims stay as they are).
 
         Every input string passes ``redact_secrets`` and then ``scrub`` (the
         API passes the PII policy) before anything is built, so the rendered
@@ -701,6 +703,7 @@ class RelayService:
                         sections,
                         relay_meta["facts_source"],
                         crew_session_token,
+                        leave=crew_leave,
                     )
                     return unchanged
             request = StoreRequest(
@@ -764,6 +767,7 @@ class RelayService:
             sections,
             relay_meta["facts_source"],
             crew_session_token,
+            leave=crew_leave,
         )
         return result
 
@@ -795,9 +799,11 @@ class RelayService:
         sections: dict[str, Any],
         facts_source: str,
         crew_session_token: str | None = None,
+        leave: bool = True,
     ) -> dict[str, Any] | None:
         """The crew side of a close (Crew mode only). The handoff is already stored, so a crew
-        failure is logged and reported in the result instead of failing the close."""
+        failure is logged and reported in the result instead of failing the close. ``leave=False``
+        (a mid-session milestone) records the handoff and leaves the crew session and its claims alone."""
         if self.crew_events is None:
             return None
         from remembra.crew.closeout import on_relay_close
@@ -816,6 +822,7 @@ class RelayService:
                 sections=sections,
                 facts_source=facts_source,
                 session_token=crew_session_token,
+                leave=leave,
             )
         except Exception as e:
             log.error(

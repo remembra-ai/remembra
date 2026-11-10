@@ -281,11 +281,13 @@ async def _leave(
         if reserve:
             expires = None if claim.get("task_id") else now_iso(now + reserve_ttl)
             await conn.execute(
-                """UPDATE crew_claims SET state = 'reserved', reserve_reason = 'ended_dirty', reserved_for = NULL,
+                # Reserved for the leaving session, as the crew's own leave path does: an agent that closes
+                # mid-session and keeps working re-joins as the same crew session and takes its claims back.
+                """UPDATE crew_claims SET state = 'reserved', reserve_reason = 'ended_dirty', reserved_for = ?,
                        reserve_expires_at = ?, offered_to = NULL, offer_expires_at = NULL, queue_pos = NULL,
                        version = version + 1, updated_at = ?
                    WHERE id = ? AND crew_id = ?""",
-                (expires, stamp, claim["id"], crew_id),
+                (sid, expires, stamp, claim["id"], crew_id),
             )
             row = await _fetchone(conn, "SELECT * FROM crew_claims WHERE id = ?", (claim["id"],))
             assert row is not None

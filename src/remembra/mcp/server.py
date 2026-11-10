@@ -1056,12 +1056,19 @@ def close_session(
     git_remote: str | None = None,
     root_path: str | None = None,
     session_id: str | None = None,
+    final: bool | None = None,
 ) -> str:
     """Call this LAST, before you finish: leave a handoff for the next agent.
 
     The server builds ONE structured handoff (Done / Not done / Failing / Next
     step) from the facts you give. Calling it again in the same session and
-    project updates that handoff instead of adding another.
+    project replaces that handoff: the new one supersedes the earlier one and
+    has a new handoff_id, so restate what still matters.
+
+    A final close also ENDS your crew session: your claims are released, or
+    reserved for you when work is unfinished. If you will keep working (a
+    milestone, a checkpoint), pass final=false: the handoff is stored and you
+    keep your crew seat and claims.
 
     Args:
         summary: Optional short narrative. It is checked against the facts
@@ -1088,6 +1095,9 @@ def close_session(
             the same value you gave session_brief).
         root_path: Resolve the project from your working directory instead.
         session_id: Defaults to this MCP session's id.
+        final: true ends your crew session with the handoff; false stores a
+            mid-session milestone handoff and keeps your seat and claims.
+            Default: true, unless end_reason says "checkpoint" or "milestone".
 
     Returns:
         JSON with handoff_id, project_id (where the handoff was filed), project_source
@@ -1095,10 +1105,12 @@ def close_session(
         location on this call was resolved, hint being the configured project;
         remembered = from an earlier session_brief or crew_status; crew-seat = your
         crew session's; relay-project = REMEMBRA_RELAY_PROJECT; configured = the
-        caller's default project), headline, the rendered handoff and grounding verdict.
+        caller's default project), headline, the rendered handoff and grounding verdict;
+        with a crew seat, a crew block that says whether the crew session ended.
     """
     try:
         client = _get_client()
+        is_final = final if final is not None else not _milestone_reason(end_reason)
         merged: dict[str, Any] = dict(facts or {})
         merged["facts_source"] = "agent-declared"
         if next_step:
@@ -1164,6 +1176,7 @@ def close_session(
                 session_id=session_id,
                 project_id=project_id,
                 locator=locator,
+                leave=is_final,
             )
         out: dict[str, Any] = {
             "status": "ok",
@@ -1183,6 +1196,9 @@ def close_session(
                 "claims_reserved": len(crew.get("claims_reserved") or []),
                 "tasks_stalled": len(crew.get("tasks_stalled") or []),
             }
+            note = _crew_close_note(out["crew"], is_final)
+            if note:
+                out["crew"]["note"] = note
             if crew.get("session_left"):
                 _crew_mark_left(seat)
         return _dump(out)
@@ -1228,6 +1244,28 @@ def _hint_refusal(brief: dict[str, Any], root_path: str | None, chosen: str | No
         f"'{resolved}' would take this and it is not used on its own: pass project_id='{resolved}' to work "
         "there, or the project_id you mean, or root_path=<your repository checkout>."
     )
+
+
+_MILESTONE_REASON_RE = re.compile(r"\b(?:checkpoint|milestone)\b", re.IGNORECASE)
+
+
+def _milestone_reason(end_reason: str | None) -> bool:
+    """An end reason that says the session goes on ("checkpoint", "release milestone; goal remains active")."""
+    return bool(end_reason and _MILESTONE_REASON_RE.search(end_reason))
+
+
+def _crew_close_note(crew: dict[str, Any], is_final: bool) -> str | None:
+    """What the close did to the caller's crew session, in words (the counters alone read as a routine result)."""
+    if crew["session_left"]:
+        return (
+            f"This close ended your crew session: {crew['claims_released']} claim(s) released, "
+            f"{crew['claims_reserved']} reserved for you, {crew['tasks_stalled']} task(s) stalled. If you keep working, "
+            "your next crew call re-joins as the same session and takes reserved claims back; claim released ones "
+            "again. For a mid-session milestone pass final=false: the handoff is stored and you keep your seat and claims."
+        )
+    if not is_final:
+        return "Milestone handoff stored. Your crew session and claims are kept; close again when the session really ends."
+    return None
 
 
 def _project_for_locator(client: Memory, locator: dict[str, Any]) -> str | None:
@@ -1286,13 +1324,20 @@ def _close_crew_session(
     session_id: str | None,
     project_id: str | None,
     locator: dict[str, Any] | None,
+    leave: bool = True,
 ) -> dict[str, Any]:
     """``POST /session/close`` as :meth:`Memory.close_session` does, plus the crew session token.
 
     The close carries this MCP session's crew id (``session_id`` defaults to it) and token, so the
     server ends the crew session with the handoff (claims released or reserved, tasks stalled).
+
+    ``leave=False`` (a milestone) sends ``leave: false`` and no token. A server that predates the
+    ``leave`` field ignores it, but it never ends a crew session without that session's token, so
+    the seat and its claims are kept on old and new servers alike.
     """
     payload: dict[str, Any] = {"session_id": session_id or seat.client_session_id, "facts": facts}
+    if not leave:
+        payload["leave"] = False
     agent = (_default_agent_id() or client.agent_id or "").strip()
     if agent:
         payload["agent_id"] = agent
@@ -1305,7 +1350,7 @@ def _close_crew_session(
     if end_reason:
         payload["end_reason"] = end_reason
     try:
-        _, body, _ = CrewHttp(client).call("POST", "/session/close", token=seat.token, json=payload)
+        _, body, _ = CrewHttp(client).call("POST", "/session/close", token=seat.token if leave else None, json=payload)
     except CrewApiError as e:
         raise MemoryError(f"Request failed: {e.message}", status_code=e.status or None) from None
     return dict(body or {})

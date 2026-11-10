@@ -392,6 +392,13 @@ class CloseRequest(BaseModel):
     facts: FactsIn = Field(default_factory=FactsIn)
     summary: str | None = Field(default=None, description="Optional agent-written summary; grounding-checked, never trusted")
     end_reason: str | None = None
+    leave: bool = Field(
+        default=True,
+        description=(
+            "Crew mode: false stores the handoff as a mid-session milestone and keeps the caller's crew session "
+            "and claims; true (default) ends the crew session when the close carries its token"
+        ),
+    )
     closed_at: datetime | None = Field(
         default=None,
         description=(
@@ -735,6 +742,7 @@ async def close_session(
                 location=location,
                 # Crew mode: the close ends the caller's crew session only with that session's token (§11.2)
                 crew_session_token=request.headers.get(CREW_SESSION_HEADER),
+                crew_leave=body.leave,
             )
         except BaseException:
             if hold is not None:
