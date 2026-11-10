@@ -1380,7 +1380,7 @@
             "anyOf": [
               {
                 "maxLength": 80,
-                "pattern": "(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}",
+                "pattern": "[a-z][a-z0-9-]{1,14}:[A-Za-z0-9._/-]{1,64}",
                 "type": "string"
               },
               {
@@ -1727,7 +1727,7 @@
             "anyOf": [
               {
                 "maxLength": 80,
-                "pattern": "(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}",
+                "pattern": "[a-z][a-z0-9-]{1,14}:[A-Za-z0-9._/-]{1,64}",
                 "type": "string"
               },
               {
@@ -4609,7 +4609,7 @@
             "anyOf": [
               {
                 "maxLength": 80,
-                "pattern": "(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}",
+                "pattern": "[a-z][a-z0-9-]{1,14}:[A-Za-z0-9._/-]{1,64}",
                 "type": "string"
               },
               {
@@ -7508,7 +7508,7 @@
           "services": {
             "items": {
               "maxLength": 80,
-              "pattern": "(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}",
+              "pattern": "[a-z][a-z0-9-]{1,14}:[A-Za-z0-9._/-]{1,64}",
               "type": "string"
             },
             "maxItems": 20,

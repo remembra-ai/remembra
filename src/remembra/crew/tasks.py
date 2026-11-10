@@ -331,7 +331,14 @@ def validate_acceptance(criteria: Any) -> list[dict[str, Any]]:
                 raise _err(422, "invalid_acceptance", f"{where}: match {problems[0]}")
         elif kind == "file":
             if not match or not schemas.is_path_rel(match):
-                raise _err(422, "invalid_acceptance", f"{where}: kind file needs a repo-relative path in match")
+                raise _err(
+                    422,
+                    "invalid_acceptance",
+                    (
+                        f"{where}: kind file needs a repo-relative path in match; "
+                        "for a file outside the repository use kind manual and name it in text"
+                    ),
+                )
         elif kind == "commit":
             if match is not None and not _is_sha_prefix(match):
                 raise _err(422, "invalid_acceptance", f"{where}: commit match must be a sha prefix (7-40 hex)")

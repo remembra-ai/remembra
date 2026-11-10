@@ -994,7 +994,43 @@ def error_text(e: CrewApiError, what: str) -> str:
     if e.status == 429:
         said = rate_limit_text(e)
         return f"RATE LIMITED ({what}): {said}" if said else f"RATE LIMITED ({what})."
-    return f"CREW ERROR ({what}: {e.status} {S.clip_item(e.error, 64)}): {e.message}"
+    return f"CREW ERROR ({what}: {e.status} {S.clip_item(e.error, 64)}): {e.message}" + _problems_text(e)
+
+
+# The five kinds a server before 0.17.7 takes (its RESOURCE_PATTERN, as it appears in its 422 problems).
+_CLASSIC_KINDS: Final = "schema|deploy|service|supabase|mcp"
+_PROBLEM_RE: Final = re.compile(r"\$\.?(?P<field>[A-Za-z0-9_.\[\]]{0,80}): (?P<what>.{1,400})", re.S)
+_PROBLEM_VALUE_RE: Final = re.compile(r"^.*? (?=(?:not in|does not match) )", re.S)
+
+
+def _problems_text(e: CrewApiError) -> str:
+    """What the server found wrong with the body (422 ``problems``), without the values it quotes back.
+
+    The route answers "The body is invalid." and lists the reasons next to it; without them an agent
+    cannot tell which field to change. A resource refused by an older server gets the kinds it takes.
+    """
+    problems = e.body.get("problems") if 400 <= e.status < 500 else None
+    if not isinstance(problems, list):
+        return ""
+    shown: list[str] = []
+    resource_form = ""
+    for problem in problems:
+        m = _PROBLEM_RE.fullmatch(problem) if isinstance(problem, str) else None
+        if m is None:
+            continue
+        what = _PROBLEM_VALUE_RE.sub("", m["what"], count=1)
+        if m["field"] == "resource" and "does not match" in what:
+            resource_form = (
+                " This server takes only schema:, deploy:, service:, supabase: and mcp: resources: "
+                'name it with one of those, e.g. zone="service:<name>".'
+                if _CLASSIC_KINDS in what
+                else " A resource is kind:name: a lowercase kind (2-15 letters, digits or -), then a name of letters, "
+                'digits and . _ / - (up to 64), e.g. zone="artifact:qa-report".'
+            )
+        shown.append(_clean_message(f"{m['field'] or 'body'}: {what}", 200))
+        if len(shown) == 3:
+            break
+    return (" " + "; ".join(shown) + "." if shown else "") + resource_form
 
 
 def resumed_text(kind: str, *, on_write: bool = False) -> str:
@@ -1601,7 +1637,11 @@ class CrewBridge:
             for z in self._zones(http, seat):
                 if z.get("id") == wanted or str(z.get("slug") or "").lower() == wanted.lower():
                     return z
-        raise CrewUsageError(f"Unknown zone {S.clip_item(wanted, 60)!r}. crew_status(verbose=True) lists the zones.")
+        raise CrewUsageError(
+            f"Unknown zone {S.clip_item(wanted, 60)!r}. crew_status(verbose=True) lists the zones. "
+            "For files pass paths=[...]; for something outside the repository (a deploy, a server, an artifact) "
+            'claim a named resource, kind:name, e.g. zone="deploy:production".'
+        )
 
     def _zone_label(self, http: CrewHttp, seat: Seat, zone_id: Any) -> str | None:
         if not zone_id:
@@ -2290,7 +2330,10 @@ class CrewBridge:
                 if label == f"#{n}" and data is not None and path:
                     data.append(f"path #{n}: {agent_text(path)}")
                 if hit.get("error"):
-                    notes.append(f"{label}: not a repo-relative path (pass paths relative to the repository root)")
+                    notes.append(
+                        f"{label}: not a repo-relative path. Inside the repository, pass it relative to the repository "
+                        'root; outside it, claim a named resource instead (kind:name), e.g. zone="artifact:<name>"'
+                    )
                 elif hit.get("crew_policy"):
                     notes.append(f"{label}: crew policy file, never claimable by agents; ask a human")
                 elif hit.get("ignored"):

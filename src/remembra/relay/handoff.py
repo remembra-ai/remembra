@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from remembra.crew.gatecore import SAFE_CLAIM_PATH_RE
+from remembra.crew.schemas import RESOURCE_PATTERN
 from remembra.relay.identity import repository_key
 from remembra.relay.testruns import executing_invocations, resolve_runs, runner_invocations
 from remembra.security.secrets import redact_secrets
@@ -1753,7 +1754,7 @@ _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
 _CALLSIGN_RE = re.compile(r"[a-z][a-z0-9-]{0,31}-[1-9][0-9]{0,3}")
 _TASK_REF_RE = re.compile(r"T-[1-9][0-9]{0,6}")
 _WORD_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")
-_RESOURCE_RE = re.compile(r"(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}")
+_RESOURCE_RE = re.compile(RESOURCE_PATTERN)  # the claim contract's own pattern: every valid resource is named
 _BATON_REF_RE = re.compile(r"refs/remembra/baton/(?:T-[1-9][0-9]{0,6}|cs_[A-Za-z0-9_-]{1,64})/[0-9]{1,9}")
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 

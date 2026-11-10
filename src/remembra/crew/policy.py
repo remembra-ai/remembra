@@ -404,7 +404,7 @@ def validate_zone_body(slug: str, body: Any, path: str, errors: list[str], *, al
     services = _str_list(body.get("services"), f"{path}.services", errors, MAX_SERVICES_PER_ZONE)
     for svc in services:
         if not _RESOURCE_RE.fullmatch(svc):
-            errors.append(f"{path}.services: {svc!r} must look like schema:<db>, deploy:<target> or service:<name>")
+            errors.append(f"{path}.services: {svc!r} must be kind:name, like schema:<db>, deploy:<target> or service:<name>")
     commands = _str_list(body.get("commands"), f"{path}.commands", errors, S.MAX_COMMAND_PATTERNS_PER_ZONE + 1)
     errors.extend(f"{path}.commands: {e}" for e in S.validate_command_patterns(commands))
     mcp_tools = _mcp_rules(body.get("mcp_tools"), f"{path}.mcp_tools", errors)
@@ -521,7 +521,7 @@ def _mcp_rules(raw: Any, path: str, errors: list[str]) -> tuple[tuple[str, str |
             errors.append(f"{path}[{idx}].tool: letters, digits, _ . - and * only")
             continue
         if service is not None and (not isinstance(service, str) or not _RESOURCE_RE.fullmatch(service)):
-            errors.append(f"{path}[{idx}].service: must look like schema:<db> or deploy:<target>")
+            errors.append(f"{path}[{idx}].service: must be kind:name, like schema:<db> or deploy:<target>")
             continue
         out.append((tool, service))
     return tuple(out)

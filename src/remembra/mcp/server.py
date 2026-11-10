@@ -3444,10 +3444,13 @@ async def crew_claim(
     and 6 for all sessions of one agent id. A zone is one area, and files in one folder count as one area,
     so a job in one folder needs one slot; a folder claimed by name is one area of its own.
     A refusal names the limit and who holds what.
+    Work outside the repository (a deploy, a server, a file in another checkout) is claimed as a
+    named resource: zone="deploy:production", zone="artifact:qa-report".
 
     Args:
         action: claim | release | adopt | handover | accept | decline.
-        zone: Zone slug (e.g. "pos") or a resource like "schema:main".
+        zone: Zone slug (e.g. "pos") or a resource kind:name (lowercase kind, then letters, digits
+            and . _ / -), e.g. "schema:main", "deploy:production", "artifact:qa-report".
         paths: Repo-relative paths. In a declared zone the path's whole zone is claimed; in a temporary
             zone (auto-derived from a folder) and outside every zone, each file is claimed by itself.
         mode: exclusive (default) | shared | watch.

@@ -690,7 +690,10 @@ def bypass_scope_matches(scope: str, surface: str, zone: str | None = None) -> b
 
 
 CRITERION_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}"
-RESOURCE_PATTERN: Final = r"(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}"
+# A named resource ``kind:name``: what a claim covers when it is not files of the repository (a
+# schema, a deploy target, a server, an artifact in another checkout). The kind is free (schema,
+# deploy, service, supabase, mcp, artifact, ops, qa, …); the longest value is 80 chars, the RESOURCE cap.
+RESOURCE_PATTERN: Final = r"[a-z][a-z0-9-]{1,14}:[A-Za-z0-9._/-]{1,64}"
 # Repo-relative POSIX path: what leaves the host (§11 redaction). No leading '/', '~', '..' segment or backslash.
 PATH_REL_PATTERN: Final = r"(?!/)(?!~)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f\\]{1,1024}"
 
@@ -703,6 +706,10 @@ AGENT_ID = _s(64, pattern=AGENT_ID_PATTERN)
 BATON_REF = _s(128, pattern=BATON_REF_PATTERN)
 RESOURCE = _s(80, pattern=RESOURCE_PATTERN)
 GLOB = _s(256)
+
+
+def is_resource(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(RESOURCE_PATTERN, value) is not None
 
 
 def is_path_rel(value: Any) -> bool:

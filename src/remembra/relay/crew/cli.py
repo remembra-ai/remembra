@@ -916,8 +916,20 @@ def _own_claim(snap: Mapping[str, Any], session_id: str, target: str) -> dict[st
     return min(hits, key=lambda c: _CLAIM_PICK_ORDER.get(str(c.get("state")), 3), default=None)
 
 
+_CLASSIC_RESOURCE_KINDS: Final = ("schema", "deploy", "service", "supabase", "mcp")
+
+
+def _is_file_here(target: str) -> bool:
+    """A file or directory of that name exists (a path that merely looks like ``kind:name``)."""
+    try:
+        return Path(target).exists()
+    except OSError:
+        return False
+
+
 def _claim_target(snap: Mapping[str, Any], target: str) -> dict[str, Any]:
-    if ":" in target and target.split(":", 1)[0] in ("schema", "deploy", "service", "supabase", "mcp"):
+    """What ``claim <target>`` names: a ``kind:name`` resource, a zone slug, else a path glob."""
+    if S.is_resource(target) and (target.split(":", 1)[0] in _CLASSIC_RESOURCE_KINDS or not _is_file_here(target)):
         return {"resource": target}
     zone = _zone_by_slug(snap, target)
     if zone is not None:
