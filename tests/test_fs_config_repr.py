@@ -18,6 +18,7 @@ from remembra.auth.keys import APIKey
 from remembra.cloud.paddle_config import PaddleConfig, PaddleEnvironment, PaddleSettings
 from remembra.cloud.plans import PlanTier
 from remembra.cloud.provisioning import ProvisionResult
+from remembra.connector.store import TokenPair
 from remembra.crew.hosts import RegisteredHost
 from remembra.extraction.extractor import ExtractionConfig
 from remembra.mcp.crew import Seat
@@ -80,7 +81,11 @@ def _seat() -> Seat:
     )
 
 
-BUILDERS = [_relay, _target, _bridge, _provision, _host, _extraction, _api_key, _seat]
+def _token_pair() -> TokenPair:
+    return TokenPair(access_token=SECRET, refresh_token=OTHER, expires_in=3600, scopes=["memory:read"])
+
+
+BUILDERS = [_relay, _target, _bridge, _provision, _host, _extraction, _api_key, _seat, _token_pair]
 
 
 @pytest.mark.parametrize("build", BUILDERS, ids=lambda b: b.__name__.lstrip("_"))
@@ -132,3 +137,46 @@ def test_no_secret_in_a_traceback_with_locals() -> None:
         raise RuntimeError(f"could not reach the server with {config}")
     except RuntimeError as e:
         assert SECRET not in str(e)
+
+
+def test_token_pair_repr_leaves_both_tokens_out_and_the_response_keeps_them() -> None:
+    pair = _token_pair()
+    text = f"{pair!r} {pair}"
+    assert SECRET not in text and OTHER not in text
+    assert "expires_in=3600" in text and "memory:read" in text
+    # The OAuth token response, which is where the tokens are meant to go, is unchanged.
+    body = pair.response()
+    assert (body["access_token"], body["refresh_token"], body["token_type"]) == (SECRET, OTHER, "Bearer")
+    assert pair == _token_pair() and TokenPair(SECRET, OTHER, 3600, ["memory:read"]) == pair  # positional, as before
+
+
+def test_no_token_or_key_field_of_a_dataclass_is_left_in_a_repr() -> None:
+    """Every dataclass field under src/remembra named like a credential is ``repr=False``, bar the known ones."""
+    import ast
+
+    known = {
+        ("crew/sessions.py", "JoinResult", "session_token"),  # frozen path: recorded as deferred
+        ("cloud/paddle_config.py", "PaddleSettings", "client_token"),  # Paddle's public client-side token
+    }
+    root = Path(__file__).resolve().parents[1] / "src" / "remembra"
+    secretish = ("api_key", "token", "secret", "password")
+    exposed = set()
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any("dataclass" in ast.unparse(d) for d in node.decorator_list):
+                continue
+            for item in node.body:
+                if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)):
+                    continue
+                name = item.target.id
+                if not any(name == s or name.endswith(f"_{s}") for s in secretish):
+                    continue
+                if "str" not in ast.unparse(item.annotation):
+                    continue  # a count or a flag about tokens, not a credential
+                if item.value is not None and "repr=False" in ast.unparse(item.value):
+                    continue
+                exposed.add((path.relative_to(root).as_posix(), node.name, name))
+    assert exposed == known

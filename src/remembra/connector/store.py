@@ -96,8 +96,8 @@ class Grant:
 
 @dataclass(frozen=True)
 class TokenPair:
-    access_token: str
-    refresh_token: str
+    access_token: str = field(repr=False)  # bearer credentials: never in a repr, a traceback or a log line
+    refresh_token: str = field(repr=False)
     expires_in: int
     scopes: list[str]
 
