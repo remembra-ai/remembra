@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -44,6 +44,11 @@ STATUS_VALUE_FIELD = "status_value"
 MAX_STATUS_KEY_LEN = 128
 INBOX_PREVIEW_CHARS = 200
 INBOX_ACCEPTED_SHOWN = 5  # accepted (taken on, not finished) messages listed in a brief
+# A message with no project is "here" in every project's brief. That is right for a new one; one an agent
+# sent and nobody answered stays in front of every session of every project for good. After this many days
+# the brief counts it in one line instead of listing it (get_inbox still returns it; nothing is deleted).
+# A message from the owner (human) or from Remembra (system) is never aged out.
+INBOX_UNTAGGED_FRESH_DAYS = 3
 # The brief's "Recent" block: at most this many of the project's latest handoffs and checkpoints.
 MAX_RECENT_IN_BRIEF = 5
 # Handoffs the brief looks through (newest first) for the last one that recorded any work.
@@ -588,15 +593,21 @@ class AgentSessionService:
     ) -> dict[str, Any]:
         """The agent's unread messages for the brief. With ``current_project`` (and no project restriction) it
         lists that project's messages and untagged ones, and counts the rest as ``other_projects_unread``: a
-        message tagged with another project belongs to that project's sessions.
+        message tagged with another project belongs to that project's sessions. An untagged message from an
+        agent is listed only while it is fresh (:data:`INBOX_UNTAGGED_FRESH_DAYS`); older ones are counted as
+        ``stale_untagged_unread`` and not listed, so an abandoned one is not "unread here" in every project.
 
         Messages the agent accepted (taken on, not finished) are listed apart, under ``accepted_count`` and
-        ``accepted_items``, with the same project rule: a new session of the agent still sees what it owes."""
-        now_iso = datetime.now(UTC).isoformat()
+        ``accepted_items``, with the same project rule: a new session of the agent still sees what it owes.
+        An accepted message is never aged out: the agent took it on."""
+        now = datetime.now(UTC)
+        now_iso = now.isoformat()
         try:
             columns = await self._inbox_columns()
             project_sql, project_args = _inbox_project_filter(project_ids, "project_id" in columns)
+            owed_sql, owed_args = project_sql, project_args  # accepted messages: the project rule, no ageing
             other_count = 0
+            stale_count = 0
             if current_project and project_ids is None and "project_id" in columns:
                 cursor = await self.db.conn.execute(
                     """
@@ -608,7 +619,29 @@ class AgentSessionService:
                 )
                 other_row = await cursor.fetchone()
                 other_count = int(other_row[0]) if other_row else 0
-                project_sql, project_args = " AND (project_id = ? OR project_id IS NULL)", [current_project]
+                fresh_since = (now - timedelta(days=INBOX_UNTAGGED_FRESH_DAYS)).isoformat()
+                # Aged out: no project at all (neither the column nor, on a row from before the column,
+                # its metadata), older than the window, and sent by an agent (a table from before sender
+                # provenance holds agent messages only).
+                stale_sql = (
+                    "project_id IS NULL AND COALESCE(julianday(created_at), 0) <= julianday(?)"
+                    " AND (metadata IS NULL OR NOT json_valid(metadata) OR json_extract(metadata, '$.project_id') IS NULL)"
+                )
+                if "sender_kind" in columns:
+                    stale_sql += " AND COALESCE(sender_kind, 'agent') NOT IN ('human', 'system')"
+                cursor = await self.db.conn.execute(
+                    f"""
+                    SELECT COUNT(*) FROM agent_inbox
+                    WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
+                      AND (expires_at IS NULL OR expires_at > ?) AND {stale_sql}
+                    """,  # noqa: S608 - fixed fragments; values are bound
+                    (user_id, agent_id, now_iso, fresh_since),
+                )
+                stale_row = await cursor.fetchone()
+                stale_count = int(stale_row[0]) if stale_row else 0
+                owed_sql, owed_args = " AND (project_id = ? OR project_id IS NULL)", [current_project]
+                project_sql = f" AND (project_id = ? OR (project_id IS NULL AND NOT ({stale_sql})))"
+                project_args = [current_project, fresh_since]
             cursor = await self.db.conn.execute(
                 f"""
                 SELECT COUNT(*) FROM agent_inbox
@@ -621,30 +654,35 @@ class AgentSessionService:
             trust_col = "trust_score" if "trust_score" in columns else "NULL"
             # sender provenance (main v5); an older table has no such columns
             provenance = ", sender_kind, sender_verified" if {"sender_kind", "sender_verified"} <= columns else ""
-            select_sql = f"""
+
+            def select_sql(scope_sql: str) -> str:
+                return f"""
                 SELECT inbox_id, from_agent, subject, body, created_at, metadata, {trust_col} AS trust_score{provenance}
                 FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = ?
-                  AND (expires_at IS NULL OR expires_at > ?){project_sql}
+                  AND (expires_at IS NULL OR expires_at > ?){scope_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
                 LIMIT ?
                 """  # noqa: S608 - placeholders only; values are bound
-            cursor = await self.db.conn.execute(select_sql, (user_id, agent_id, "unread", now_iso, *project_args, limit))
+
+            cursor = await self.db.conn.execute(
+                select_sql(project_sql), (user_id, agent_id, "unread", now_iso, *project_args, limit)
+            )
             rows = await cursor.fetchall()
             cursor = await self.db.conn.execute(
                 f"""
                 SELECT COUNT(*) FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'accepted'
-                  AND (expires_at IS NULL OR expires_at > ?){project_sql}
+                  AND (expires_at IS NULL OR expires_at > ?){owed_sql}
                 """,  # noqa: S608 - placeholders only; values are bound
-                (user_id, agent_id, now_iso, *project_args),
+                (user_id, agent_id, now_iso, *owed_args),
             )
             accepted_row = await cursor.fetchone()
             accepted_count = int(accepted_row[0]) if accepted_row else 0
             accepted_rows: list[Any] = []
             if accepted_count and limit > 0:
                 cursor = await self.db.conn.execute(
-                    select_sql, (user_id, agent_id, "accepted", now_iso, *project_args, min(limit, INBOX_ACCEPTED_SHOWN))
+                    select_sql(owed_sql), (user_id, agent_id, "accepted", now_iso, *owed_args, min(limit, INBOX_ACCEPTED_SHOWN))
                 )
                 accepted_rows = list(await cursor.fetchall())
         except Exception as e:  # agent_inbox table absent (inbox disabled)
@@ -656,6 +694,8 @@ class AgentSessionService:
             "agent_id": agent_id,
             "unread_count": int(count_row[0]) if count_row else 0,
             "other_projects_unread": other_count,
+            "stale_untagged_unread": stale_count,
+            "untagged_fresh_days": INBOX_UNTAGGED_FRESH_DAYS,
             "items": [self._inbox_brief_item(r) for r in rows],
             "accepted_count": accepted_count,
             "accepted_items": [self._inbox_brief_item(r) for r in accepted_rows],

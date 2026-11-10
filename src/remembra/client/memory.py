@@ -1224,6 +1224,8 @@ class Memory:
         agent_id: str,
         status: str = "unread",
         limit: int = 20,
+        project_id: str | None = None,
+        scope: str | None = None,
     ) -> builtins.list[dict[str, Any]]:
         """List inbox rows addressed to `agent_id`.
 
@@ -1233,15 +1235,24 @@ class Memory:
                 "accepted" (taken on, not finished) or "all". A server older than "open" and
                 "accepted" answers those two with a 422.
             limit: Max rows to return (1-200).
+            project_id: Only rows tagged with this project (rows with no
+                project are left out). Default: every project.
+            scope: "project" (only rows tagged with some project) or
+                "unscoped" (only rows with none). Default: all.
 
         Returns:
-            List of inbox row dicts, newest first.
+            List of inbox row dicts, newest first; each carries its
+            ``project_id`` (None for a row with no project).
         """
         params: dict[str, Any] = {
             "agent_id": agent_id,
             "status": status,
             "limit": limit,
         }
+        if project_id and project_id.strip():
+            params["project_id"] = project_id.strip()
+        if scope:
+            params["scope"] = scope
         result = self._request("GET", "/api/v1/inbox", params=params)
         return result if isinstance(result, list) else []
 

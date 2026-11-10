@@ -1411,6 +1411,11 @@ _neutralize = neutralize  # kept for callers of the old private name
 _INBOX_REF_RE = re.compile(r"inbox_[0-9a-f]{8,64}")
 
 
+def _whole_count(value: Any) -> int:
+    """A count from a brief's JSON: a positive int, else 0 (a field this build cannot read is not rendered)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 def _inbox_line(item: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -> str:
     sent = relative_time(item.get("created_at"), now)
     verdict = _verdict_for_item([item.get("from_agent"), item.get("subject"), item.get("body_preview")], item, allowed)
@@ -1622,10 +1627,23 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
 
     inbox = brief.get("inbox")
     elsewhere = int((inbox or {}).get("other_projects_unread") or 0)
-    if inbox and inbox.get("available", True) and (inbox.get("unread_count") or elsewhere):
+    stale = _whole_count((inbox or {}).get("stale_untagged_unread"))
+    if inbox and inbox.get("available", True) and (inbox.get("unread_count") or elsewhere or stale):
         more = f"; {elsewhere} more in other projects" if elsewhere else ""
-        data.append(f"Inbox: {inbox.get('unread_count') or 0} unread here{more} (get_inbox for bodies, ack_inbox when done)")
+        data.append(
+            f"Inbox: {inbox.get('unread_count') or 0} unread here{more}"
+            " (get_inbox for bodies; ack_inbox when done, or result=rejected to dismiss one without acting on it)"
+        )
         data.extend(_inbox_line(item, now, allowed) for item in (inbox.get("items") or [])[:5])
+        if stale:
+            # Counted, not listed: an untagged message nobody answered is not "unread here" in every project.
+            days = _whole_count(inbox.get("untagged_fresh_days"))
+            sent = f" (sent more than {days} days ago)" if days else ""
+            one = stale == 1
+            data.append(
+                f"{stale} older unread message{'' if one else 's'} with no project{sent} {'is' if one else 'are'} not listed:"
+                f" get_inbox shows {'it' if one else 'them'}; ack_inbox with result=rejected dismisses one."
+            )
     accepted = (inbox or {}).get("accepted_count")
     if inbox and inbox.get("available", True) and isinstance(accepted, int) and not isinstance(accepted, bool) and accepted > 0:
         data.append(
