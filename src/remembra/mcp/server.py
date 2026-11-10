@@ -47,6 +47,7 @@ import weakref
 from typing import Annotated, Any, Literal, cast
 
 import anyio
+import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
@@ -56,6 +57,7 @@ from remembra.client.memory import Memory, MemoryError
 from remembra.client.project import aliases_from_env, normalize_project_id
 from remembra.crew import schemas as crew_schemas
 from remembra.crew.schemas import MCP_INSTRUCTIONS as CREW_MCP_INSTRUCTIONS
+from remembra.mcp.crew import GATEWAY_STATUSES as CREW_GATEWAY_STATUSES
 from remembra.mcp.crew import (
     MAX_WAIT_S,
     CallerInfo,
@@ -67,7 +69,9 @@ from remembra.mcp.crew import (
     hook_adapter_of,
     local_crew,
 )
+from remembra.mcp.crew import _clean_message as _crew_clean_message
 from remembra.mcp.crew import error_text as crew_error_text
+from remembra.mcp.crew import transport_error as _crew_transport_error
 from remembra.relay.declared_facts import normalize_close_facts, normalize_crew_evidence
 from remembra.relay.identity import canonical_git_remote
 from remembra.security.error_sanitizer import sanitize_error_message as _sanitize_error_message
@@ -2753,7 +2757,28 @@ def _crew_error(e: Exception) -> str:
         return f"CREW: {e}"
     if isinstance(e, CrewApiError):
         return crew_error_text(e, "crew")
+    api_error = _as_crew_api_error(e)
+    if api_error is not None:
+        text = crew_error_text(api_error, "crew")
+        return f"{text} {NO_SETTINGS_HINT}" if NO_SETTINGS and _is_connect_error(e) else text
     return _error(e)
+
+
+def _as_crew_api_error(e: Exception) -> CrewApiError | None:
+    """An outage met by the SDK client inside a crew tool (the project lookup) as the crew tools' own error.
+
+    Crew tools answer as text: a gateway answer or a transport failure of ``Memory`` reads the same as
+    one of ``CrewHttp``, instead of the memory tools' JSON envelope. Other failures of the SDK client
+    (a missing or rejected key, a refused project) keep that envelope.
+    """
+    if isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES:
+        message = str(e)
+        if message.startswith("Request failed: "):
+            message = message[len("Request failed: ") :]
+        return CrewApiError(int(e.status_code), f"http_{int(e.status_code)}", _crew_clean_message(message.strip()))
+    if isinstance(e, httpx.HTTPError):
+        return _crew_transport_error(e)
+    return None
 
 
 async def _run_crew(

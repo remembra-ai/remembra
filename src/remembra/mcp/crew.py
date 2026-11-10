@@ -157,12 +157,16 @@ def _held_note(wait_s: int, cap: int | None = None) -> str:
 class CrewApiError(Exception):
     """A crew REST call failed. ``status`` 0 means the server was not reached."""
 
-    def __init__(self, status: int, error: str, message: str, body: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self, status: int, error: str, message: str, body: Mapping[str, Any] | None = None, *, not_sent: bool = False
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.error = error
         self.message = message
         self.body: dict[str, Any] = dict(body or {})
+        # the request never left this machine (connection refused, no route, connect timeout)
+        self.not_sent = not_sent
 
 
 def no_answer(e: CrewApiError) -> bool:
@@ -200,6 +204,20 @@ def _error_from(res: httpx.Response) -> CrewApiError:
         return CrewApiError(res.status_code, "validation", _clean_message("; ".join(parts) or "invalid request"))
     return CrewApiError(
         res.status_code, "route_missing" if res.status_code == 404 else f"http_{res.status_code}", _clean_message(detail)
+    )
+
+
+def transport_error(e: httpx.HTTPError) -> CrewApiError:
+    """The :class:`CrewApiError` (status 0) for a request that got no HTTP answer."""
+    if isinstance(e, httpx.TimeoutException):
+        return CrewApiError(
+            0, "timeout", "The Remembra server did not answer in time.", not_sent=isinstance(e, httpx.ConnectTimeout)
+        )
+    return CrewApiError(
+        0,
+        "unreachable",
+        _clean_message(f"The Remembra server is unreachable: {e}"),
+        not_sent=isinstance(e, httpx.ConnectError),
     )
 
 
@@ -371,10 +389,10 @@ class CrewHttp:
                 headers=headers,
                 timeout=timeout if timeout is not None else self.client.timeout,
             )
-        except httpx.TimeoutException:
-            raise CrewApiError(0, "timeout", "The Remembra server did not answer in time.") from None
+        except httpx.TimeoutException as e:
+            raise transport_error(e) from None
         except httpx.HTTPError as e:
-            raise CrewApiError(0, "unreachable", _clean_message(f"The Remembra server is unreachable: {e}")) from None
+            raise transport_error(e) from None
         if res.status_code == 304:
             return 304, None, res.headers.get("ETag")
         if res.status_code >= 400:
@@ -731,11 +749,39 @@ def rate_limit_text(e: CrewApiError) -> str:
     return said
 
 
+# Answers of a proxy or gateway in front of the server (or of the server while it cannot serve): an outage.
+GATEWAY_STATUSES: Final = frozenset({502, 503, 504, 520, 521, 522, 523, 524})
+# Of those, the ones sent when no backend took the request, so nothing was carried out.
+_NOT_REACHED_STATUSES: Final = frozenset({503, 521, 522, 523})
+NOT_CARRIED_OUT: Final = "This call was not carried out: repeat it once the server answers."
+OUTCOME_UNKNOWN: Final = "Whether this call was carried out is not known: check (crew_status) before repeating it."
+
+
+def is_outage(e: CrewApiError) -> bool:
+    """No answer at all, or a gateway status that is not the server's own "crew mode is off" (``crew_unavailable``)."""
+    if e.error in ("route_missing", "crew_unavailable"):
+        return False
+    return e.status == 0 or e.status in GATEWAY_STATUSES
+
+
+def outage_outcome(e: CrewApiError) -> str:
+    """What an outage means for the call that hit it: certainly not carried out, or unknown."""
+    return NOT_CARRIED_OUT if e.not_sent or e.status in _NOT_REACHED_STATUSES else OUTCOME_UNKNOWN
+
+
 def error_text(e: CrewApiError, what: str) -> str:
-    if e.status == 0:
-        return f"CREW UNAVAILABLE: {e.message}"
-    if e.status == 503 or e.error in ("route_missing", "crew_unavailable"):
+    if e.error in ("route_missing", "crew_unavailable"):
         return "CREW UNAVAILABLE: Crew mode is not enabled on this Remembra server."
+    if e.status == 0:
+        return f"CREW UNAVAILABLE: {e.message or 'The Remembra server could not be reached.'} {outage_outcome(e)}"
+    if e.status in GATEWAY_STATUSES:
+        # the error code only when it says something ("db_locked"), not the status again ("http_503", "503")
+        code = "" if e.error.isdigit() or e.error.startswith("http_") else S.clip_item(e.error, 64)
+        said = (e.message or code).strip().rstrip(".")
+        return (
+            f"CREW UNAVAILABLE: The Remembra server answered HTTP {e.status}{f': {said}' if said else ''}. "
+            f"That is an outage or a restart, not a crew setting. {outage_outcome(e)}"
+        )
     if e.status == 429:
         said = rate_limit_text(e)
         return f"RATE LIMITED ({what}): {said}" if said else f"RATE LIMITED ({what})."
