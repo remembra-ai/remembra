@@ -53,7 +53,7 @@ from mcp.types import ToolAnnotations
 from pydantic import ConfigDict, WithJsonSchema, create_model, model_validator
 
 from remembra import __version__
-from remembra.client.memory import Memory, MemoryError
+from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
 from remembra.client.project import aliases_from_env, normalize_project_id
 from remembra.crew import schemas as crew_schemas
 from remembra.crew.schemas import MCP_INSTRUCTIONS as CREW_MCP_INSTRUCTIONS
@@ -197,8 +197,29 @@ def _caller_agent_id() -> str | None:
     return agent.strip() or None if agent else None
 
 
+# Seconds this server waits for the API. A store runs extraction, embedding and consolidation inside the
+# server's own budget (store_time_budget_seconds, 45 s by default), so it gets longer than other calls:
+# a store that finishes inside that budget is a result, not a client-side timeout.
+DEFAULT_TIMEOUT_S = 30.0
+DEFAULT_STORE_TIMEOUT_S = 50.0
+_MAX_TIMEOUT_S = 600.0
+
+
+def _timeout_from_env(name: str, default: float) -> float:
+    """``name`` as seconds (0 < value <= 600); anything else is ignored."""
+    raw = (os.environ.get(name) or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if 0 < value <= _MAX_TIMEOUT_S else default  # also false for nan
+
+
 def _new_client(api_key: str | None, project: str, agent_id: str | None) -> Memory:
+    timeout = _timeout_from_env("REMEMBRA_TIMEOUT", DEFAULT_TIMEOUT_S)
     return Memory(
+        timeout=timeout,
+        store_timeout=max(timeout, _timeout_from_env("REMEMBRA_STORE_TIMEOUT", DEFAULT_STORE_TIMEOUT_S)),
         base_url=REMEMBRA_URL,
         api_key=api_key,
         user_id=REMEMBRA_USER_ID,
@@ -276,6 +297,9 @@ def _dump_data(payload: dict[str, Any]) -> str:
 
 
 def _error(e: Exception) -> str:
+    if isinstance(e, MemoryTimeoutError):
+        # no HTTP answer, so no code; "timed_out" tells it from an error the server reported
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": None, "timed_out": True})
     if isinstance(e, MemoryError):
         return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     return json.dumps({"status": "error", "error": sanitize_error_message(e)})
@@ -772,12 +796,48 @@ def health_check() -> str:
         )
         health = client.health()
         warnings = _config_warnings(client.agent_id, client.project, health.get("version"))
-        return _dump({"status": "ok", "server": client.base_url, **identity, "warnings": warnings, "health": health})
+        out: dict[str, Any] = {"status": "ok", "server": client.base_url, **identity, "warnings": warnings, "health": health}
+        readiness = _readiness(client)
+        if readiness is not None:
+            out["readiness"] = readiness
+            degraded = readiness.get("degraded")
+            if degraded:
+                parts = ", ".join(f"{name} ({why})" if why else name for name, why in degraded.items())
+                warnings.append(
+                    f"The server is up but not fully ready: {parts}. Stores and recalls may fail or run degraded "
+                    "until the operator fixes it."
+                )
+        return _dump(out)
     except Exception as e:
         payload = json.loads(_error(e))
         payload.update({"server": REMEMBRA_URL, **identity})
         payload["warnings"] = _config_warnings(identity["agent_id"], identity["project"], None)
         return _dump(payload)
+
+
+def _readiness(client: Memory) -> dict[str, Any] | None:
+    """``/health/ready`` in short: ``{"status": ...}`` plus, when degraded, ``{component: reason}``.
+
+    ``/health`` is liveness only and stays "ok" while, say, the embedding provider is out of quota.
+    None when the server has no such route (before 0.16) or does not answer it: the health check
+    itself never fails on this.
+    """
+    try:
+        ready = client.readiness()
+    except Exception:
+        return None
+    if not isinstance(ready, dict) or not ready.get("status"):
+        return None
+    out: dict[str, Any] = {"status": str(ready.get("status"))}
+    found = ready.get("components")
+    components: dict[str, Any] = found if isinstance(found, dict) else {}
+    names = [str(n) for n in ready.get("degraded_components") or [] if isinstance(n, str)]
+    if names:
+        out["degraded"] = {
+            name: str(components[name].get("reason") or "") if isinstance(components.get(name), dict) else ""
+            for name in names[:10]
+        }
+    return out
 
 
 def _config_warnings(agent_id: str | None, project: str | None, server_version: str | None) -> list[str]:
@@ -2771,6 +2831,8 @@ def _as_crew_api_error(e: Exception) -> CrewApiError | None:
     one of ``CrewHttp``, instead of the memory tools' JSON envelope. Other failures of the SDK client
     (a missing or rejected key, a refused project) keep that envelope.
     """
+    if isinstance(e, MemoryTimeoutError):
+        return CrewApiError(0, "timeout", "The Remembra server did not answer in time.")
     if isinstance(e, MemoryError) and e.status_code in CREW_GATEWAY_STATUSES:
         message = str(e)
         if message.startswith("Request failed: "):

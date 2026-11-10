@@ -1,6 +1,6 @@
 """Remembra Python SDK - Universal memory layer for AI applications."""
 
-from remembra.client.memory import Memory, MemoryError
+from remembra.client.memory import Memory, MemoryError, MemoryTimeoutError
 from remembra.client.shadow_ttl import ShadowTTLCache, parse_ttl_string
 from remembra.client.temporal_parser import (
     TemporalDetection,
@@ -21,6 +21,7 @@ __all__ = [
     # Core client
     "Memory",
     "MemoryError",
+    "MemoryTimeoutError",
     # Result types
     "RecallResult",
     "StoreResult",

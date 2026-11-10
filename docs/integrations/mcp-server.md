@@ -659,6 +659,8 @@ that does it says `RESUMED`: `crew_status` on its YOU line, a crew write on the 
 | `REMEMBRA_MCP_MAX_WAIT_S` | `45` | Longest time one `crew_claim` / `crew_say` call waits on the server (`wait_s`), in seconds; read when the server starts |
 | `REMEMBRA_MCP_WAIT_MAX_S` | - | The same limit, read on every call; when set (1 to 300) it is the one used |
 | `REMEMBRA_MCP_SEAT_STORE` | `1` | `0`: do not keep crew seats in `~/.remembra/mcp/seats/` (a restarted stdio server then joins as a new seat) |
+| `REMEMBRA_TIMEOUT` | `30` | Seconds to wait for the server on one call |
+| `REMEMBRA_STORE_TIMEOUT` | `50` | Seconds to wait for a store, which runs extraction and embedding on the server (never less than `REMEMBRA_TIMEOUT`). A call that gets no answer in time returns `"timed_out": true`: the write may still have landed, so recall or list before storing again |
 | `REMEMBRA_KNOWN_AGENTS` | `claude-code,claude-desktop,codex,gemini,clawdbot` | Valid agent ids. Used for typo warnings |
 | `REMEMBRA_MCP_TRANSPORT` | `stdio` | Transport: `stdio`, `sse`, or `streamable-http` |
 

@@ -146,6 +146,23 @@ class MemoryError(Exception):
         self.status_code = status_code
 
 
+class MemoryTimeoutError(MemoryError):
+    """The server did not answer within the client's timeout (``status_code`` is None: there was no answer).
+
+    The request was sent. For a write that means the outcome is unknown: the server may still have
+    carried it out, so look (recall, list) before sending it again.
+    """
+
+    def __init__(self, method: str, timeout: float | None) -> None:
+        waited = f"within {timeout:g}s" if timeout else "in time"
+        message = f"The Remembra server did not answer {waited}."
+        self.may_have_been_carried_out = method.upper() not in ("GET", "HEAD", "OPTIONS")
+        if self.may_have_been_carried_out:
+            message += " The request may still have been carried out: check before you repeat it."
+        super().__init__(message, status_code=None)
+        self.timeout = timeout
+
+
 class Memory:
     """
     Remembra Memory Client.
@@ -203,6 +220,8 @@ class Memory:
         provenance: bool = True,
         provenance_source: str = "sdk",
         project_aliases: Mapping[str, str] | None = None,
+        # How long a store may take (it runs extraction, embedding and consolidation). Default: ``timeout``.
+        store_timeout: float | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -210,6 +229,7 @@ class Memory:
         self._project_aliases = dict(project_aliases or {})
         self.project = normalize_project_id(project, self._project_aliases)
         self.timeout = timeout
+        self.store_timeout = store_timeout if store_timeout else timeout
         self.agent_id = (agent_id or "").strip() or None
         self.session_id = session_id or uuid.uuid4().hex
         self._provenance_enabled = provenance
@@ -252,8 +272,14 @@ class Memory:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Make an HTTP request to the Remembra server."""
+        """Make an HTTP request to the Remembra server.
+
+        ``timeout`` overrides the client's timeout for this request. A request that was sent and got
+        no answer in time raises :class:`MemoryTimeoutError`; one that never connected raises the
+        ``httpx`` connect error unchanged (nothing was sent).
+        """
         url = f"{self.base_url}{path}"
 
         kwargs: dict[str, Any] = {"method": method, "url": url, "json": json, "params": params}
@@ -261,7 +287,13 @@ class Memory:
         if agent or headers:
             # Declared identity; an agent-scoped API key overrides it server-side.
             kwargs["headers"] = {**({"X-Remembra-Agent-Id": agent} if agent else {}), **(headers or {})}
-        response = self._client.request(**kwargs)
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        try:
+            response = self._client.request(**kwargs)
+        except (httpx.ReadTimeout, httpx.WriteTimeout) as e:
+            waited = timeout if timeout is not None else getattr(self, "timeout", None)
+            raise MemoryTimeoutError(method, waited) from e
 
         if response.status_code >= 400:
             try:
@@ -368,7 +400,10 @@ class Memory:
         if memory_type:
             payload["memory_type"] = memory_type
 
-        data = self._request("POST", "/api/v1/memories", json=payload)
+        # only passed when it differs, so a subclass that overrides _request with the older signature keeps working
+        store_timeout = getattr(self, "store_timeout", None)
+        longer: dict[str, Any] = {"timeout": store_timeout} if store_timeout and store_timeout != self.timeout else {}
+        data = self._request("POST", "/api/v1/memories", json=payload, **longer)
 
         memory_id = data["id"]
 
@@ -682,6 +717,16 @@ class Memory:
             Health status including version and component states
         """
         return self._request("GET", "/health")
+
+    def readiness(self) -> dict[str, Any]:
+        """
+        Can the server store and recall right now?
+
+        ``/health`` only says the process is up; this is ``/health/ready``: ``status`` ("ok" or
+        "degraded"), ``degraded_components`` and per-component detail (for example an embedding
+        provider that is out of quota). Servers before 0.16 have no such route (404).
+        """
+        return self._request("GET", "/health/ready")
 
     def list(
         self,
