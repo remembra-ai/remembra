@@ -313,7 +313,9 @@ def test_missing_gate_is_reported_once(crew_home: FakeHome) -> None:
     f = only(report, "CREW_GATE_MISSING")
     assert (f.severity, f.agent, f.inferred) == ("warn", None, False)
     assert any("crew-gate.py" in e for e in f.evidence)
-    assert f.fix is not None and f.fix.command == "remembra-crew connect --apply --include-unverified"
+    # The agents that hold crew hooks are named: without --agent crew connect wires every agent it detects.
+    assert f.fix is not None
+    assert f.fix.command == "remembra-crew connect --apply --agent claude-code --agent codex --include-unverified"
     assert f.fix.runs_where == "user_terminal"
     assert report.exit_code == 1
 
@@ -503,8 +505,10 @@ def test_new_findings_are_documented() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        "remembra-crew connect --apply",
+        "remembra-crew connect --apply --agent claude-code",
+        "remembra-crew connect --apply --agent claude-code --agent codex --include-unverified",
         "remembra-crew connect --apply --agent codex --include-unverified",
+        "remembra-crew connect --apply --agent claude-code --scope project --repo .",
         "remembra-crew doctor",
     ],
 )
@@ -515,6 +519,8 @@ def test_crew_commands_are_templates(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "remembra-crew connect --apply",  # no --agent: it would wire every agent it detects
+        "remembra-crew connect --apply --include-unverified",
         "remembra-crew connect --apply --yes",
         "remembra-crew connect --uninstall --apply",
         "remembra-crew connect --apply --agent codex; rm -rf ~",

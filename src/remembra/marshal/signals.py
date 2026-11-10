@@ -268,6 +268,15 @@ class AgentSignals:
     crew_gate: bool = True  # ~/.remembra/crew/bin/crew-gate.py exists (without it every gate hook does nothing)
     crew_missing_binary: str | None = None  # the crew start / end hooks call this, and it no longer exists
     crew_backup: str | None = None  # a *.bak-crew-* next to the config: remembra-crew connect wrote here once
+    # ``project``: the crew hooks are in the repository the doctor ran in (remembra-crew connect --scope project),
+    # not in the global file. ``crew_config_path`` is the file that holds them, when it is not ``config_path``.
+    crew_scope: str = "global"
+    crew_config_path: str | None = None
+
+    @property
+    def crew_file(self) -> str:
+        """The file this agent's crew hooks are in, as shown on a slip."""
+        return self.crew_config_path or self.config_path
 
     @property
     def crew_mode(self) -> bool:
@@ -505,6 +514,53 @@ def _crew_hooks(data: Any, toml_hooks: bool, name: str) -> tuple[int, dict[str, 
     return count, events, (max(prefixes, key=lambda p: prefixes[p]) if prefixes else None)
 
 
+def _repo_top(cwd: Path) -> Path | None:
+    """The top folder of the repository (or worktree) containing ``cwd``, from the ``.git`` above it (no git process)."""
+    try:
+        here = cwd.resolve()
+    except OSError:
+        return None
+    for folder in (here, *here.parents):
+        try:
+            if (folder / ".git").exists():
+                return folder
+        except OSError:
+            return None
+    return None
+
+
+def _project_crew_hooks(name: str, repo: Path, global_file: Path) -> tuple[Path, int, dict[str, list[str]], str | None] | None:
+    """``name``'s crew hooks in ``repo``'s own config (``remembra-crew connect --scope project``), if it has any.
+
+    Claude Code only: ``<repo>/.claude/settings.json``, or ``settings.local.json`` next to it (where crew connect
+    writes when ``settings.json`` is tracked by git). A file that is missing or not its format holds none, and
+    the global file is never read as a project's (a home directory that is itself a repository).
+    """
+    from remembra.relay.adapters.crew_hooks import crew_specs
+
+    spec = crew_specs().get(name)
+    if spec is None or spec.project_config is None:
+        return None
+    first = spec.project_config(repo)
+    for path in (first, first.with_name("settings.local.json")) if first.suffix == ".json" else (first,):
+        try:
+            if path.resolve() == global_file.resolve():
+                continue
+        except OSError:
+            continue
+        text, _ = _read_text(path)
+        if not text or CREW_HOOK_MARKER not in text:
+            continue
+        try:
+            data = tomllib.loads(text) if path.suffix == ".toml" else json.loads(text)
+        except ValueError:
+            continue
+        count, events, prefix = _crew_hooks(data, path.suffix == ".toml", name)
+        if count:
+            return path, count, events, prefix
+    return None
+
+
 def _prefix(commands: list[str], name: str) -> str | None:
     counts: dict[str, int] = {}
     for command in commands:
@@ -584,6 +640,7 @@ def _agent_signals(
     environ: Mapping[str, str],
     status_agents: Mapping[str, Any],
     key_source: str,
+    repo: Path | None = None,
 ) -> AgentSignals:
     spec = adapter.spec
     path = config_file(adapter, home)
@@ -599,6 +656,13 @@ def _agent_signals(
             crew_count, crew_cli, crew_prefix = _crew_hooks(data, path.suffix == ".toml", name)
         except ValueError:
             readable = False
+    crew_scope, crew_path = "global", None
+    if not crew_count and repo is not None:
+        # No crew hooks in the global file: they may be written for this repository only.
+        in_repo = _project_crew_hooks(name, repo, path)
+        if in_repo is not None:
+            project_file, crew_count, crew_cli, crew_prefix = in_repo
+            crew_scope, crew_path = "project", f"./{project_file.relative_to(repo).as_posix()}"
     expected = tuple(event for _, event in adapter.events())
     core = tuple(e for e in (spec.start_event, spec.end_event) if e)
     commands = [c for cs in events.values() for c in cs]
@@ -644,6 +708,8 @@ def _agent_signals(
         crew_gate=(home / CREW_HOME_REL / "bin" / "crew-gate.py").is_file(),
         crew_missing_binary=clean_text(gone, 120) if (gone := _missing_binary(crew_prefix)) else None,
         crew_backup=_backup(path, "crew"),
+        crew_scope=crew_scope,
+        crew_config_path=crew_path,
     )
 
 
@@ -1129,6 +1195,7 @@ def collect(
         prefer = adapter.spec.config_source
         per_agent_config[name] = load_config(environ=env, home=home, prefer=prefer) if prefer else primary
 
+    repo_top = _repo_top(cwd or Path(os.getcwd()))
     agent_signals = {
         name: _agent_signals(
             name,
@@ -1138,6 +1205,7 @@ def collect(
             env,
             status_agents,
             _source(per_agent_config[name], home),
+            repo_top,
         )
         for name, adapter in REGISTRY.items()
     }

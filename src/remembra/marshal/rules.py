@@ -585,6 +585,16 @@ def _crew_unverified(name: str) -> bool:
 
 def _crew_connect_fix(agent: AgentSignals) -> Fix:
     """The fix for a hook file crew connect manages: it shows its plan and asks at a terminal before writing."""
+    if agent.crew_scope == "project":
+        return Fix(
+            kind="command",
+            text="From this repository, let crew connect rewrite its hooks (it shows its plan and asks; a backup"
+            " of the file is kept):",
+            command=cmd.CREW_CONNECT_PROJECT,
+            runs_where="user_terminal",
+            writes=(agent.crew_file,),
+            backup=True,
+        )
     return Fix(
         kind="command",
         text="Let crew connect rewrite the hooks (it shows its plan and asks; a backup of the file is kept):",
@@ -613,7 +623,7 @@ def _crew_findings(agent: AgentSignals) -> list[Finding]:
                 f"{agent.display}: its crew hooks call {agent.crew_missing_binary}, which no longer exists;"
                 " the start and end hooks fail, so it gets no brief and leaves no handoff.",
                 (  # only the missing path: the rest of a hook command is never shown
-                    f"{agent.config_path}: the remembra-crew hooks call {agent.crew_missing_binary}",
+                    f"{agent.crew_file}: the remembra-crew hooks call {agent.crew_missing_binary}",
                     f"{agent.crew_missing_binary}: no such file",
                 ),
                 fix=_crew_connect_fix(agent),
@@ -623,7 +633,33 @@ def _crew_findings(agent: AgentSignals) -> list[Finding]:
             )
         )
     doubled = agent.duplicated_events
-    if doubled:
+    if doubled and agent.crew_scope == "project":
+        # Global relay hooks and this repository's crew hooks. No command is offered: the global hooks serve
+        # the repositories outside the crew, and which of the two to give up is the owner's call.
+        events = ", ".join(doubled)
+        out.append(
+            Finding(
+                "HOOKS_DUPLICATED",
+                WARN,
+                name,
+                f"{agent.display}: in this repository {events} {'has' if len(doubled) == 1 else 'have'} a relay hook"
+                " and a crew hook, so the brief or the close runs twice here.",
+                (
+                    f"{agent.config_path}: remembra-relay hooks on {events} (every repository)",
+                    f"{agent.crew_file}: remembra-crew hooks on {events} (this repository)",
+                    "remembra-crew start / end run the relay brief and close themselves",
+                ),
+                fix=Fix(
+                    kind="none",
+                    text=f"Your call: the relay hooks in {agent.config_path} still serve every repository outside"
+                    " the crew. To end the double run, connect crew for every repository (remembra-crew connect,"
+                    f" without --scope project) or take the remembra-relay hooks out of {agent.config_path}.",
+                    runs_where="none",
+                ),
+                doc=DOC_SETUP,
+            )
+        )
+    elif doubled:
         events = ", ".join(doubled)
         out.append(
             Finding(
@@ -653,7 +689,7 @@ def _crew_findings(agent: AgentSignals) -> list[Finding]:
                 f"{agent.display}: in crew mode nothing runs the relay's {events} hook for a session outside a crew;"
                 " the brief at the start and the close at the end still run.",
                 (
-                    f"{agent.config_path}: remembra-crew hooks run the brief and close on {', '.join(agent.crew_events)}",
+                    f"{agent.crew_file}: remembra-crew hooks run the brief and close on {', '.join(agent.crew_events)}",
                     f"{agent.config_path}: no relay hook on {', '.join(gaps)}",
                 ),
                 fix=Fix(
@@ -672,7 +708,15 @@ def rule_hooks(sig: Signals) -> list[Finding]:
     crewed = [sig.agents[n] for n in scope(sig) if sig.agents[n].crew_hooks and sig.agents[n].config_readable]
     gate_missing = [a for a in crewed if not a.crew_gate]
     if gate_missing:
-        files = ", ".join(a.config_path for a in gate_missing)
+        files = ", ".join(a.crew_file for a in gate_missing)
+        # Any crew connect run puts the gate back. The command names the agents that already hold crew hooks and
+        # no other: without --agent, crew connect would also wire every agent still in plain relay mode.
+        named = [a for a in gate_missing if a.crew_scope != "project"]
+        if named:
+            gate_command = cmd.crew_connect([a.name for a in named], unverified=any(_crew_unverified(a.name) for a in named))
+        else:
+            named = gate_missing[:1]
+            gate_command = cmd.CREW_CONNECT_PROJECT
         out.append(
             Finding(
                 "CREW_GATE_MISSING",
@@ -683,10 +727,12 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                 ("~/.remembra/crew/bin/crew-gate.py: no such file", f"remembra-crew hooks in {files}"),
                 fix=Fix(
                     kind="command",
-                    text="Let crew connect put the gate back (it shows its plan and asks before it writes):",
-                    command=cmd.crew_connect(unverified=any(_crew_unverified(a.name) for a in gate_missing)),
+                    text="Let crew connect put the gate back and rewrite the crew hooks of "
+                    f"{words.join_names([a.display for a in named])} (it shows its plan and asks; backups are kept):",
+                    command=gate_command,
                     runs_where="user_terminal",
-                    writes=("~/.remembra/crew/bin/crew-gate.py",),
+                    writes=("~/.remembra/crew/bin/crew-gate.py", *(a.crew_file for a in named)),
+                    backup=True,
                 ),
                 then=cmd.doctor(),
                 doc=DOC_SETUP,
@@ -740,7 +786,7 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                     name,
                     f"{agent.display}: its crew hooks are incomplete, so it gets no brief or leaves no handoff.",
                     (
-                        f"{agent.config_path}: {words.plural(agent.crew_hooks, 'remembra-crew hook')},"
+                        f"{agent.crew_file}: {words.plural(agent.crew_hooks, 'remembra-crew hook')},"
                         f" none that runs the brief or the close on {', '.join(uncovered)}",
                     ),
                     fix=_crew_connect_fix(agent),

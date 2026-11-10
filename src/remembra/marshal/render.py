@@ -139,7 +139,9 @@ def hooks_word(agent: AgentSignals) -> str:
     if not agent.config_readable:
         return "config unreadable"
     if agent.crew_mode:  # remembra-crew start / end run the brief and the close
-        return "hooks call a missing command" if agent.crew_missing_binary else "crew hooks written"
+        if agent.crew_missing_binary:
+            return "hooks call a missing command"
+        return "crew hooks written for this repository" if agent.crew_scope == "project" else "crew hooks written"
     if not agent.any_hooks:
         # connect --apply leaves an unverified adapter out unless asked: left out, not missing.
         return "hooks NOT written" if agent.verified else "hooks left out"
@@ -404,6 +406,8 @@ def render_json(sig: Signals, findings: list[Finding], exit_code: int) -> dict[s
                 "present": list(agent.present_events),
                 "missing": list(agent.missing_events),
                 "crew": {
+                    "scope": agent.crew_scope,
+                    "config_path": agent.crew_file,
                     "hooks": agent.crew_hooks,
                     "events": list(agent.crew_events),
                     "not_covered": list(agent.crew_gap_events),
