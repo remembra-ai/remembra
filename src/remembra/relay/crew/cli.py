@@ -89,7 +89,7 @@ CREW_EXISTS_TIMEOUT_S: Final = 5.0
 # in its crew, so the hook asks crewd one local question and prints a reminder of at most this many
 # characters instead of joining again and fetching the whole brief.
 COMPACT_ALIVE_TIMEOUT_S: Final = 1.0
-START_COMPACT_CAP: Final = 400
+START_COMPACT_CAP: Final = 480
 MIN_STEP_S: Final = 0.3
 HOOK_OUTPUT: Final[Mapping[str, str]] = {
     "claude-code": "hook-json",
@@ -468,7 +468,8 @@ def compact_reminder(sess: Mapping[str, Any]) -> str:
     lines = [
         f"Crew: {who}. The context was compacted, so the session brief is no longer in it.",
         "Crew mode is automatic: claims, checkpoints and reports happen by hook.",
-        "For the crew's current state call crew_status; for the handoff and inbox call session_brief.",
+        "Crew state: crew_status. Handoff and inbox: session_brief(compact=true), "
+        "or `remembra-relay brief` if you have no Remembra tools.",
     ]
     if sess.get("observe_only"):
         lines.append("This session is observe-only (plan limit): it cannot claim zones.")

@@ -40,7 +40,9 @@ through the `session_brief` and `close_session` MCP tools in any other MCP agent
    The brief's text is capped at 6,000 characters (about 1,500 tokens). The `session_brief` MCP tool returns
    only that text with `compact=true`; by default it also returns the structured JSON, which is larger
    (cut to about 20,000 characters). After a context compaction (a start with source `compact`), a session
-   that already has its brief gets a two-line pointer to it instead of a second copy. See
+   that already has its brief gets a two-line pointer instead of a second copy: call
+   `session_brief(compact=true)`, or run `remembra-relay brief` where the MCP tools are not set up. If
+   handoffs are waiting in the local queue, that start sends them and prints the whole brief. See
    [Reading the brief](#reading-the-brief).
 
 ## Setup

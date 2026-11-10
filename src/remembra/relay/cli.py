@@ -905,20 +905,33 @@ def _hook_ack(adapter: Adapter) -> None:
 
 # What a session that already got its brief reads at a start after a compaction (source "compact"), in
 # place of a second copy: the relay's own words only, so it needs no data block.
+# It names the MCP tool in its small form, and the command for a session that has hooks but no MCP tools.
 COMPACT_POINTER = (
     "Remembra: the context was compacted, so the session brief printed at the start is no longer in it. "
-    "Call session_brief for the last handoff and your inbox before you rely on either.\n"
+    "Before you rely on the last handoff or your inbox, call session_brief(compact=true), or run "
+    "`remembra-relay brief` if you have no Remembra tools.\n"
     "Before you finish: run `remembra-relay close` or call close_session so the next agent can pick up."
 )
+
+
+def _handoffs_queued(home: Path) -> bool:
+    """Whether closes are waiting in the local queue (a start replays them before it asks for the brief)."""
+    try:
+        return bool(outbox.pending(home))
+    except Exception:
+        return False  # replay_outbox logs an unreadable queue; it is not a reason to fetch the brief again
 
 
 def _compacted_with_brief(args: argparse.Namespace, source: Any, home: Path, key: str, session: str | None) -> bool:
     """A start hook after a compaction, in a session whose brief was printed before (a fresh marker).
 
     Then the hook prints :data:`COMPACT_POINTER` and fetches nothing. Without a marker (the session never
-    got a brief, or the marker expired) the caller prints the whole brief, as for any other start.
+    got a brief, or the marker expired) the caller prints the whole brief, as for any other start. So it
+    does while handoffs wait in the queue: the whole start sends them first, and its brief includes them.
     """
-    return source == "compact" and not args.once and bool(session) and brief_delivered(home, key, str(session))
+    if source != "compact" or args.once or not session or not brief_delivered(home, key, str(session)):
+        return False
+    return not _handoffs_queued(home)
 
 
 def _brief_needed(args: argparse.Namespace, spec: AdapterSpec, source: Any, home: Path, key: str, session: str | None) -> bool:
