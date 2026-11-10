@@ -2443,8 +2443,9 @@ MCP_TOOLS: Final[tuple[McpToolSpec, ...]] = (
             McpParam("git_remote", "str"),
             McpParam("root_path", "str"),
             McpParam("verbose", "bool", default=False),
+            McpParam("join", "bool", default=True),
         ),
-        "Joins implicitly. Crew block, deltas since cursor, and the YOU self-view.",
+        "Joins implicitly (join=false: look only, no seat). Crew block, deltas since cursor, and the YOU self-view.",
     ),
     McpToolSpec(
         "crew_claim",

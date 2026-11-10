@@ -7,13 +7,17 @@ parts that are not MCP plumbing:
 * **Seats.** The MCP session (``Mcp-Session-Id`` on streamable HTTP, one id per stdio
   process) becomes a crew session on first use: ``POST /crews/join`` with
   ``adapter='mcp'`` and ``client_kind='mcp'`` (the server makes it ``advisory``). The
-  session token is held in memory only, keyed by the API key's fingerprint, the MCP
-  session id and the project, so one tenant's token is never used for another.
+  session token is held in memory, keyed by the API key's fingerprint, the MCP
+  session id and the project, so one tenant's token is never used for another. A stdio
+  server also keeps it in a private file (:mod:`remembra.mcp.seats`), so the process that
+  replaces it re-joins as the same crew session instead of a new callsign.
 * **Liveness.** MCP sessions have no crewd heartbeat. Any Remembra MCP call re-joins
   with the current token at most once per :data:`TOUCH_INTERVAL_S`; the server treats a
   re-join as activity and renews the session's leases (§10.1 "MCP-only: last call").
 * **Long-poll.** ``crew_claim(wait_s=…)`` and ``crew_say(wait_s=…)`` pass ``wait_s`` to the
-  server, which holds the request (≤300 s / ≤120 s); the HTTP timeout is raised to match.
+  server, which holds the request; the HTTP timeout is raised to match. One call waits at
+  most :data:`MAX_WAIT_S`: MCP clients drop a request after about 60 s and may then replace
+  the server process, so a longer wait is cut and the answer says so.
 * **Piggyback.** Every Remembra MCP result gets a ``crew_notice`` (≤300 chars) when this
   session's queue changed: at most one per :data:`NOTICE_INTERVAL_S`, except collisions,
   overrides and pause, which are sent at once (§7). Notices carry server-template text only
@@ -43,6 +47,7 @@ import httpx
 from remembra.client.memory import Memory, _header_agent_id
 from remembra.crew import gatecore as G
 from remembra.crew import schemas as S
+from remembra.mcp.seats import SeatRecord, SeatStore, pool_key
 from remembra.relay.handoff import CREW_FOOTER, data_line, police_item, render_crew_block
 from remembra.security.error_sanitizer import sanitize_error_message
 from remembra.security.untrusted import DATA_PREAMBLE
@@ -54,6 +59,11 @@ POLL_INTERVAL_S: Final = 5.0
 NOTICE_INTERVAL_S: Final = float(S.MCP_PIGGYBACK_MIN_INTERVAL_S)
 LIST_TTL_S: Final = 15.0
 HTTP_GRACE_S: Final = 15.0
+# The longest one crew call waits on the server (wait_s). An MCP client gives a tool call about 60 s; a call
+# that runs longer is dropped and the client may replace the stdio server, which costs the session its seat.
+MAX_WAIT_S: Final = 40
+# Join answers that mean a stored seat can never be used again (anything else may be a passing failure).
+_SEAT_GONE_STATUSES: Final = frozenset({400, 401, 403, 404, 409, 410, 422})
 MAX_SCOPES: Final = 1000
 # Session-queue kinds delivered immediately (server-generated collisions, human overrides and pause, §7).
 URGENT_KINDS: Final = frozenset({"collision_notice", "override_notice"})
@@ -654,8 +664,11 @@ def _names_crew(fn: _F) -> _F:
 class CrewBridge:
     """Seats per MCP session plus the seven crew tools, implemented over the REST API."""
 
-    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic, max_wait_s: int = MAX_WAIT_S) -> None:
         self._clock = clock
+        self.max_wait_s = max(1, int(max_wait_s))
+        # set for a stdio server only (remembra.mcp.server.main): seats then survive a process restart
+        self.seat_store: SeatStore | None = None
         self._lock = threading.RLock()
         self._seats: dict[tuple[str, str], dict[str, Seat]] = {}
         self._current: dict[tuple[str, str], str] = {}
@@ -937,7 +950,12 @@ class CrewBridge:
             existing.current_task_id = (body.get("session") or {}).get("current_task_id")
             existing.callsign = str(body.get("callsign") or existing.callsign)
             self._remember(existing, sticky=sticky)
+            self._store_seat(caller, existing)
             return existing, body
+        resumed = self._resume_stored(caller, scope, project, checkout)
+        if resumed is not None:
+            self._remember(resumed[0], sticky=sticky)
+            return resumed
         client_session_id = caller.client_session_id
         try:
             _, body, _ = http.call("POST", "/crews/join", json=self._join_body(caller, project, client_session_id, checkout))
@@ -970,7 +988,93 @@ class CrewBridge:
             current_task_id=session.get("current_task_id"),
         )
         self._remember(seat, sticky=sticky)
+        self._store_seat(caller, seat)
         return seat, body
+
+    # -- seats that outlive the process (stdio) ---------------------------------------
+
+    def _seat_record(self, caller: CallerInfo, seat: Seat) -> SeatRecord:
+        return SeatRecord(
+            pool=pool_key(caller.client.base_url, caller.fingerprint, seat.agent_id, seat.project_id),
+            anchor="",
+            project_id=seat.project_id,
+            agent_id=seat.agent_id,
+            client_session_id=seat.client_session_id,
+            crew_id=seat.crew_id,
+            session_id=seat.session_id,
+            callsign=seat.callsign,
+            token=seat.token,
+            verified=seat.verified,
+        )
+
+    def _store_seat(self, caller: CallerInfo, seat: Seat) -> None:
+        """Keep (or refresh) the seat's token on disk for the process that may replace this one."""
+        store = self.seat_store
+        if store is None or seat.local is not None or seat.left or not seat.token:
+            return
+        store.save(self._seat_record(caller, seat))
+
+    def _forget_seat(self, caller: CallerInfo, seat: Seat) -> None:
+        store = self.seat_store
+        if store is not None and seat.local is None and seat.token:
+            store.drop(self._seat_record(caller, seat))
+
+    def _resume_stored(
+        self, caller: CallerInfo, scope: tuple[str, str], project: str, checkout: Mapping[str, Any] | None
+    ) -> tuple[Seat, dict[str, Any]] | None:
+        """Re-join as the crew session an earlier process of this agent held here, when its owner is gone.
+
+        The server treats a join with the session's current token as that session coming back: same callsign,
+        leases renewed, its reservations taken back. A token the server refuses is dropped and the next stored
+        seat (or a fresh join) is used.
+        """
+        store = self.seat_store
+        if store is None:
+            return None
+        http = CrewHttp(caller.client)
+        for record in store.take(pool_key(caller.client.base_url, caller.fingerprint, str(caller.agent_id), project)):
+            try:
+                _, body, _ = http.call(
+                    "POST",
+                    "/crews/join",
+                    token=record.token,
+                    json=self._join_body(caller, project, record.client_session_id, checkout),
+                )
+            except CrewApiError as e:
+                if e.status in _SEAT_GONE_STATUSES:
+                    store.drop(record)
+                    continue
+                store.release(record)  # unreachable or overloaded: the seat is still good for a later call
+                raise
+            body = dict(body or {})
+            if not body.get("crew_id") or not body.get("session_id"):
+                store.drop(record)
+                continue
+            # a join that created a session (the server no longer knew this one) answers with a new token
+            issued = body.get("session_token")
+            session = body.get("session") or {}
+            seq = int(body.get("seq") or 0)
+            seat = Seat(
+                scope=scope,
+                project_id=project,
+                agent_id=str(caller.agent_id),
+                client_session_id=record.client_session_id,
+                crew_id=str(body["crew_id"]),
+                session_id=str(body["session_id"]),
+                token=issued if isinstance(issued, str) and issued else record.token,
+                callsign=str(body.get("callsign") or record.callsign),
+                verified=bool(session.get("agent_verified")),
+                observe_only=bool(body.get("observe_only")),
+                status_cursor=max(0, seq - 20),
+                notice_cursor=seq,
+                last_touch=self._clock(),
+                current_task_id=session.get("current_task_id"),
+            )
+            if seat.session_id == record.session_id:
+                body["resumed_seat"] = "conversation" if store.anchor else "agent"
+            self._store_seat(caller, seat)
+            return seat, body
+        return None
 
     def write_seat(self, caller: CallerInfo, project_id: str | None, tool: str) -> Seat:
         """The seat a crew write acts as: the project it names, else the only project this session knows.
@@ -1018,6 +1122,7 @@ class CrewBridge:
             seat.current_task_id = session.get("current_task_id")
             if body.get("callsign"):
                 seat.callsign = str(body["callsign"])
+        self._store_seat(caller, seat)
         return dict(body)
 
     def mark_left(self, caller: CallerInfo, seat: Seat | None = None) -> None:
@@ -1027,6 +1132,7 @@ class CrewBridge:
             with seat.lock:
                 seat.left = True
                 seat.pending.clear()
+            self._forget_seat(caller, seat)
 
     # -- lookups (cached per seat) --------------------------------------------------
 
@@ -1137,7 +1243,10 @@ class CrewBridge:
         project_id: str | None,
         checkout: Mapping[str, Any] | None,
         verbose: bool,
+        join: bool = True,
     ) -> str:
+        if not join:
+            return self._look(caller, project_id)
         seat, joined = self.seat(caller, project_id, checkout)
         http = self._http(caller, seat)
         rejoin = joined or self.touch(caller, seat, force=True) or {}
@@ -1175,6 +1284,36 @@ class CrewBridge:
             seat.last_notice = self._clock()
         return join_text(lines, data)
 
+    def _look(self, caller: CallerInfo, project_id: str | None) -> str:
+        """``crew_status(join=False)``: the crew block, read with the API key alone.
+
+        Nothing is joined, touched, resolved or remembered: no crew session, no presence, no ``session.joined``
+        event, and the project does not become the current one. A seat this session already holds there adds
+        its YOU line (read with its token, no re-join).
+        """
+        scope = (caller.fingerprint, caller.client_session_id)
+        with self._lock:
+            project = project_id or self._current.get(scope) or caller.default_project
+        if not project:
+            raise CrewUsageError("No project yet: call crew_status(project_id=..., join=False) or pass git_remote / root_path.")
+        seat = self.seat_in(caller, project)
+        held = seat if seat is not None and not seat.left else None
+        params: dict[str, Any] = {"project_id": project, "recent_n": 0, "inbox_limit": 0}
+        if caller.agent_id:
+            params["agent_id"] = caller.agent_id
+        http = self._http(caller, held) if held is not None else CrewHttp(caller.client)
+        block = self._crew_block_of(http, project, params)
+        lines = [block or f"CREW {_safe(project) or 'this project'}: no crew yet (nobody has joined it)."]
+        if held is not None:
+            lines.append(self._you_line(http, held, {}))
+            lines.append("LOOK ONLY: nothing was joined, renewed or marked as read by this call.")
+        else:
+            lines.append(
+                "NOT JOINED (look only): you hold no seat in this crew, so you can claim nothing and nobody sees "
+                "you here. Call crew_status without join=False to join."
+            )
+        return join_text(lines)
+
     def _crew_block(self, http: CrewHttp, caller: CallerInfo, seat: Seat) -> str:
         params = {
             "project_id": seat.project_id,
@@ -1183,10 +1322,13 @@ class CrewBridge:
             "recent_n": 0,
             "inbox_limit": 0,
         }
+        return self._crew_block_of(http, seat.project_id, params)
+
+    def _crew_block_of(self, http: CrewHttp, project_id: str, params: Mapping[str, Any]) -> str:
         try:
             _, brief, _ = http.call("GET", "/session/brief", params=params)
         except CrewApiError as e:
-            return f"CREW {seat.project_id}: crew block unavailable ({e.status} {S.clip_item(e.error, 40)})"
+            return f"CREW {project_id}: crew block unavailable ({e.status} {S.clip_item(e.error, 40)})"
         crew = brief.get("crew") if isinstance(brief, dict) else None
         if not isinstance(crew, dict):
             return ""
@@ -1199,6 +1341,13 @@ class CrewBridge:
         state = _safe(session.get("state")) or "active"
         verified = "key-verified" if seat.verified else "self-declared"
         parts = [f"YOU: {seat.callsign} ({seat.session_id}) · mcp, advisory · {verified} · {state}"]
+        if rejoin.get("resumed_seat") == "conversation":
+            parts.append("RESUMED after an MCP server restart (this conversation's seat: it keeps what it held)")
+        elif rejoin.get("resumed_seat"):
+            parts.append(
+                "RESUMED the seat this agent's previous MCP server process held on this machine "
+                "(it keeps what that seat held: release what is not yours to continue)"
+            )
         if seat.observe_only:
             parts.append("OBSERVE-ONLY (plan limit: you cannot claim)")
         my_tasks = [t for t in rejoin.get("my_tasks") or [] if isinstance(t, dict)]
@@ -1631,10 +1780,16 @@ class CrewBridge:
         lines: list[str] = []
         granted = capped = 0
         widened: dict[str, list[str]] = {}  # zone id -> the paths a whole-zone-only server widened to it
+        asked = wait_s
+        budget = min(asked, self.max_wait_s) if asked > 0 else 0  # one budget for the whole call, not per target
+        cut = f" Waits are cut to {self.max_wait_s}s per call." if asked > budget else ""
+        deadline = time.monotonic() + budget
         queue = list(targets)
         while queue:
             label, target = queue.pop(0)
             fallback = target.get("_zone")
+            # a claim that waits is queued; one that does not is refused: keep waiting (≥1 s) once asked to
+            wait_s = max(1, int(round(deadline - time.monotonic()))) if asked > 0 else 0
             body: dict[str, Any] = {
                 **{k: v for k, v in target.items() if k != "_zone"},
                 "mode": mode,
@@ -1672,20 +1827,20 @@ class CrewBridge:
             state = claim.get("state")
             granted += 1 if state == "active" else 0
             if state == "active":
-                note = f" after waiting {waited}s" if wait_s > 0 and waited >= 1 else ""
+                note = f" after waiting {waited}s" if asked > 0 and waited >= 1 else ""
                 lines.append(f"GRANTED {label} ({claim.get('mode')}, epoch {claim.get('epoch')}, {claim.get('id')}){note}")
             elif state == "queued":
                 who = self._blocker_text(http, seat, (res or {}).get("blockers") or [])
-                waited_txt = f" (waited {waited}s)" if wait_s > 0 else ""
+                waited_txt = f" (waited {waited}s)" if asked > 0 else ""
                 lines.append(
                     f"QUEUED {label}{waited_txt}: {who}. You are next in line ({claim.get('id')}); "
-                    "call crew_claim again with wait_s to keep waiting, or work elsewhere."
+                    f"call crew_claim again with wait_s to keep waiting, or work elsewhere.{cut}"
                 )
             else:
                 lines.append(f"{str(state or status).upper()} {label} ({claim.get('id')})")
-        for zid, asked in widened.items():
+        for zid, wide in widened.items():
             notes.append(
-                f"{', '.join(asked[:5])}: this server claims whole zones only: all of zone "
+                f"{', '.join(wide[:5])}: this server claims whole zones only: all of zone "
                 f"{self._zone_label(http, seat, zid)} is now yours, or refused as shown above"
             )
         if capped and len(targets) > 1:
@@ -2375,6 +2530,8 @@ class CrewBridge:
             if mention.lower() not in text.lower():
                 text = f"{mention} {text}"
         payload: dict[str, Any] = {"kind": kind, "body": text, "client_msg_id": f"mcp-{uuid.uuid4().hex[:24]}"}
+        asked = wait_s
+        wait_s = min(asked, self.max_wait_s) if asked > 0 else 0
         if thread:
             payload["thread_root_id"] = thread.strip()
         if wait_s > 0:
@@ -2401,7 +2558,14 @@ class CrewBridge:
             if res.get("reply") and isinstance(reply_text, str):
                 lines.append(reply_text)
             else:
-                lines.append(f"no reply yet (waited {int(round(float(res.get('waited_s') or wait_s)))}s)")
+                waited = int(round(float(res.get("waited_s") or wait_s)))
+                if asked > wait_s:
+                    lines.append(
+                        f"no reply yet (waited {waited}s; waits are cut to {self.max_wait_s}s per call). The reply "
+                        "will reach you as a crew_notice on a later call, or in crew_status."
+                    )
+                else:
+                    lines.append(f"no reply yet (waited {waited}s)")
         return "\n".join(lines)
 
     # -- crew_checkpoint ------------------------------------------------------------------

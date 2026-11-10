@@ -6,7 +6,7 @@ the tools in `mcp/server.py`; a test there should compare the registered FastMCP
 
 | Tool | Parameters (default) | Returns |
 |---|---|---|
-| `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false` | joins implicitly; crew block, deltas since cursor, the YOU self-view |
+| `crew_status` | `project_id?`, `git_remote?`, `root_path?`, `verbose=false`, `join=true` | joins implicitly (`join=false`: look only, no seat); crew block, deltas since cursor, the YOU self-view |
 | `crew_claim` | `action="claim"` (`claim release adopt handover accept decline`), `zone?`, `paths?: [str]`, `mode="exclusive"`, `task?`, `to?`, `baton?: bool`, `reason?`, `wait_s=0` (≤300), `project_id?`, `root_path?` | `GRANTED …`, `QUEUED … (waited Ns)` or `REFUSED: …` |
 | `crew_guard` | `paths: [str]` (required), `command?`, `mcp_tool?`, `project_id?`, `root_path?` | `ALLOW` / `DENY <reason>` |
 | `crew_task` | `action="list"` (`list create start update block release`), `task?`, `title?`, `status?`, `zones?: [str]`, `acceptance?: [Criterion]`, `phase?`, `note?`, `project_id?`, `root_path?` | `start` claims the task's zones atomically |
@@ -28,6 +28,10 @@ every result but `crew_status`'s ends with `(project <id>)`, the project the cal
 transport the answer of each of these six tools carries the line `(in CREW <project> as <callsign>)`.
 An argument
 a tool does not have is refused with the list of the ones it takes.
+
+`wait_s` keeps its contract range (≤300 / ≤120), but one MCP call waits at most `MAX_WAIT_S` (40 s,
+`REMEMBRA_MCP_MAX_WAIT_S`) so it answers inside an MCP client's request timeout; the answer says when a wait
+was cut.
 
 Parameter order in the Python signature is free (required parameters first); names, types,
 defaults, enums and caps are the contract.

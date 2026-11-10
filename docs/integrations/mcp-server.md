@@ -582,7 +582,7 @@ Agents with crew hooks get the same checks from the hooks; for MCP-only agents t
 
 | Tool | Purpose |
 |------|---------|
-| `crew_status(project_id?, git_remote?, root_path?, verbose=false)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. |
+| `crew_status(project_id?, git_remote?, root_path?, verbose=false, join=true)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. `join=false` only looks: the crew block, with no seat taken, no presence and nothing marked as read. |
 | `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0, project_id?)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
 | `crew_guard(paths, command?, mcp_tool?, project_id?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
 | `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?, project_id?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
@@ -608,6 +608,31 @@ desktop app can start a single process for all its conversations, which then sha
   conversation, so there the project chosen last is still the default.
 - `crew_status` without a project still shows the project chosen last; its first line names the crew.
 
+### Waiting (`wait_s`)
+
+`crew_claim(wait_s=…)` and `crew_say(wait_s=…)` hold the call until the grant or the first reply. One call
+waits at most 40 seconds, whatever `wait_s` says: MCP clients drop a tool call after about 60 seconds, and
+some then replace the server process. When the time is up the answer says so. A claim stays queued (call
+`crew_claim` again to keep waiting); a reply to `crew_say` reaches you as a `crew_notice` on a later call or
+in `crew_status`. Set `REMEMBRA_MCP_MAX_WAIT_S` only for a client with a longer tool timeout.
+
+### A seat that survives a server restart (stdio)
+
+A stdio server keeps each crew seat's session token in `~/.remembra/mcp/seats/` (directory `0700`, files
+`0600`; a crew session token, never the API key). When the client replaces the server process, the new
+process re-joins as the same crew session: the same callsign, with the claims and tasks it held. `crew_status`
+then says `RESUMED`.
+
+- A seat is taken over only when the process that used it is gone (it holds a file lock while it lives), and
+  only for the same server, API key, agent and project.
+- With a fixed `REMEMBRA_SESSION_ID`, or under a client that gives the server its conversation id, only that
+  conversation's seat is resumed, for up to 24 hours.
+- Otherwise (a desktop app's server knows no conversation) the seat of this agent's previous server process
+  on this machine is resumed, for up to 55 minutes after its last call. After that the server has marked the
+  session lost and offers its work as a baton, and the new process joins as a new seat.
+- `close_session` removes the stored seat. `REMEMBRA_MCP_SEAT_STORE=0` turns the store off. A remote
+  (`sse`, `streamable-http`) server never writes one.
+
 ---
 
 ## Environment Variables
@@ -620,7 +645,9 @@ desktop app can start a single process for all its conversations, which then sha
 | `REMEMBRA_PROJECT` | `default` | Project namespace. Use the same value for every agent |
 | `REMEMBRA_AGENT_ID` | - | This agent's id (`claude-code`, `claude-desktop`, `codex`, `gemini`, `clawdbot`). Required for the inbox. Stamped on every store. `health_check` warns when it is missing |
 | `REMEMBRA_PROJECT_ALIASES` | - | `alias=canonical,...`. For example `clawdbot=clawbot` makes both names resolve to `clawbot`. Case is kept for ids that are not aliases |
-| `REMEMBRA_SESSION_ID` | random per process | Session id stamped on stores |
+| `REMEMBRA_SESSION_ID` | random per process | Session id stamped on stores. When set, a restarted stdio server resumes this id's crew seat |
+| `REMEMBRA_MCP_MAX_WAIT_S` | `40` | Longest time one `crew_claim` / `crew_say` call waits on the server (`wait_s`), in seconds |
+| `REMEMBRA_MCP_SEAT_STORE` | `1` | `0`: do not keep crew seats in `~/.remembra/mcp/seats/` (a restarted stdio server then joins as a new seat) |
 | `REMEMBRA_KNOWN_AGENTS` | `claude-code,claude-desktop,codex,gemini,clawdbot` | Valid agent ids. Used for typo warnings |
 | `REMEMBRA_MCP_TRANSPORT` | `stdio` | Transport: `stdio`, `sse`, or `streamable-http` |
 

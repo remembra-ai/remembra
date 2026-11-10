@@ -55,6 +55,7 @@ from remembra.client.project import aliases_from_env, normalize_project_id
 from remembra.crew import schemas as crew_schemas
 from remembra.crew.schemas import MCP_INSTRUCTIONS as CREW_MCP_INSTRUCTIONS
 from remembra.mcp.crew import (
+    MAX_WAIT_S,
     CallerInfo,
     CrewApiError,
     CrewBridge,
@@ -2219,7 +2220,21 @@ def ack_inbox(
 # the server's event loop for other callers. Every other tool result gets a crew_notice when
 # this session's crew queue changed (installed at the end of this module).
 
-_crew = CrewBridge()
+
+def _max_wait_s(raw: str | None) -> int:
+    """``REMEMBRA_MCP_MAX_WAIT_S``: the longest one crew call waits on the server (default 40 s).
+
+    MCP clients drop a tool call after about 60 s and may then replace the stdio server. Raise this only for
+    a client whose tool timeout is longer; the tools' own limits (120 s / 300 s) still apply.
+    """
+    try:
+        value = int(raw.strip()) if raw and raw.strip() else MAX_WAIT_S
+    except ValueError:
+        value = MAX_WAIT_S
+    return max(1, min(value, crew_schemas.CLAIM_WAIT_MAX_S))
+
+
+_crew = CrewBridge(max_wait_s=_max_wait_s(os.environ.get("REMEMBRA_MCP_MAX_WAIT_S")))
 # Tools whose results never get a crew_notice: crew_status already shows everything.
 _NO_CREW_NOTICE = frozenset({"crew_status"})
 
@@ -2346,9 +2361,12 @@ def _write_project(project_id: str | None) -> str | None:
 
 
 def _crew_project(
-    project_id: str | None, git_remote: str | None, root_path: str | None
+    project_id: str | None, git_remote: str | None, root_path: str | None, *, remember: bool = True
 ) -> tuple[str | None, dict[str, Any] | None, Memory]:
-    """Project for crew_status: explicit id, else the location resolved read-only (the brief), else None."""
+    """Project for crew_status: explicit id, else the location resolved read-only (the brief), else None.
+
+    ``remember=False`` (a look-only status) resolves without making the project this session's default.
+    """
     client = _get_client()
     locator, checkout = _locator(git_remote=git_remote, root_path=root_path)
     if project_id:
@@ -2357,7 +2375,8 @@ def _crew_project(
         brief = client.session_brief(recent_n=0, inbox_limit=0, locator=locator)
         resolved = brief.get("project_id")
         if resolved:
-            _remember_session_project(str(resolved), locator)
+            if remember:
+                _remember_session_project(str(resolved), locator)
             return str(resolved), checkout, client
     return None, checkout, client
 
@@ -2372,6 +2391,7 @@ async def crew_status(
     git_remote: str | None = None,
     root_path: str | None = None,
     verbose: bool = False,
+    join: bool = True,
 ) -> str:
     """Call after session_brief: joins this project's crew (once) and shows where everyone is.
 
@@ -2386,27 +2406,29 @@ async def crew_status(
         git_remote: Resolve the project from your repo's remote instead.
         root_path: Resolve the project from your working directory instead.
         verbose: Also list zones, open tasks and the latest channel messages.
+        join: False only looks: it shows the crew block without joining (no seat, no presence, nothing
+            marked as read) and does not change the project later calls default to.
     """
-    args = {"project_id": project_id, "git_remote": git_remote, "root_path": root_path, "verbose": verbose}
+    args = {"project_id": project_id, "git_remote": git_remote, "root_path": root_path, "verbose": verbose, "join": join}
     errors = crew_schemas.validate_mcp_call("crew_status", {k: v for k, v in args.items() if v is not None})
     if errors:
         return "INVALID ARGUMENTS: " + "; ".join(errors[:5])
     try:
-        project, checkout, _ = _crew_project(project_id, git_remote, root_path)
+        project, checkout, _ = _crew_project(project_id, git_remote, root_path, remember=join)
         caller = _crew_caller()
     except Exception as e:
         return _crew_error(e)
     answered: list[bool] = []
 
     def status(who: CallerInfo) -> str:
-        out = _crew.status(who, project_id=project, checkout=checkout, verbose=verbose)
+        out = _crew.status(who, project_id=project, checkout=checkout, verbose=verbose, join=join)
         answered.append(True)
         return out
 
     out = await _run_crew("crew_status", args, status, caller)
-    if answered and project_id and project:
+    if answered and join and project_id and project:
         # close_session, store_memory and send_to_inbox follow a project chosen here too, not only the
-        # crew tools; a status that failed chose nothing
+        # crew tools; a status that failed, or one that only looked (join=False), chose nothing
         _remember_session_project(project, None)
     return out
 
@@ -2434,7 +2456,8 @@ async def crew_claim(
     claim: zone="pos" (or paths=["src/app/pos/cart.ts"], or task="T-14" for all its zones).
     Answers GRANTED, QUEUED or REFUSED. When REFUSED, do not edit there: work elsewhere or ask
     the holder with crew_say(to="@holder", kind="request_release"). wait_s (≤300) waits for the
-    grant instead (the call blocks until granted or the time is up).
+    grant instead (the call blocks until granted or the time is up; one call waits at most 40 s,
+    then answers QUEUED: call again to keep waiting).
     release: zone/paths/task you hold, also one crew_status shows as yours and reserved
     (baton=True keeps an active one reserved for the next pickup).
     adopt: a baton offered to you in your brief: task="T-12", zone="pos" or the reserved
@@ -2456,7 +2479,7 @@ async def crew_claim(
         to: For handover: the receiving session's callsign (@codex-1).
         baton: For release: keep the area reserved for the next agent.
         reason: Short note shown to the crew.
-        wait_s: Seconds to wait for a grant (0–300).
+        wait_s: Seconds to wait for a grant (0–300; one call waits at most 40 s).
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
             you work in more than one project or share this MCP server with other conversations (default:
             the only project this session chose with session_brief / crew_status).
@@ -2613,15 +2636,16 @@ async def crew_say(
     """Talk to the crew: a message, question, answer, release request or proposed decision.
 
     to="crew" posts to the channel; "@codex-1" (a session), "@codex" (an agent), "@crew" (every
-    live session) or "@mani" (the human) mentions them. wait_s (≤120) waits for the first reply
-    in the thread and returns it as data. A decision stays proposed until a human confirms it.
+    live session) or "@mani" (the human) mentions them. wait_s waits for the first reply in the
+    thread and returns it as data (one call waits at most 40 s; a later reply reaches you as a
+    crew_notice or in crew_status). A decision stays proposed until a human confirms it.
 
     Args:
         body: The message.
         kind: chat | question | answer | note | request_release | decision.
         to: crew, or @callsign / @agent / @crew / @mani.
         thread: Message id to reply in (msg_…).
-        wait_s: Seconds to wait for a reply (0–120).
+        wait_s: Seconds to wait for a reply (0–120; one call waits at most 40 s).
         project_id: The project whose crew this is for, for this call only. Pass it (or root_path) whenever
             you work in more than one project or share this MCP server with other conversations (default:
             the only project this session chose with session_brief / crew_status).
@@ -3066,6 +3090,35 @@ def _log_to_stderr() -> None:
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_CurrentStderr()))  # type: ignore[arg-type]
 
 
+def _seat_anchor() -> str:
+    """What ties a stored crew seat to one conversation: a fixed session id, else the client's conversation id."""
+    fixed = (os.environ.get("REMEMBRA_SESSION_ID") or "").strip()
+    if fixed:
+        return f"id:{fixed}"
+    conversation = (os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
+    return f"conversation:{conversation}" if conversation else ""
+
+
+def _enable_seat_store(transport: str) -> None:
+    """Let a stdio server's crew seats outlive the process (``REMEMBRA_MCP_SEAT_STORE=0`` turns it off).
+
+    The client replaces a stdio server now and then (a timed-out request, an app restart); the new process
+    then re-joins as the same crew session instead of a new callsign. Never on a remote transport: that
+    server holds other callers' sessions, and their tokens are not written to its disk.
+    """
+    if transport != "stdio" or os.environ.get("REMEMBRA_MCP_SEAT_STORE", "1") == "0":
+        _crew.seat_store = None
+        return
+    from pathlib import Path
+
+    from remembra.mcp.seats import SeatStore
+
+    try:
+        _crew.seat_store = SeatStore(Path.home() / ".remembra" / "mcp" / "seats", anchor=_seat_anchor())
+    except (OSError, RuntimeError):  # no home directory: seats stay in memory, as before
+        _crew.seat_store = None
+
+
 def main() -> None:
     """Run the Remembra MCP server."""
     transport = REMEMBRA_MCP_TRANSPORT.lower()
@@ -3112,6 +3165,7 @@ def main() -> None:
     global _LOCAL_CREW, _STDIO_SERVER
     _STDIO_SERVER = transport == "stdio"
     _LOCAL_CREW = transport == "stdio" and os.environ.get("REMEMBRA_MCP_LOCAL_CREW", "1") != "0"
+    _enable_seat_store(transport)
     mcp.run(transport=transport)  # type: ignore[arg-type]
 
 
