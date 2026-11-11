@@ -5,6 +5,23 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.8] - 2026-11-11
+
+### Fixed
+- Restore saved work when the adopter has identical untracked files, while retaining byte, mode,
+  changed-commit and rollback safeguards. Honor Git's `core.filemode=false` on filesystems without
+  executable bits. An own retake skips restoration only when the saved work is present; the check
+  runs off the daemon event loop with a bounded timeout.
+- Agent-session queued claims expire after ten minutes without an explicit renewal. Expiry exceeds
+  the older client's maximum single wait, notifies the waiter through existing session notices,
+  and offers a fresh claim. Human waits and saved-work reservation policies are unchanged.
+- Avoid extra sweep transactions for fresh queued claims; use one sweep clock and preserve terminal
+  notification/collision cleanup. Explicit renewals increment the claim version.
+- Doctor recognizes Relay companion hooks and gives an actionable reconnect command, including
+  Codex's required unverified-adapter flag, when those hooks are missing.
+- Ended claims resolve obsolete baton notifications. MCP wait/cancel/expiry guidance now explains
+  renewal and rejoining the queue after expiration.
+
 ## [0.17.7] - 2026-11-10
 
 **Fixes from a fault survey of 0.17.5 and 0.17.6 in daily use between Codex and Claude. No route, MCP tool name or stored schema is removed.**
