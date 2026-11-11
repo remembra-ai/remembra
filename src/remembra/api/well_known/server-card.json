@@ -1,7 +1,7 @@
 {
   "serverInfo": {
     "name": "Remembra",
-    "version": "0.17.7"
+    "version": "0.17.8"
   },
   "authentication": {
     "required": true,

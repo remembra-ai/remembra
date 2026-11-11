@@ -30,6 +30,14 @@ def test_a_server_that_does_not_answer_holds_a_prompt_up_for_two_seconds_at_most
             base_url="http://relay.test", transport=httpx.MockTransport(stall)
         ),
     )
+    # Repository discovery is part of the same prompt budget, not a second allowance.
+    repo_info = cli.factlib.repo_info
+
+    def slow_repo_info(cwd, deadline):
+        time.sleep(0.8)
+        return repo_info(cwd, deadline)
+
+    monkeypatch.setattr(cli.factlib, "repo_info", slow_repo_info)
     payload = {"session_id": "s-stall", "cwd": str(env["folder"]), "hook_event_name": "UserPromptSubmit", "prompt": "next"}
     # the session was briefed earlier (its marker is old), so this prompt asks the server
     marker = cli._brief_marker_path(env["home"], "claude-code", "s-stall")

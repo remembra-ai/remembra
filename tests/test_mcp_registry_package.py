@@ -126,7 +126,13 @@ def test_all_release_versions_agree():
 
 
 def test_version_check_catches_each_kind_of_drift(tmp_path):
-    for rel in ("pyproject.toml", "src/remembra/__init__.py", "packages/remembra-mcp/pyproject.toml", "server.json"):
+    for rel in (
+        "pyproject.toml",
+        "src/remembra/__init__.py",
+        "packages/remembra-mcp/pyproject.toml",
+        "server.json",
+        "src/remembra/api/well_known/server-card.json",
+    ):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / rel, tmp_path / rel)
     good = check_release_versions.collect(tmp_path)
@@ -134,6 +140,14 @@ def test_version_check_catches_each_kind_of_drift(tmp_path):
     version = good["pyproject.toml"]
     assert version
     assert check_release_versions.problems(good, "v9.9.9") == [f"tag v9.9.9 does not match the files ({version})"]
+
+    card_path = tmp_path / "src/remembra/api/well_known/server-card.json"
+    card = json.loads(card_path.read_text())
+    card["serverInfo"]["version"] = "0.0.1"
+    card_path.write_text(json.dumps(card))
+    issues = check_release_versions.problems(check_release_versions.collect(tmp_path))
+    assert len(issues) == 1 and "server-card.json serverInfo.version=0.0.1" in issues[0]
+    shutil.copy(ROOT / "src/remembra/api/well_known/server-card.json", card_path)
 
     launcher = tmp_path / "packages/remembra-mcp/pyproject.toml"
     launcher.write_text(launcher.read_text().replace(f'"remembra[mcp]=={version}"', '"remembra[mcp]==0.0.1"'))

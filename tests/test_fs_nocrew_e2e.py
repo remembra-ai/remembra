@@ -84,7 +84,10 @@ def test_a_killed_session_leaves_a_checkpoint_and_a_late_message_reaches_the_run
             break
         time.sleep(0.5)
     assert "still open (saved while the session was running)" in picked, picked
-    assert "README.md" in picked and "pytest -q" in picked
+    assert "README.md" in picked and "pytest -q" in picked, (
+        picked,
+        (home / ".remembra" / "relay" / "last-detached-close.log").read_text(),
+    )
     log = (home / ".remembra" / "relay" / "relay.log").read_text()
     assert "close --hook claude-code: checkpoint started (Stop, session sess-K)" in log
     assert "close: sent the handoff of claude-code session sess-K" in log

@@ -401,3 +401,17 @@ Crew mode is additive, so rollback never needs a data migration:
 | Refused again and again where you want the agent to proceed | Hand the zone over or override the claim in the dashboard; for a one-off push issue a bypass code; to stop refusing altogether switch the project to observe |
 | "commit gate: missing" on a lane | A tool reinstalled the git hooks (Husky, lefthook). The daemon repairs it when you installed the hooks with `connect`; otherwise re-run `connect --git-hooks` |
 | `zones.yml` change has no effect | It must be committed on the default branch, and loosening changes wait for approval under **Needs you** |
+
+### Waiting for a claim
+
+A queued claim expires ten minutes after its last explicit claim request. Call `crew_claim` again
+with the same target to renew a live wait; heartbeats do not renew it. After expiry a new request
+joins the back of the queue. Cancel a wait with `crew_claim(action="release", ...)` on the same
+target before moving to other work. Saved-work reservations are separate and keep their existing
+retention policy.
+
+This timeout applies to agent-session waits, including waits associated with a task. Human waits
+are retained until explicitly cancelled. Task-linked saved-work reservations are unchanged.
+An agent is notified once when its wait expires; it can issue a fresh claim to rejoin the queue.
+An outage retry with the same idempotency key recovers the earlier answer, rather than renewing
+the wait. After recovery, issue another claim call to renew or rejoin.

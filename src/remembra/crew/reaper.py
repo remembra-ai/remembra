@@ -247,19 +247,22 @@ class CrewReaper:
 
     async def _presence(self, now: datetime, report: SweepReport) -> None:
         marks = ", ".join("?" for _ in SWEPT_STATES)
+        # One snapshot avoids a host + settings round trip for every crew while heartbeats
+        # and claims share the connection. LEFT JOIN preserves the missing-host/default-settings cases.
         rows = await _all(
-            self.sessions.conn, f"SELECT * FROM crew_sessions WHERE state IN ({marks}) ORDER BY crew_id, id", SWEPT_STATES
+            self.sessions.conn,
+            "SELECT s.*, h.last_seen_at AS presence_host_seen, c.settings AS presence_settings"
+            " FROM crew_sessions s LEFT JOIN crew_hosts h ON h.id = s.host_id"
+            " LEFT JOIN crews c ON c.id = s.crew_id"
+            f" WHERE s.state IN ({marks}) ORDER BY s.crew_id, s.id",
+            SWEPT_STATES,
         )
-        hosts: dict[str, dict[str, Any] | None] = {}
         for row in rows:
-            host = None
-            if row.get("host_id"):
-                if row["host_id"] not in hosts:
-                    hosts[row["host_id"]] = await _one(
-                        self.sessions.conn, "SELECT * FROM crew_hosts WHERE id = ?", (row["host_id"],)
-                    )
-                host = hosts[row["host_id"]]
-            target = presence_target(row, host, await self._settings(row["crew_id"]), now=now, boot_at=self.boot_at)
+            crew_id = row["crew_id"]
+            if crew_id not in self._settings_cache:
+                self._settings_cache[crew_id] = load_settings(row["presence_settings"])
+            host = {"last_seen_at": row["presence_host_seen"]} if row.get("host_id") else None
+            target = presence_target(row, host, self._settings_cache[crew_id], now=now, boot_at=self.boot_at)
             if target.state == row["state"] and target.quiet_reason == (
                 row.get("quiet_reason") if row["state"] == "quiet" else None
             ):

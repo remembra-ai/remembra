@@ -572,6 +572,14 @@ def refused_fields(resp: Resp, names: Iterable[str]) -> bool:
     )
 
 
+async def _baton_work_present(top: str, ref: str, *, timeout_s: float = 5.0) -> bool:
+    """Git/filter probes must not block the daemon; uncertainty falls back to safe restore checks."""
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(B.work_present, top, ref), timeout=timeout_s)
+    except (TimeoutError, B.GitError, OSError):
+        return False
+
+
 class CrewdError(Exception):
     def __init__(self, code: str, message: str = "", **extra: Any) -> None:
         super().__init__(message or code)
@@ -2829,10 +2837,13 @@ class Crewd:
                         continue
                     body = r.body or {}
                     got = [x for x in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(x, dict)]
+                    # a retake is this session's own claim back: nothing to restore while its work is still here
+                    retake = body.get("kind") == "retake"
                     for x in got or [c]:
-                        adopted.append(
-                            {**x, "baton_ref": x.get("baton_ref") or c.get("baton_ref"), "baton_id": body.get("baton_id")}
-                        )
+                        ref_x = x.get("baton_ref") or c.get("baton_ref")
+                        if retake and ref_x and await _baton_work_present(str(sess["toplevel"]), str(ref_x)):
+                            ref_x = None
+                        adopted.append({**x, "baton_ref": ref_x, "baton_id": body.get("baton_id")})
                     done |= {str(x.get("id")) for x in got} | {str(c.get("id"))}
             if not adopted:
                 if refused:

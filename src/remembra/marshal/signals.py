@@ -69,7 +69,7 @@ _AGENT_LABEL_RE = re.compile(r"[^a-z0-9._-]+")
 _RELAY_CMD_RE = re.compile(r"^(?P<prefix>.+?) (?:brief|close) --hook (?P<hook>[\w.-]+) --agent \S+(?: --once)?$")
 # A crew hook that runs the relay brief or close itself: "<remembra-crew> start|stall|end --hook A --agent A # remembra-crew".
 _CREW_CLI_RE = re.compile(
-    r"^(?P<prefix>.+?) (?P<verb>start|stall|end) --hook (?P<hook>[\w.-]+) --agent \S+ " + re.escape(CREW_HOOK_MARKER) + "$"
+    r"^(?P<prefix>.+?) (?P<verb>start|stall|end|relay) --hook (?P<hook>[\w.-]+) --agent \S+ " + re.escape(CREW_HOOK_MARKER) + "$"
 )
 _CREW_HOOK_RE = re.compile(r" --hook (?P<hook>[\w.-]+)(?: --agent \S+)? " + re.escape(CREW_HOOK_MARKER) + "$")
 _HTTP_STATUS_RE = re.compile(r"HTTP (\d{3})")

@@ -264,14 +264,26 @@ def test_plain_relay_mode_is_untouched(fh: FakeHome) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_events_crew_mode_leaves_without_a_relay_hook_are_a_note(crew_home: FakeHome) -> None:
+def test_missing_companion_hooks_are_actionable(crew_home: FakeHome) -> None:
+    for agent in ("claude-code", "codex"):
+        path = REGISTRY[agent].spec.config_path(crew_home.home)
+        data = json.loads(path.read_text())
+        for groups in data["hooks"].values():
+            for group in groups:
+                group["hooks"] = [h for h in group["hooks"] if " relay --hook " not in h.get("command", "")]
+        path.write_text(json.dumps(data))
     report = run(crew_home)
-    claude = only(report, "CREW_RELAY_GAP", "claude-code")
-    assert claude.severity == "info" and not claude.actionable and "PreCompact" in claude.what
-    assert "SessionStart" not in claude.what and "StopFailure" not in claude.what  # start, end and stall are covered
-    codex = only(report, "CREW_RELAY_GAP", "codex")
-    assert codex.severity == "info" and "UserPromptSubmit" in codex.what
-    assert claude.fix is None or claude.fix.command is None
+    for agent in ("claude-code", "codex"):
+        gap = only(report, "CREW_RELAY_GAP", agent)
+        assert gap.severity == "warn" and gap.actionable
+        assert gap.fix and "--agent " + agent in gap.fix.command
+        if agent == "codex":
+            assert "--include-unverified" in gap.fix.command
+
+
+def test_current_companion_hooks_cover_noncrew_events(crew_home: FakeHome) -> None:
+    report = run(crew_home)
+    assert "CREW_RELAY_GAP" not in ids(report)
 
 
 # ---------------------------------------------------------------------------

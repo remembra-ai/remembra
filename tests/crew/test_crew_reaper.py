@@ -331,3 +331,39 @@ async def test_reaper_hook_runs_in_the_app_lifespan(tmp_path, monkeypatch):
             await app.state.tasks.shutdown(timeout=2.0)
     finally:
         await env.db.close()
+
+
+@pytest.mark.parametrize("crew_count", [1, 10])
+async def test_unchanged_presence_reads_do_not_grow_with_hosts_and_crews(mk, monkeypatch, crew_count):
+    from remembra.crew import reaper as reaper_module
+    from remembra.crew.reaper import SweepReport
+
+    env = await mk(max_live=64)
+    expected = {}
+    for i in range(crew_count):
+        h, token = await host(env, label=f"presencehost{i}")
+        joined = await _join(env, f"presence-{i}", project=f"presence-project-{i}", host_id=h["id"], host_token=token)
+        cid = joined.session["crew_id"]
+        lease = 600 + i * 60
+        await env.svc.store.patch_settings(cid, {"lease_ttl_s": lease}, if_match=1)
+        expected[cid] = lease
+
+    reads = []
+    original_all, original_one = reaper_module._all, reaper_module._one
+
+    async def counted_all(*args, **kwargs):
+        reads.append(args[1])
+        return await original_all(*args, **kwargs)
+
+    async def counted_one(*args, **kwargs):
+        reads.append(args[1])
+        return await original_one(*args, **kwargs)
+
+    monkeypatch.setattr(reaper_module, "_all", counted_all)
+    monkeypatch.setattr(reaper_module, "_one", counted_one)
+    reaper = CrewReaper(env.svc)
+    report = SweepReport()
+    await reaper._presence(env.clock.now, report)
+    assert report.state_changes == report.lost == 0
+    assert len(reads) <= 1, reads
+    assert {cid: cfg["lease_ttl_s"] for cid, cfg in reaper._settings_cache.items()} == expected

@@ -4268,7 +4268,7 @@ wheels = [
 
 [[package]]
 name = "remembra"
-version = "0.17.7"
+version = "0.17.8"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },

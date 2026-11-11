@@ -684,7 +684,7 @@ def _crew_findings(agent: AgentSignals) -> list[Finding]:
         out.append(
             Finding(
                 "CREW_RELAY_GAP",
-                INFO,
+                WARN,
                 name,
                 f"{agent.display}: in crew mode nothing runs the relay's {events} hook for a session outside a crew;"
                 " the brief at the start and the close at the end still run.",
@@ -692,12 +692,8 @@ def _crew_findings(agent: AgentSignals) -> list[Finding]:
                     f"{agent.crew_file}: remembra-crew hooks run the brief and close on {', '.join(agent.crew_events)}",
                     f"{agent.config_path}: no relay hook on {', '.join(gaps)}",
                 ),
-                fix=Fix(
-                    kind="none",
-                    text="Nothing to change here: crew connect takes those relay hooks out, and its own hook on"
-                    f" {events} acts only in a crew session.",
-                    runs_where="none",
-                ),
+                fix=_crew_connect_fix(agent),
+                caveat="Codex asks for trust again after its hooks change." if name == "codex" else None,
             )
         )
     return out
