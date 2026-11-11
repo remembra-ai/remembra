@@ -199,15 +199,19 @@ def _same_as_saved(top: str, path: str, commit: str, changed: Sequence[str]) -> 
     nothing (two sessions of one agent usually have the same untracked ``.claude/settings.json``)."""
     if path not in changed or path.endswith("/"):
         return False
-    return _holds_saved(top, path, commit)
+    return _holds_saved(top, path, commit, filemode=_filemode(top))
 
 
-def _holds_saved(top: str, path: str, commit: str) -> bool:
+def _filemode(top: str) -> bool:
+    return try_out(["config", "--type=bool", "--get", "core.filemode"], top) != "false"
+
+
+def _holds_saved(top: str, path: str, commit: str, *, filemode: bool = True) -> bool:
     full = os.path.join(top, path)
     if os.path.islink(full) or not os.path.isfile(full):
         return False
     mode = try_out(["ls-tree", commit, "--", path], top) or ""
-    if not mode.startswith(("100644", "100755")) or mode.startswith("100755") != os.access(full, os.X_OK):
+    if not mode.startswith(("100644", "100755")) or (filemode and mode.startswith("100755") != os.access(full, os.X_OK)):
         return False
     try:
         wanted = git(["cat-file", "--filters", f"{commit}:{path}"], top, timeout=30.0).stdout
@@ -230,7 +234,10 @@ def work_present(toplevel: str | Path, ref: str) -> bool:
         deleted = z_paths(["diff", "--name-only", "-z", "--diff-filter=D", parent, commit], top)
     except GitError:
         return False
-    return all(_holds_saved(top, p, commit) for p in changed) and not any(os.path.lexists(os.path.join(top, p)) for p in deleted)
+    filemode = _filemode(top)
+    return all(_holds_saved(top, p, commit, filemode=filemode) for p in changed) and not any(
+        os.path.lexists(os.path.join(top, p)) for p in deleted
+    )
 
 
 def files_in_the_way(entries: Sequence[tuple[str, str]], touched: Iterable[str]) -> list[str]:

@@ -76,7 +76,7 @@ log = structlog.get_logger(__name__)
 LIVE_HOLD: Final = ("active", "offered")
 BLOCKING: Final = ("active", "offered", "reserved")
 LIVE: Final = ("requested", "queued", "active", "offered", "reserved")
-QUEUE_TTL_S: Final = 300  # explicit claim calls renew the wait; heartbeats do not
+QUEUE_TTL_S: Final = 600  # explicit claim calls renew the wait; heartbeats do not
 HANDOVER_TTL_S: Final = 600
 MICRO_LEASE_S: Final = 300
 FENCE_MARGIN_S: Final = 60
@@ -803,7 +803,7 @@ async def request_claim(
         await _check_task(conn, crew_id, task_id)
         _zone_rules(target, principal, settings, task_id, source)
         now = utcnow()
-        await _expire_queued(tx, crew_id, now)
+        await _expire_queued(ops, tx, crew_id, now)
         # own claim on the same target: idempotent, or a re-take of an own reservation
         own = await fetchall(
             conn,
@@ -815,7 +815,9 @@ async def request_claim(
             if not (_mine(r, principal) and target.same(r)):
                 continue
             if r["state"] == "queued":
-                await conn.execute("UPDATE crew_claims SET updated_at = ? WHERE id = ?", (now_iso(now), r["id"]))
+                await conn.execute(
+                    "UPDATE crew_claims SET updated_at = ?, version = version + 1 WHERE id = ?", (now_iso(now), r["id"])
+                )
                 # a blocker may have ended on a path that did not run the queue: promote now (never brick a waiter)
                 if str(r["id"]) in await promote_queue(ops, tx, crew_id):
                     fresh = await _reload(conn, str(r["id"]))
@@ -1045,21 +1047,46 @@ async def _hoarding_check(tx: EventTx, crew_id: str, session: Mapping[str, Any],
 # ---------------------------------------------------------------------------
 
 
-async def _expire_queued(tx: EventTx, crew_id: str, now: datetime) -> None:
-    """A wait is live for five minutes after its last explicit claim request."""
+async def _expire_queued(ops: CrewOps, tx: EventTx, crew_id: str, now: datetime) -> None:
+    """A wait is live for ten minutes after its last explicit claim request."""
     cutoff = now_iso(now - timedelta(seconds=QUEUE_TTL_S))
     rows = await fetchall(
-        tx.conn, "SELECT * FROM crew_claims WHERE crew_id = ? AND state = 'queued' AND updated_at <= ?", (crew_id, cutoff)
+        tx.conn,
+        "SELECT * FROM crew_claims WHERE crew_id = ? AND state = 'queued' AND holder_kind = 'session' AND updated_at < ?",
+        (crew_id, cutoff),
     )
     for row in rows:
         fresh = await _end(tx, row, "expired", "queue_timeout")
+        from remembra.crew import collisions as CO
+
+        await resolve_inbox_items(
+            tx, crew_id, ref_ids=[str(row["id"])], kinds=["baton_reserved", "baton_available", "baton_waiting"]
+        )
+        await CO.auto_resolve(ops, tx, crew_id, claim_id=str(row["id"]))
         await _emit_claim(tx, crew_id, "claim.expired", fresh, Actor.system(), "queued claim expired: wait not renewed")
+        if row.get("holder_session_id"):
+            # Existing clients already display session mentions; no new inbox kind is required.
+            await raise_inbox_item(
+                tx,
+                crew_id,
+                audience="session",
+                recipient=str(row["holder_session_id"]),
+                kind="mention",
+                title=(
+                    "Queued wait expired after 10 min without renewal; claim again to rejoin: "
+                    f"{await _target_label(tx.conn, row)}"
+                ),
+                dedupe_key=f"queue-expired:{row['id']}",
+                ref_type="claim",
+                ref_id=str(row["id"]),
+            )
 
 
-async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str) -> list[str]:
+async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str, *, now: datetime | None = None) -> list[str]:
     """Grant queued claims whose blockers ended, oldest first; a waiting claim is never overtaken by a later one."""
     conn = tx.conn
-    await _expire_queued(tx, crew_id, utcnow())
+    now = now or utcnow()
+    await _expire_queued(ops, tx, crew_id, now)
     queued = await fetchall(
         conn, "SELECT * FROM crew_claims WHERE crew_id = ? AND state = 'queued' ORDER BY queue_pos, created_at", (crew_id,)
     )
@@ -1068,7 +1095,6 @@ async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str) -> list[str]:
     settings = load_settings((await crew_row(conn, crew_id))["settings"])
     granted: list[str] = []
     waiting: list[dict[str, Any]] = []
-    now = utcnow()
     for q in queued:
         session = await _session(conn, q.get("holder_session_id"))
         principal = Principal.for_session(session) if session else Principal.human(str(q["holder_user_id"]))
@@ -1935,15 +1961,16 @@ async def sweep(ops: CrewOps, *, now: datetime | None = None, boot_at: datetime 
     crews = await fetchall(
         conn,
         "SELECT DISTINCT crew_id FROM crew_claims WHERE (state IN ('active','offered') AND lease_expires_at < ?)"
-        " OR (state = 'reserved' AND task_id IS NULL AND reserve_expires_at < ?) OR state = 'queued'",
-        (iso, iso),
+        " OR (state = 'reserved' AND task_id IS NULL AND reserve_expires_at < ?)"
+        " OR (state = 'queued' AND holder_kind = 'session' AND updated_at < ?)",
+        (iso, iso, now_iso(stamp - timedelta(seconds=QUEUE_TTL_S))),
     )
     for c in crews:
         crew_id = str(c["crew_id"])
         async with ops.log.transaction() as tx:
             settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
             grace = (boot_at + timedelta(seconds=int(settings["lease_ttl_s"]))) if boot_at else None
-            await _expire_queued(tx, crew_id, stamp)
+            await _expire_queued(ops, tx, crew_id, stamp)
             changed = False
             for r in await fetchall(
                 tx.conn,
@@ -1989,7 +2016,7 @@ async def sweep(ops: CrewOps, *, now: datetime | None = None, boot_at: datetime 
                 counts["reservations_expired"] += 1
                 changed = True
             if changed:
-                await promote_queue(ops, tx, crew_id)
+                await promote_queue(ops, tx, crew_id, now=stamp)
     for z in await fetchall(
         conn, "SELECT * FROM crew_zones WHERE frozen_by IS NOT NULL AND frozen_until IS NOT NULL AND frozen_until < ?", (iso,)
     ):

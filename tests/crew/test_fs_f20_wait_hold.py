@@ -129,7 +129,7 @@ def test_crew_claim_wait_is_one_budget_for_the_whole_call(live, clock, monkeypat
     assert elapsed < 15, elapsed
     assert text.count("QUEUED zone ") == 2, text
     assert "of the 40 asked: one MCP call holds at most 3s" in text, text
-    assert "call crew_claim again within 5 minutes to renew the wait" in text, text
+    assert "call crew_claim again within 10 minutes to renew the wait" in text, text
     assert "cancel it with crew_claim(action=release)" in text, text
 
 

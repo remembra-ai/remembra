@@ -3947,7 +3947,7 @@ async def crew_claim(
     Answers GRANTED, QUEUED or REFUSED. When REFUSED, do not edit there: work elsewhere or ask
     the holder with crew_say(body="…", to="@holder", kind="request_release"). wait_s waits for the grant
     instead: one call holds at most 45 seconds in all (a larger wait_s is held that long), then
-    answers QUEUED. Renew within 5 minutes with another claim call to keep your place; otherwise the wait expires.
+    answers QUEUED. Renew within 10 minutes with another claim call to keep your place; otherwise the wait expires.
     Cancel a wait with release on the same target before working elsewhere.
     release: zone/paths/task you hold, also one crew_status shows as yours and reserved
     (baton=True keeps an active one reserved for the next pickup).

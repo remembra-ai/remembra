@@ -825,3 +825,41 @@ async def test_a_file_that_cannot_be_put_back_is_reported_never_silently_lost(tm
     assert "could not put back .claude/settings.json" in (result.error or "") and ref in (result.error or ""), result
     leftovers = [f for f in os.listdir(wt_c / ".claude")] if (wt_c / ".claude").exists() else []
     assert not [f for f in leftovers if ".restore-" in f], leftovers  # no half-written temp files left behind
+
+
+async def test_saved_work_probe_yields_the_daemon_loop(monkeypatch):
+    import asyncio
+    import threading
+    from remembra.relay.crew.crewd import _baton_work_present
+
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(*args):
+        entered.set()
+        release.wait(2)
+        return True
+
+    monkeypatch.setattr(B, "work_present", slow)
+    task = asyncio.create_task(_baton_work_present("repo", "ref"))
+    try:
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        assert await task is True
+        release.clear()
+        assert await _baton_work_present("repo", "ref", timeout_s=0.01) is False
+    finally:
+        release.set()
+
+
+async def test_identical_file_restore_uses_git_filemode_policy(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    wt = add_worktree(repo, tmp_path / "adopter", "adopter")
+    ref = _baton_with(repo, {"settings.json": "same bytes\n"}, "T-19")
+    (wt / "settings.json").write_text("same bytes\n")
+    os.chmod(wt / "settings.json", 0o755)
+    assert B.restore_baton(wt, ref).reason == "dirty_tree"
+    git(wt, "config", "core.filemode", "false")
+    assert B.restore_baton(wt, ref).restored is True
+    assert B.work_present(wt, ref) is True

@@ -277,6 +277,8 @@ def test_missing_companion_hooks_are_actionable(crew_home: FakeHome) -> None:
         gap = only(report, "CREW_RELAY_GAP", agent)
         assert gap.severity == "warn" and gap.actionable
         assert gap.fix and "--agent " + agent in gap.fix.command
+        if agent == "codex":
+            assert "--include-unverified" in gap.fix.command
 
 
 def test_current_companion_hooks_cover_noncrew_events(crew_home: FakeHome) -> None:
