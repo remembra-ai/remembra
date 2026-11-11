@@ -467,9 +467,15 @@ def current_adhoc_session(home: Path, agent: str, host: str, anchor: str) -> dic
 class Context:
     """Resolved inputs shared by the hook-safe subcommands."""
 
-    def __init__(self, args: argparse.Namespace, payload: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        payload: dict[str, Any] | None = None,
+        *,
+        deadline: factlib.Deadline | None = None,
+    ) -> None:
         self.args = args
-        self.deadline = factlib.Deadline(TOTAL_BUDGET_SECONDS)
+        self.deadline = deadline if deadline is not None else factlib.Deadline(TOTAL_BUDGET_SECONDS)
         self.http_timeout = HTTP_TIMEOUT_SECONDS  # per request; commands that are not hooks may raise both
         self.adapter: Adapter | None = get_adapter(getattr(args, "hook", None))
         self.payload = payload if payload is not None else (read_hook_payload() if self.adapter else {})
@@ -483,7 +489,7 @@ class Context:
         self.cwd = Path(cwd).expanduser()
         self.home = Path(os.environ.get("HOME") or Path.home())
         self.host = socket.gethostname()
-        git_deadline = factlib.Deadline(min(GIT_BUDGET_SECONDS, TOTAL_BUDGET_SECONDS))
+        git_deadline = factlib.Deadline(min(GIT_BUDGET_SECONDS, self.deadline.remaining()))
         self.repo = factlib.repo_info(self.cwd, git_deadline)
 
     def configured_project(self) -> str | None:
@@ -967,6 +973,7 @@ def turn_messages(args: argparse.Namespace, adapter: Adapter, payload: dict[str,
     hook, which reads what crewd polled. Never raises and prints nothing on any failure: a prompt
     hook must not get in the way of the prompt.
     """
+    deadline = factlib.Deadline(TURN_BUDGET_SECONDS)
     home = _home()
     key = _once_key(args, adapter)
     try:
@@ -981,8 +988,7 @@ def turn_messages(args: argparse.Namespace, adapter: Adapter, payload: dict[str,
         if isinstance(last, int | float) and 0 <= now - float(last) < TURN_POLL_SECONDS:
             return
         save_turn_state(home, key, session_id, checked_at=now)  # before the slow part: one check per interval
-        ctx = Context(args, payload=payload)
-        ctx.deadline = factlib.Deadline(TURN_BUDGET_SECONDS)
+        ctx = Context(args, payload=payload, deadline=deadline)
         ctx.http_timeout = TURN_BUDGET_SECONDS
         if not ctx.config.api_key or not ctx.agent:
             return
