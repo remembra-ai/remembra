@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from remembra.relay.crew.crewd import ZONES_S
+from remembra.relay.crew.crewd import HEARTBEAT_S, ZONES_S
 from tests.crew.e2e.harness import WEBHOOK_URL, FakeAgent, World, git, wait_for
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -248,6 +248,7 @@ def test_token_bounds_over_a_long_session(world: World) -> None:
     b.start()
     injections: list[str] = []
     changes = 0
+    began = time.monotonic()
     for turn in range(100):
         if turn % 5 == 0 and changes < 20:
             zone = "reports" if changes % 2 == 0 else "pos"
@@ -261,7 +262,16 @@ def test_token_bounds_over_a_long_session(world: World) -> None:
                 ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
                 injections.append(ctx)
     assert changes == 20
-    assert len(injections) <= 20, len(injections)
+    # One block per crew change, never one per turn. crewd's heartbeat (every HEARTBEAT_S) also hands the
+    # session what others did since the last one as a "NEW:" line, once: a loop that runs across a
+    # heartbeat gets that block, and the gate prints the plain block once more on the turn after it (its
+    # digest holds the news ids for that one turn). Both are bounded by the clock, not by the turn count:
+    # at most one news block per heartbeat, and at most two blocks for each. Without a heartbeat in the
+    # loop this is exactly "at most 20".
+    news = sum(1 for t in injections if "\nNEW: " in t)
+    heartbeats = int((time.monotonic() - began) // HEARTBEAT_S) + 1
+    assert news <= heartbeats, (news, heartbeats, injections)
+    assert len(injections) - 2 * news <= 20, (len(injections), news, injections)
     assert all(len(t) <= 600 for t in injections), [len(t) for t in injections]
 
 

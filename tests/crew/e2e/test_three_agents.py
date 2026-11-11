@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from remembra.crew import schemas as S
+from remembra.relay.crew.gate import read_json
 from tests.crew.e2e.harness import VITEST, WEBHOOK_URL, DashboardObserver, World, git, wait_for
 
 pytestmark = pytest.mark.skipif(
@@ -268,6 +269,17 @@ def test_three_agents_end_to_end(world: World) -> None:
     print(f"stall visible after {elapsed:.2f}s")
 
     # ---- 5. B tries POS again: the reserved reason, and no adopt line (B was not offered) --------------
+    # The gate decides from this machine's snapshot file, which crewd re-reads in the background once the
+    # stall call has returned; the events above are on the socket before that call returns. The step is
+    # about what the gate says once the reservation has reached it, so wait for the file, inside the same
+    # 5 s the stall has (until then the gate still denies, with the holder reason).
+    def reserved_locally() -> bool:
+        local = read_json(world.layout.snapshot_file(crew)) or {}
+        return any(c.get("zone_id") == pos and c.get("state") == "reserved" for c in local.get("claims") or ())
+
+    assert wait_for(reserved_locally, timeout=max(0.5, 5.0 - (time.time() - t_stall)), interval=0.02), (
+        f"the reservation did not reach the local snapshot within 5 s of the stall ({time.time() - t_stall:.2f}s)"
+    )
     reason = denied_reason(b.edit("src/app/pos/split.ts", "[total]", "[Math.round(total)]"))
     assert "RESERVED for the next pickup of T-1" in reason and "You were not offered this baton" in reason, reason
     assert "adopt" not in reason.lower(), reason
