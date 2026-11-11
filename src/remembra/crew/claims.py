@@ -76,6 +76,7 @@ log = structlog.get_logger(__name__)
 LIVE_HOLD: Final = ("active", "offered")
 BLOCKING: Final = ("active", "offered", "reserved")
 LIVE: Final = ("requested", "queued", "active", "offered", "reserved")
+QUEUE_TTL_S: Final = 300  # explicit claim calls renew the wait; heartbeats do not
 HANDOVER_TTL_S: Final = 600
 MICRO_LEASE_S: Final = 300
 FENCE_MARGIN_S: Final = 60
@@ -802,6 +803,7 @@ async def request_claim(
         await _check_task(conn, crew_id, task_id)
         _zone_rules(target, principal, settings, task_id, source)
         now = utcnow()
+        await _expire_queued(tx, crew_id, now)
         # own claim on the same target: idempotent, or a re-take of an own reservation
         own = await fetchall(
             conn,
@@ -813,11 +815,12 @@ async def request_claim(
             if not (_mine(r, principal) and target.same(r)):
                 continue
             if r["state"] == "queued":
+                await conn.execute("UPDATE crew_claims SET updated_at = ? WHERE id = ?", (now_iso(now), r["id"]))
                 # a blocker may have ended on a path that did not run the queue: promote now (never brick a waiter)
                 if str(r["id"]) in await promote_queue(ops, tx, crew_id):
                     fresh = await _reload(conn, str(r["id"]))
                     return ClaimOutcome("granted", fresh)
-                return ClaimOutcome("queued", r)
+                return ClaimOutcome("queued", await _reload(conn, str(r["id"])))
             if r["state"] in ("active", "offered"):
                 return ClaimOutcome("existing", r)
             if r["state"] == "reserved" and r.get("reserved_for") in (None, principal.session_id):
@@ -1042,9 +1045,21 @@ async def _hoarding_check(tx: EventTx, crew_id: str, session: Mapping[str, Any],
 # ---------------------------------------------------------------------------
 
 
+async def _expire_queued(tx: EventTx, crew_id: str, now: datetime) -> None:
+    """A wait is live for five minutes after its last explicit claim request."""
+    cutoff = now_iso(now - timedelta(seconds=QUEUE_TTL_S))
+    rows = await fetchall(
+        tx.conn, "SELECT * FROM crew_claims WHERE crew_id = ? AND state = 'queued' AND updated_at <= ?", (crew_id, cutoff)
+    )
+    for row in rows:
+        fresh = await _end(tx, row, "expired", "queue_timeout")
+        await _emit_claim(tx, crew_id, "claim.expired", fresh, Actor.system(), "queued claim expired: wait not renewed")
+
+
 async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str) -> list[str]:
     """Grant queued claims whose blockers ended, oldest first; a waiting claim is never overtaken by a later one."""
     conn = tx.conn
+    await _expire_queued(tx, crew_id, utcnow())
     queued = await fetchall(
         conn, "SELECT * FROM crew_claims WHERE crew_id = ? AND state = 'queued' ORDER BY queue_pos, created_at", (crew_id,)
     )
@@ -1160,6 +1175,10 @@ async def _after_end(ops: CrewOps, tx: EventTx, crew_id: str, rows: Sequence[Map
 
     await promote_queue(ops, tx, crew_id)
     for r in rows:
+        if r["state"] not in LIVE:
+            await resolve_inbox_items(
+                tx, crew_id, ref_ids=[str(r["id"])], kinds=["baton_reserved", "baton_available", "baton_waiting"]
+            )
         await CO.auto_resolve(ops, tx, crew_id, claim_id=str(r["id"]))
 
 
@@ -1916,7 +1935,7 @@ async def sweep(ops: CrewOps, *, now: datetime | None = None, boot_at: datetime 
     crews = await fetchall(
         conn,
         "SELECT DISTINCT crew_id FROM crew_claims WHERE (state IN ('active','offered') AND lease_expires_at < ?)"
-        " OR (state = 'reserved' AND task_id IS NULL AND reserve_expires_at < ?)",
+        " OR (state = 'reserved' AND task_id IS NULL AND reserve_expires_at < ?) OR state = 'queued'",
         (iso, iso),
     )
     for c in crews:
@@ -1924,6 +1943,7 @@ async def sweep(ops: CrewOps, *, now: datetime | None = None, boot_at: datetime 
         async with ops.log.transaction() as tx:
             settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
             grace = (boot_at + timedelta(seconds=int(settings["lease_ttl_s"]))) if boot_at else None
+            await _expire_queued(tx, crew_id, stamp)
             changed = False
             for r in await fetchall(
                 tx.conn,

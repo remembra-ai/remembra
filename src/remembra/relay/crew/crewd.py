@@ -2829,10 +2829,13 @@ class Crewd:
                         continue
                     body = r.body or {}
                     got = [x for x in body.get("claims") or ([body["claim"]] if body.get("claim") else []) if isinstance(x, dict)]
+                    # a retake is this session's own claim back: nothing to restore while its work is still here
+                    retake = body.get("kind") == "retake"
                     for x in got or [c]:
-                        adopted.append(
-                            {**x, "baton_ref": x.get("baton_ref") or c.get("baton_ref"), "baton_id": body.get("baton_id")}
-                        )
+                        ref_x = x.get("baton_ref") or c.get("baton_ref")
+                        if retake and ref_x and B.work_present(str(sess["toplevel"]), str(ref_x)):
+                            ref_x = None
+                        adopted.append({**x, "baton_ref": ref_x, "baton_id": body.get("baton_id")})
                     done |= {str(x.get("id")) for x in got} | {str(c.get("id"))}
             if not adopted:
                 if refused:

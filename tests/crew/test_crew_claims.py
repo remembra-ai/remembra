@@ -363,7 +363,7 @@ async def test_sweeper_leases_reservations_and_boot_grace(env):
     assert counts["reservations_expired"] == 1
     assert (await C.get_claim(db.conn, got.claim["id"]))["state"] == "expired"  # type: ignore[index]
     assert (await C.get_claim(db.conn, tasked.claim["id"]))["state"] == "reserved"  # type: ignore[index]
-    assert (await C.get_claim(db.conn, waiting.claim["id"]))["state"] == "active"  # type: ignore[index]
+    assert (await C.get_claim(db.conn, waiting.claim["id"]))["state"] == "expired"  # type: ignore[index]
     # micro-leases expire instead of reserving
     ml = await C.request_claim(ops, CREW, a, path_glob="yarn.lock", source="micro_lease")
     assert ml.claim["lease_expires_at"] < now_iso(C.utcnow() + timedelta(seconds=C.MICRO_LEASE_S + 1))  # type: ignore[index]

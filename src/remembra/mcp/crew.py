@@ -2503,7 +2503,8 @@ class CrewBridge:
                 waited_txt = f" (waited {waited}s{_held_note(asked, cap) if held < asked else ''})" if asked > 0 else ""
                 lines.append(
                     f"QUEUED {label}{waited_txt}: {who}. You are next in line ({claim.get('id')}); "
-                    f"call crew_claim again with wait_s to keep waiting, or work elsewhere.{cut}"
+                    f"call crew_claim again within 5 minutes to renew the wait, "
+                    f"or cancel it with crew_claim(action=release) on the same target before working elsewhere.{cut}"
                 )
             else:
                 lines.append(f"{str(state or status).upper()} {label} ({claim.get('id')})")
