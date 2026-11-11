@@ -54,6 +54,13 @@ def proxy(api):
         def log_message(self, *args: Any) -> None:
             return
 
+    # The hook gives the server 8 s. The first request through a new app also builds the parameter models
+    # of every route (about 90 ms and a million calls here, against 3 ms for the next request), and late in
+    # the full suite that burst once met a pause of more than 8 s on a CI runner. So the app has served one
+    # brief before the hook runs: record=false writes nothing, and it does not pass through the proxy, so
+    # `seen` holds only the hook's own requests.
+    assert api["http"].get("/api/v1/session/brief?project_id=warm-up&record=false").status_code == 200
+
     server = HTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
