@@ -46,6 +46,8 @@ def collect(root: Path = ROOT) -> dict[str, str | None]:
 
     server = json.loads((root / "server.json").read_text(encoding="utf-8"))
     found["server.json version"] = server.get("version")
+    card = json.loads((root / "src/remembra/api/well_known/server-card.json").read_text(encoding="utf-8"))
+    found["server-card.json serverInfo.version"] = card.get("serverInfo", {}).get("version")
     packages = server.get("packages") or []
     launcher_entries = [p for p in packages if p.get("registryType") == "pypi" and p.get("identifier") == LAUNCHER]
     found["server.json packages[remembra-mcp].version"] = launcher_entries[0].get("version") if launcher_entries else None

@@ -44,7 +44,7 @@ What Crew mode does about that:
 2. **Keeps the guarantees that matter on the server**, where a local agent cannot switch them off:
     - **Human-only actions need a dashboard login.** Overrides, hand-overs, freezes, waivers, approving
       a change that loosens `zones.yml`, bypass codes, settings and pausing an agent are accepted only
-      from a dashboard session (sensitive ones need a login from the last 110 minutes). API keys, even
+      from a dashboard session (sensitive ones need a login from the last 15 minutes). API keys, even
       admin keys, are never "human".
     - **Tenancy.** Every crew and every claim, task or message id is checked against your account and
       project access; a key restricted to one project cannot see or create crews for another.
@@ -226,7 +226,7 @@ to keep a separate MCP seat instead.
 ### When an agent stops
 
 - **Out of credits or rate-limited.** Claude Code reports it through its StopFailure hook; for other
-  agents a transcript detector notices a limit message followed by ten minutes of silence. The session
+  agents a transcript detector notices a limit message followed by five minutes of silence. The session
   becomes *quota blocked*, its uncommitted work is saved to `refs/remembra/baton/…`, its task becomes
   *stalled* with a report, and you get a **baton available** notice.
 - **Crashed or closed.** A dead process is noticed within 30 s and handled the same way. A machine that
@@ -268,7 +268,7 @@ project to **observe** (log would-be denials instead of refusing).
 **Bypass codes.** There is no environment variable an agent can set to switch Crew mode off. When you
 need to push past the gate yourself, issue a code in the project's **Policy** panel: it is single use,
 scoped to one session and one surface (`commit`, `push`, or `write:<zone>` for edits in that zone
-only), valid for up to 110 minutes, and the panel shows the exact command
+only), valid for up to 15 minutes, and the panel shows the exact command
 (`REMEMBRA_BYPASS=<code> git push`). A code issued for `push` does not open a commit or an edit. When the server cannot be reached, `remembra-crew bypass --session <callsign>` asks for
 confirmation at an interactive terminal. Every use is an audit entry, a moment and an alert.
 
