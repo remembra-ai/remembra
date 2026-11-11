@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.17.8] - 2026-11-11
 
 ### Fixed
+- Use one joined snapshot for presence sweeps instead of per-host and per-crew reads, reducing
+  contention with heartbeats and claims. Include repository discovery in the prompt message check
+  two-second budget.
 - Restore saved work when the adopter has identical untracked files, while retaining byte, mode,
   changed-commit and rollback safeguards. Honor Git's `core.filemode=false` on filesystems without
   executable bits. An own retake skips restoration only when the saved work is present; the check
