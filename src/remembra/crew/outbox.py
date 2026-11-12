@@ -16,6 +16,14 @@ Delivery is at-least-once, so every handler is idempotent:
   effect already happened (or the agent closed the session itself, which is
   newer and better), so it is not applied again.
 
+Workers serialize the entire read/apply/ack batch per local Crew database.
+A nonblocking POSIX file lock excludes other API processes and is released by
+the OS if a process dies; it has no lease that can expire during a slow handler.
+Do not unlink the persistent lock file, or run crew.db on a filesystem without
+shared POSIX locks. This does not make external side effects exactly-once:
+handlers still need durable replay checks after a crash. The memory replay
+check covers a committed main-DB memory, not a partially completed store or meter.
+
 Failures retry with exponential backoff stored on the row (``next_attempt_at``),
 so a restart keeps the schedule. After ``max_attempts``, or on a
 :class:`OutboxPermanentError` (a malformed payload), the item is marked
@@ -36,9 +44,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import Awaitable, Callable, Mapping
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Final
 
 import structlog
@@ -106,7 +116,6 @@ class CrewOutboxWorker:
         self.max_backoff_s = max_backoff_s
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
-        self._run_lock = asyncio.Lock()
         self._stopping = False
 
     # -- lifecycle ---------------------------------------------------------------
@@ -155,10 +164,53 @@ class CrewOutboxWorker:
         """Seconds to wait after the ``attempts``-th failure."""
         return float(min(self.max_backoff_s, self.base_backoff_s * (2 ** max(attempts - 1, 0))))
 
+    @contextlib.asynccontextmanager
+    async def _exclusive_batch(self) -> AsyncIterator[bool]:
+        """Keep competing workers out through the handler and acknowledgement.
+
+        Never hold a Crew SQLite transaction across a handler: handlers may read
+        Crew limits or write the main database. If locking fails, propagate the
+        error and leave the pending effects untouched, rather than running unlocked.
+        """
+        db = self.store.db
+        if db.outbox_run_lock.locked():
+            yield False
+            return
+        async with db.outbox_run_lock:
+            if db.db_path == ":memory:":
+                yield True
+                return
+
+            # Import here so the SDK still imports on Windows. Crew requires
+            # macOS/Linux; unsupported platforms must fail closed when processing.
+            import fcntl
+
+            database = Path(db.db_path).resolve()
+            lock_path = database.with_name(database.name + ".outbox.lock")
+            flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(lock_path, flags, 0o600)
+            acquired = False
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                except BlockingIOError:
+                    yield False
+                    return
+                yield True
+            finally:
+                try:
+                    if acquired:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(fd)
+
     async def run_once(self) -> dict[str, int]:
         """Apply every due item once; return counts by outcome (``done``, ``retry``, ``failed``)."""
         counts = {"done": 0, "retry": 0, "failed": 0}
-        async with self._run_lock:
+        async with self._exclusive_batch() as acquired:
+            if not acquired:
+                return counts
             for row in await self.store.due_outbox(limit=self.batch_size):
                 outcome = await self._process(row)
                 counts[outcome] += 1
