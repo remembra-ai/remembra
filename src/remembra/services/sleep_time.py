@@ -19,6 +19,7 @@ pinned memory, or changes its text (``MUTABLE_SQL``): the retention pages
 promise those stay until the user deletes them.
 """
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -35,6 +36,64 @@ from remembra.models.memory import ConsolidationReport
 from remembra.security.audit import AuditAction, AuditLogger
 
 log = structlog.get_logger(__name__)
+
+
+def parse_entity_aliases(raw: Any) -> list[str]:
+    """Read an ``entities.aliases`` value as a list of names.
+
+    The column holds a JSON array. Two older shapes are also read so their
+    names are not lost: several arrays joined with commas (``["A"],["B"],[]``,
+    written by entity merges before this function existed) and a plain
+    comma-separated string. Order is kept; blanks and repeats are dropped.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list | tuple):
+        parsed: Any = list(raw)
+    else:
+        text = str(raw).strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            # Several JSON values in a row, separated by commas: read each one.
+            decoder = json.JSONDecoder()
+            values: list[Any] = []
+            pos = 0
+            while pos < len(text):
+                if text[pos] in ", \t\r\n":
+                    pos += 1
+                    continue
+                try:
+                    value, pos = decoder.raw_decode(text, pos)
+                except ValueError:
+                    values = []
+                    break
+                values.append(value)
+            # Not JSON at all: an older comma-separated list of names.
+            parsed = values or text.split(",")
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, list | tuple):
+            for item in value:
+                walk(item)
+        elif isinstance(value, str):
+            name = value.strip()
+            if name and name.casefold() not in seen:
+                seen.add(name.casefold())
+                names.append(name)
+
+    walk(parsed)
+    return names
+
+
+def _name_key(name: Any) -> str:
+    """Case- and spacing-insensitive form of an entity name, for equality only."""
+    return " ".join(str(name or "").casefold().split())
+
 
 # The only memory types the sleep-time pass may merge or delete: ordinary notes
 # and the facts pulled from them. Handoffs, checkpoints and status values (the
@@ -404,9 +463,10 @@ class SleepTimeWorker:
         """
         Resolve entity aliases across different sessions.
 
-        Two entities match on the same name, a name in the other's aliases, or one
-        name inside the other ("John" and "John Smith"); see ``_entities_match``.
-        A relational mention ("my wife") is not matched to a name here.
+        Two entities match only on the same name, or a name that is one of the
+        other's aliases; see ``_entities_match``. A shorter name inside a longer
+        one ("Sam" and "Sam Altman") is not a match, and a relational mention
+        ("my wife") is not matched to a name here.
 
         Operation Circuit Breaker fix (March 19, 2026):
         - Added max merge attempts per pass (circuit breaker)
@@ -439,7 +499,7 @@ class SleepTimeWorker:
                     {
                         "id": row[0],
                         "name": row[1],
-                        "aliases": row[2].split(",") if row[2] else [],
+                        "aliases": parse_entity_aliases(row[2]),
                         "type": row[3],
                         "project_id": row[4],
                     }
@@ -504,22 +564,24 @@ class SleepTimeWorker:
         entity1: dict[str, Any],
         entity2: dict[str, Any],
     ) -> bool:
-        """Check if two entities are likely the same."""
-        name1 = entity1["name"].lower()
-        name2 = entity2["name"].lower()
-        aliases1 = [a.lower() for a in entity1.get("aliases", [])]
-        aliases2 = [a.lower() for a in entity2.get("aliases", [])]
+        """Whether two entities are the same one, on evidence that a merge can rest on.
 
-        # Direct name match
+        A merge deletes one entity and moves its memory links and relationships
+        onto the other, and nothing undoes it. So the only matches are an equal
+        name (ignoring case and spacing) or a name that is listed among the
+        other's aliases. A name that merely contains the other is not a match:
+        "Sam" is inside both "Samantha Reed" and "Sam Altman", and "Go" is inside
+        "Google".
+        """
+        name1 = _name_key(entity1["name"])
+        name2 = _name_key(entity2["name"])
+        if not name1 or not name2:
+            return False
         if name1 == name2:
             return True
-
-        # Name in other's aliases
-        if name1 in aliases2 or name2 in aliases1:
-            return True
-
-        # One name contains the other (e.g., "John" in "John Smith")
-        return bool(name1 in name2 or name2 in name1)
+        aliases1 = {_name_key(a) for a in entity1.get("aliases", [])}
+        aliases2 = {_name_key(a) for a in entity2.get("aliases", [])}
+        return name1 in aliases2 or name2 in aliases1
 
     async def _importance_rescore_pass(self, user_id: str) -> int:
         """
@@ -699,21 +761,23 @@ class SleepTimeWorker:
                     log.warning("entity_merge_skipped_scope", keep=keep_id, delete=delete_id, found=found)
                     return
 
-                # 1. Transfer aliases from deleted to kept
+                # 1. The kept entity takes the deleted one's name and aliases. The
+                # column is a JSON array and is written back as one.
                 cursor = await self.db.conn.execute(
-                    "SELECT aliases FROM entities WHERE id = ?",
-                    (delete_id,),
+                    "SELECT id, canonical_name, aliases FROM entities WHERE id IN (?, ?)",
+                    (keep_id, delete_id),
                 )
-                row = await cursor.fetchone()
-                if row and row[0]:
-                    await self.db.conn.execute(
-                        """
-                        UPDATE entities 
-                        SET aliases = aliases || ',' || ?
-                        WHERE id = ?
-                        """,
-                        (row[0], keep_id),
-                    )
+                found_rows = {r[0]: (r[1], r[2]) for r in await cursor.fetchall()}
+                keep_name, keep_aliases = found_rows[keep_id]
+                delete_name, delete_aliases = found_rows[delete_id]
+                merged = parse_entity_aliases(
+                    [parse_entity_aliases(keep_aliases), delete_name, parse_entity_aliases(delete_aliases)]
+                )
+                merged = [a for a in merged if _name_key(a) != _name_key(keep_name)]
+                await self.db.conn.execute(
+                    "UPDATE entities SET aliases = ? WHERE id = ?",
+                    (json.dumps(merged), keep_id),
+                )
 
                 # 2. Update memory_entities references (skip links the kept
                 # entity already has — (memory_id, entity_id) is the PK)
