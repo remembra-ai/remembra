@@ -1,0 +1,97 @@
+name: Publish scheduled blog posts
+
+# A post in content/blog/ dated in the future is merged long before it should
+# be public. Each day this workflow rebuilds the blog as of today (UTC) with
+# scripts/site_blog.py; when a post has come due, the output changes and it
+# opens a pull request titled "Publish: <post title>". Merging that pull
+# request is what puts the post live. It never pushes to main and never merges.
+#
+# The repository setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings > Actions > General) must be on for `gh pr create` to
+# work with GITHUB_TOKEN. Pull requests opened with GITHUB_TOKEN do not start
+# other workflows, so this job runs the site checks itself before opening one.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blog-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Open a "Publish:" pull request when a post comes due
+    runs-on: ubuntu-latest
+    if: github.repository == 'remembra-ai/remembra'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Always the default branch, whatever ref a manual run was started from.
+      # The checkout keeps its token: this job pushes one branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Rebuild the blog as of today (UTC)
+        run: |
+          today="$(date -u +%F)"
+          python scripts/site_blog.py --today "$today" --report "$RUNNER_TEMP/blog-report.json"
+
+      # Standard library only: nothing is installed in a job that can write to the repository.
+      - name: Check the site still holds together
+        run: |
+          python scripts/site_blog.py --check
+          python scripts/site_partials.py --check
+          python scripts/site_csp.py --check
+          python scripts/site_llms.py --check
+
+      - name: Open the pull request if a post came due
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/blog-report.json"
+          if [ "$(jq -r '.changed' "$report")" != "true" ] || [ -z "$(git status --porcelain -- landing content/blog)" ]; then
+            echo "Nothing came due today."
+            exit 0
+          fi
+          open="$(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("blog/publish-"))] | length')"
+          if [ "$open" != "0" ]; then
+            echo "A blog/publish-* pull request is already open; merge or close it first."
+            exit 0
+          fi
+          built="$(jq -r '.built_through' "$report")"
+          branch="blog/publish-${built}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists; delete it to publish again."
+            exit 0
+          fi
+          title="$(jq -r '.pr_title' "$report")"
+          {
+            echo "The daily blog build found posts whose date has come."
+            echo
+            echo "Published:"
+            jq -r '.published[] | "- \(.date)  \(.title)  (/blog/\(.slug))"' "$report"
+            echo
+            echo "Files:"
+            jq -r '(.written + .removed)[] | "- \(.)"' "$report"
+            echo
+            echo "Merging this pull request is the approval: it puts the pages on main, and the site deploy takes them live."
+            echo "CI does not start on pull requests opened by GitHub Actions; this run checked site_blog, site_partials, site_csp and site_llms."
+          } > "$RUNNER_TEMP/blog-pr-body.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -- landing content/blog/build.json
+          git commit -m "$title"
+          git push origin "HEAD:refs/heads/${branch}"
+          gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/blog-pr-body.md"

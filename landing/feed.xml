@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Remembra blog</title>
+    <link>https://remembra.dev/blog</link>
+    <description>Notes from building Remembra: agent memory, handoffs between AI agents, and how Remembra compares with Mem0 and Zep.</description>
+    <language>en-us</language>
+    <lastBuildDate>Fri, 25 Sep 2026 00:00:00 GMT</lastBuildDate>
+    <atom:link href="https://remembra.dev/feed.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Remembra vs Mem0 vs Zep</title>
+      <link>https://remembra.dev/blog/remembra-vs-mem0-vs-zep</link>
+      <guid isPermaLink="true">https://remembra.dev/blog/remembra-vs-mem0-vs-zep</guid>
+      <pubDate>Sun, 08 Mar 2026 00:00:00 GMT</pubDate>
+      <description>What each is built for, current prices with sources, MCP support, and where each is the better fit.</description>
+    </item>
+    <item>
+      <title>Building Remembra with AI agents</title>
+      <link>https://remembra.dev/blog/building-remembra-with-ai-agents</link>
+      <guid isPermaLink="true">https://remembra.dev/blog/building-remembra-with-ai-agents</guid>
+      <pubDate>Sun, 15 Mar 2026 00:00:00 GMT</pubDate>
+      <description>How we built Remembra with a team of AI agents that shared one memory, and what broke along the way.</description>
+    </item>
+    <item>
+      <title>Multi-agent orchestration: how AI agents work together</title>
+      <link>https://remembra.dev/blog/multi-agent-orchestration-patterns</link>
+      <guid isPermaLink="true">https://remembra.dev/blog/multi-agent-orchestration-patterns</guid>
+      <pubDate>Sat, 14 Mar 2026 00:00:00 GMT</pubDate>
+      <description>Patterns for coordinating several AI agents: spawning sub-agents, handing off context, and why a shared memory helps.</description>
+    </item>
+    <item>
+      <title>Why your AI forgets everything</title>
+      <link>https://remembra.dev/blog/why-your-ai-forgets-everything</link>
+      <guid isPermaLink="true">https://remembra.dev/blog/why-your-ai-forgets-everything</guid>
+      <pubDate>Sat, 07 Mar 2026 00:00:00 GMT</pubDate>
+      <description>Every AI conversation starts from scratch. Why that happens, and what a persistent memory changes.</description>
+    </item>
+  </channel>
+</rss>

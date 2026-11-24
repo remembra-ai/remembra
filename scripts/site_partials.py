@@ -5,7 +5,7 @@ The marketing site (landing/) is plain static HTML with no build step, so
 each page carries its own copy of the shared blocks. This script rewrites
 the regions between these markers in every page listed in PAGES:
 
-    <!-- @head -->   ... <!-- /@head -->     favicons, fonts, theme bootstrap, site.css
+    <!-- @head -->   ... <!-- /@head -->     favicons, the blog feed link, fonts, theme bootstrap, site.css
     <!-- @header --> ... <!-- /@header -->   skip link, lockup, primary nav, mobile menu
     <!-- @footer --> ... <!-- /@footer -->   terrain strip, lockup, footer links
 
@@ -101,6 +101,7 @@ HEAD = """<script>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=20260926">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260926">
 <link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="Remembra blog" href="/feed.xml">
 <meta name="theme-color" content="#131416">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -140,6 +141,7 @@ MENU = [
     ("pricing", "Pricing", "/pricing"),
     ("docs", "Docs", DOCS),
     ("github", "GitHub", GITHUB),
+    ("blog", "Blog", "/blog"),
     ("security", "Security", "/security"),
     ("contact", "Contact", "/contact"),
 ]
@@ -154,6 +156,7 @@ FOOT = [
     ("refunds", "Refunds", "/refunds"),
     ("subprocessors", "Subprocessors", "/subprocessors"),
     ("dpa", "DPA", "/dpa"),
+    ("blog", "Blog", "/blog"),
     ("changelog", "Changelog", "/changelog"),
     ("contact", "Contact", "/contact"),
 ]
