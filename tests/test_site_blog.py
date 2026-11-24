@@ -69,9 +69,13 @@ def site(tmp_path: Path) -> Any:
     paths.content.mkdir(parents=True)
     paths.blog.mkdir(parents=True)
     shutil.copy(CONTENT / "legacy.json", paths.legacy)
-    shutil.copy(LANDING / "sitemap.xml", paths.sitemap)
     for slug in LEGACY:
         shutil.copy(LANDING / "blog" / f"{slug}.html", paths.blog / f"{slug}.html")
+    # The committed sitemap lists the posts published so far. This copy holds none of
+    # their sources, so its blog lines are rebuilt for what it does hold: the legacy posts.
+    committed = (LANDING / "sitemap.xml").read_text(encoding="utf-8")
+    legacy_only = blog.ordered(blog.load_legacy(paths), BUILD_DAY)
+    paths.sitemap.write_text(blog.render_sitemap(committed, legacy_only, BUILD_DAY), encoding="utf-8")
     return paths
 
 
