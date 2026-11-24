@@ -1,0 +1,78 @@
+{"id":"m001","project":"atlas","days_ago":120,"content":"Dana Reyes is the tech lead of the Atlas web app at Northwind Robotics."}
+{"id":"m002","project":"atlas","days_ago":118,"content":"Atlas is written in TypeScript with a Next.js frontend and a FastAPI backend."}
+{"id":"m003","project":"atlas","days_ago":115,"content":"The Atlas production database is PostgreSQL 16 hosted on Neon."}
+{"id":"m004","project":"atlas","days_ago":110,"content":"Dana prefers tabs over spaces and a 100 character line limit."}
+{"id":"m005","project":"atlas","days_ago":108,"content":"All Atlas pull requests need one approving review from Priya Natarajan before merge."}
+{"id":"m006","project":"atlas","days_ago":105,"content":"The Atlas staging environment lives at staging.atlas.example and deploys from the develop branch."}
+{"id":"m007","project":"atlas","days_ago":100,"content":"Atlas uses Stripe for billing; webhooks are verified with the signing secret stored in Vault."}
+{"id":"m008","project":"atlas","days_ago":98,"content":"Never run database migrations on Atlas during business hours; the window is 02:00 to 04:00 UTC."}
+{"id":"m009","project":"atlas","days_ago":95,"content":"The Atlas test suite runs with pnpm test and takes about nine minutes in CI."}
+{"id":"m010","project":"atlas","days_ago":92,"content":"Marcus Bell owns the Atlas design system and the Figma component library."}
+{"id":"m011","project":"atlas","days_ago":90,"content":"Atlas authentication uses Auth0 with passwordless email login."}
+{"id":"m012","project":"atlas","days_ago":14,"supersedes":"m011","content":"Atlas authentication moved from Auth0 to Clerk; passwordless email login is unchanged."}
+{"id":"m013","project":"atlas","days_ago":88,"content":"The Atlas release cadence is every second Tuesday."}
+{"id":"m014","project":"atlas","days_ago":20,"supersedes":"m013","content":"The Atlas release cadence changed to weekly, every Thursday."}
+{"id":"m015","project":"atlas","days_ago":85,"content":"Atlas error tracking is handled by Sentry and alerts go to the #atlas-alerts Slack channel."}
+{"id":"m016","project":"atlas","days_ago":80,"content":"The Atlas API rate limit is 60 requests per minute per API key."}
+{"id":"m017","project":"atlas","days_ago":9,"supersedes":"m016","content":"The Atlas API rate limit was raised to 120 requests per minute per API key."}
+{"id":"m018","project":"atlas","days_ago":78,"content":"Dana's working hours are 9am to 5pm Eastern, and she is offline on Fridays."}
+{"id":"m019","project":"atlas","days_ago":75,"content":"Feature flags in Atlas are managed with LaunchDarkly; the flag prefix is atlas_."}
+{"id":"m020","project":"atlas","days_ago":72,"content":"The Atlas search feature is backed by Meilisearch running on a single 4 GB instance."}
+{"id":"m021","project":"atlas","days_ago":70,"content":"Customer Globex reported that CSV export times out for reports above 50,000 rows."}
+{"id":"m022","project":"atlas","days_ago":6,"content":"The CSV export timeout for Globex was fixed by streaming the response; shipped in release 4.12."}
+{"id":"m023","project":"atlas","days_ago":68,"content":"The Atlas on-call rotation is weekly and hands over on Monday at 10:00 Eastern."}
+{"id":"m024","project":"atlas","days_ago":65,"content":"Priya Natarajan is the security reviewer for anything touching authentication or payments."}
+{"id":"m025","project":"atlas","days_ago":62,"content":"The Atlas mobile client is a React Native app maintained by Tomasz Zielinski."}
+{"id":"m026","project":"atlas","days_ago":60,"content":"Images uploaded to Atlas are stored in the S3 bucket atlas-media-prod with a 90 day lifecycle rule for originals."}
+{"id":"m027","project":"atlas","days_ago":58,"content":"Dana wants commit messages in the imperative mood with the ticket number as a prefix."}
+{"id":"m028","project":"atlas","days_ago":55,"content":"The Atlas backend runs on Python 3.11."}
+{"id":"m029","project":"atlas","days_ago":4,"content":"The Atlas backend was upgraded to Python 3.13 last sprint."}
+{"id":"m030","project":"atlas","days_ago":52,"content":"The primary Atlas contact at Globex is Elena Vasquez."}
+{"id":"m031","project":"atlas","days_ago":3,"content":"Elena Vasquez left Globex; the new Atlas contact there is Raj Patel."}
+{"id":"m032","project":"atlas","days_ago":50,"content":"Atlas background jobs run on Celery with Redis as the broker."}
+{"id":"m033","project":"atlas","days_ago":48,"content":"The Atlas analytics dashboard queries a read replica, never the primary database."}
+{"id":"m034","project":"atlas","days_ago":45,"content":"Dana dislikes long meetings and prefers written updates in the weekly doc."}
+{"id":"m035","project":"atlas","days_ago":42,"content":"The Atlas pricing page copy is owned by marketing; engineers must not edit it without sign-off from Lena Okafor."}
+{"id":"m036","project":"atlas","days_ago":40,"content":"Accessibility target for Atlas is WCAG 2.2 AA, audited each quarter."}
+{"id":"m037","project":"atlas","days_ago":38,"content":"The Atlas monorepo uses Turborepo and pnpm workspaces."}
+{"id":"m038","project":"atlas","days_ago":35,"content":"Load testing showed Atlas handles 800 concurrent users before p95 latency exceeds one second."}
+{"id":"m039","project":"atlas","days_ago":33,"content":"The Atlas CI pipeline runs on GitHub Actions with self-hosted runners for the end-to-end tests."}
+{"id":"m040","project":"atlas","days_ago":30,"content":"Tomasz is on parental leave until the end of January; Ines Moreau covers the mobile client."}
+{"id":"m041","project":"atlas","days_ago":28,"content":"The decision was made to drop Internet Explorer and legacy Edge support in Atlas."}
+{"id":"m042","project":"atlas","days_ago":25,"content":"Atlas email is sent through Postmark; the transactional stream is separate from the broadcast stream."}
+{"id":"m043","project":"atlas","days_ago":22,"content":"The Atlas data retention policy deletes inactive accounts after 24 months."}
+{"id":"m044","project":"atlas","days_ago":18,"content":"Dana's dog is a border collie named Juniper."}
+{"id":"m045","project":"atlas","days_ago":16,"content":"Dana is allergic to peanuts, so team lunches must avoid Thai and satay dishes."}
+{"id":"m046","project":"atlas","days_ago":12,"content":"The quarterly planning offsite is in Lisbon during the first week of March."}
+{"id":"m047","project":"atlas","days_ago":10,"content":"A temporary promo code LAUNCH25 gives new Atlas customers 25 percent off.","expired_days_ago":2}
+{"id":"m048","project":"atlas","days_ago":8,"content":"The Atlas staging database is frozen for the audit and must not be written to.","expired_days_ago":1}
+{"id":"m049","project":"atlas","days_ago":7,"content":"Ines found that the Android build fails on Gradle 9 because of the camera plugin."}
+{"id":"m050","project":"atlas","days_ago":5,"content":"The Atlas onboarding flow conversion rate rose from 31 percent to 38 percent after the checklist redesign."}
+{"id":"m051","project":"atlas","days_ago":2,"content":"Next step for Atlas: finish the invoice PDF renderer and add tests for multi-currency totals."}
+{"id":"m052","project":"atlas","days_ago":1,"content":"Open bug: the Atlas notification bell shows a stale unread count after marking all as read."}
+{"id":"m053","project":"harbor","days_ago":119,"content":"Harbor is the nightly data pipeline that loads warehouse telemetry into BigQuery."}
+{"id":"m054","project":"harbor","days_ago":116,"content":"Harbor is written in Python and orchestrated by Dagster."}
+{"id":"m055","project":"harbor","days_ago":112,"content":"The Harbor production database is ClickHouse for hot data, with BigQuery as the archive."}
+{"id":"m056","project":"harbor","days_ago":109,"content":"Kofi Mensah is the tech lead of the Harbor pipeline."}
+{"id":"m057","project":"harbor","days_ago":104,"content":"Harbor pull requests need two approving reviews, one of them from Kofi Mensah."}
+{"id":"m058","project":"harbor","days_ago":99,"content":"The Harbor API rate limit is 600 requests per minute per service account."}
+{"id":"m059","project":"harbor","days_ago":94,"content":"Harbor authentication uses Google service accounts with workload identity federation."}
+{"id":"m060","project":"harbor","days_ago":89,"content":"The Harbor release cadence is continuous; every merge to main deploys."}
+{"id":"m061","project":"harbor","days_ago":84,"content":"Harbor error tracking is handled by Datadog and pages go through PagerDuty."}
+{"id":"m062","project":"harbor","days_ago":79,"content":"The Harbor nightly run starts at 01:30 UTC and must finish before 05:00 UTC."}
+{"id":"m063","project":"harbor","days_ago":74,"content":"Sensor readings older than 13 months are moved from ClickHouse to cold storage."}
+{"id":"m064","project":"harbor","days_ago":69,"content":"The Harbor test suite runs with pytest and takes about four minutes."}
+{"id":"m065","project":"harbor","days_ago":64,"content":"Harbor deduplicates telemetry events by device id and event timestamp."}
+{"id":"m066","project":"harbor","days_ago":59,"content":"Warehouse 7 in Rotterdam sends malformed timestamps every time its gateway restarts."}
+{"id":"m067","project":"harbor","days_ago":54,"content":"The Harbor schema registry lives in the harbor-schemas repository and uses Avro."}
+{"id":"m068","project":"harbor","days_ago":49,"content":"Harbor backfills are limited to seven days at a time to protect the ClickHouse cluster."}
+{"id":"m069","project":"harbor","days_ago":44,"content":"The BigQuery monthly budget for Harbor is 4,000 dollars; an alert fires at 80 percent."}
+{"id":"m070","project":"harbor","days_ago":39,"content":"Kofi prefers that Harbor incidents get a written postmortem within three working days."}
+{"id":"m071","project":"harbor","days_ago":34,"content":"Harbor uses dbt for the transformation layer, with models tagged by warehouse region."}
+{"id":"m072","project":"harbor","days_ago":29,"content":"The Harbor staging environment runs against a sampled one percent dataset."}
+{"id":"m073","project":"harbor","days_ago":24,"content":"Yuki Tanaka maintains the Harbor ingestion gateway written in Go."}
+{"id":"m074","project":"harbor","days_ago":19,"content":"A Harbor job failed three nights in a row because the Rotterdam partition was missing."}
+{"id":"m075","project":"harbor","days_ago":13,"content":"The missing Rotterdam partition was caused by a renamed bucket; the path is now parameterised."}
+{"id":"m076","project":"harbor","days_ago":11,"content":"Harbor secrets are stored in Google Secret Manager and rotated every 90 days."}
+{"id":"m077","project":"harbor","days_ago":6,"content":"Next step for Harbor: add row count checks between ClickHouse and BigQuery after each nightly load."}
+{"id":"m078","project":"harbor","days_ago":2,"content":"Harbor cost review found that 40 percent of BigQuery spend comes from one unpartitioned table."}

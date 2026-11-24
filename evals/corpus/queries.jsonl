@@ -1,0 +1,59 @@
+{"id":"single-01","category":"single","project":"atlas","query":"What database does Atlas use in production?","relevant":["m003"]}
+{"id":"single-02","category":"single","project":"atlas","query":"Who owns the Atlas design system?","relevant":["m010"]}
+{"id":"single-03","category":"single","project":"atlas","query":"How long does the Atlas test suite take in CI?","relevant":["m009"]}
+{"id":"single-04","category":"single","project":"atlas","query":"What is the migration window for Atlas?","relevant":["m008"]}
+{"id":"single-05","category":"single","project":"atlas","query":"Which S3 bucket stores Atlas images?","relevant":["m026"]}
+{"id":"single-06","category":"single","project":"atlas","query":"What is the accessibility target for Atlas?","relevant":["m036"]}
+{"id":"single-07","category":"single","project":"atlas","query":"Who is the security reviewer for authentication changes?","relevant":["m024"]}
+{"id":"single-08","category":"single","project":"atlas","query":"What broker do Atlas background jobs use?","relevant":["m032"]}
+{"id":"single-09","category":"single","project":"harbor","query":"When does the Harbor nightly run start?","relevant":["m062"]}
+{"id":"single-10","category":"single","project":"harbor","query":"What is the BigQuery monthly budget for Harbor?","relevant":["m069"]}
+{"id":"single-11","category":"single","project":"harbor","query":"Who maintains the Harbor ingestion gateway?","relevant":["m073"]}
+{"id":"single-12","category":"single","project":"harbor","query":"How does Harbor deduplicate telemetry events?","relevant":["m065"]}
+{"id":"para-01","category":"paraphrase","project":"atlas","query":"Which vendor handles payments?","relevant":["m007"]}
+{"id":"para-02","category":"paraphrase","project":"atlas","query":"Where do crash reports go?","relevant":["m015"]}
+{"id":"para-03","category":"paraphrase","project":"atlas","query":"What food should we avoid when ordering for the team?","relevant":["m045"]}
+{"id":"para-04","category":"paraphrase","project":"atlas","query":"Does Dana have a pet?","relevant":["m044"]}
+{"id":"para-05","category":"paraphrase","project":"atlas","query":"How many people can use the app at once before it slows down?","relevant":["m038"]}
+{"id":"para-06","category":"paraphrase","project":"atlas","query":"When is Dana unavailable?","relevant":["m018"]}
+{"id":"para-07","category":"paraphrase","project":"atlas","query":"How should I format my git history?","relevant":["m027"]}
+{"id":"para-08","category":"paraphrase","project":"atlas","query":"Which old browsers are no longer supported?","relevant":["m041"]}
+{"id":"para-09","category":"paraphrase","project":"atlas","query":"Who looks after the phone app while its maintainer is away?","relevant":["m040"]}
+{"id":"para-10","category":"paraphrase","project":"harbor","query":"How much can we spend on the data warehouse each month?","relevant":["m069"]}
+{"id":"para-11","category":"paraphrase","project":"harbor","query":"What happens to old sensor data?","relevant":["m063"]}
+{"id":"para-12","category":"paraphrase","project":"harbor","query":"Which site keeps sending bad dates?","relevant":["m066"]}
+{"id":"update-01","category":"update_explicit","project":"atlas","query":"What does Atlas use for authentication?","relevant":["m012"],"forbidden":["m011"]}
+{"id":"update-02","category":"update_explicit","project":"atlas","query":"How often does Atlas release?","relevant":["m014"],"forbidden":["m013"]}
+{"id":"update-03","category":"update_explicit","project":"atlas","query":"What is the Atlas API rate limit?","relevant":["m017"],"forbidden":["m016"]}
+{"id":"update-04","category":"update_explicit","project":"atlas","query":"Which login provider is Atlas on?","relevant":["m012"],"forbidden":["m011"]}
+{"id":"update-05","category":"update_explicit","project":"atlas","query":"On what day do Atlas releases go out?","relevant":["m014"],"forbidden":["m013"]}
+{"id":"update-06","category":"update_explicit","project":"atlas","query":"How many requests per minute can an Atlas API key make?","relevant":["m017"],"forbidden":["m016"]}
+{"id":"implicit-01","category":"update_implicit","project":"atlas","query":"Which Python version does the Atlas backend run on?","relevant":["m029"],"stale":["m028"]}
+{"id":"implicit-02","category":"update_implicit","project":"atlas","query":"Who is the Atlas contact at Globex?","relevant":["m031"],"stale":["m030"]}
+{"id":"implicit-03","category":"update_implicit","project":"atlas","query":"Is the Globex CSV export timeout still a problem?","relevant":["m022"],"stale":["m021"]}
+{"id":"implicit-04","category":"update_implicit","project":"harbor","query":"What is the status of the missing Rotterdam partition?","relevant":["m075"],"stale":["m074"]}
+{"id":"asof-01","category":"as_of","project":"atlas","as_of_days_ago":30,"query":"What does Atlas use for authentication?","relevant":["m011"],"forbidden":["m012"]}
+{"id":"asof-02","category":"as_of","project":"atlas","as_of_days_ago":40,"query":"How often does Atlas release?","relevant":["m013"],"forbidden":["m014"]}
+{"id":"asof-03","category":"as_of","project":"atlas","as_of_days_ago":30,"query":"What is the Atlas API rate limit?","relevant":["m016"],"forbidden":["m017"]}
+{"id":"expired-01","category":"expired","project":"atlas","query":"Is there a promo code for new Atlas customers?","relevant":[],"forbidden":["m047"]}
+{"id":"expired-02","category":"expired","project":"atlas","query":"Is the Atlas staging database frozen for the audit?","relevant":[],"forbidden":["m048"]}
+{"id":"isolation-01","category":"isolation","project":"atlas","query":"Who is the tech lead?","relevant":["m001"],"forbidden":["m056"]}
+{"id":"isolation-02","category":"isolation","project":"harbor","query":"Who is the tech lead?","relevant":["m056"],"forbidden":["m001"]}
+{"id":"isolation-03","category":"isolation","project":"harbor","query":"How many approving reviews does a pull request need?","relevant":["m057"],"forbidden":["m005"]}
+{"id":"isolation-04","category":"isolation","project":"harbor","query":"What is the API rate limit?","relevant":["m058"],"forbidden":["m016","m017"]}
+{"id":"isolation-05","category":"isolation","project":"harbor","query":"What handles error tracking?","relevant":["m061"],"forbidden":["m015"]}
+{"id":"isolation-06","category":"isolation","project":"harbor","query":"What is the release cadence?","relevant":["m060"],"forbidden":["m013","m014"]}
+{"id":"multi-01","category":"multi","project":"atlas","query":"What should I work on next in Atlas and what bugs are open?","relevant":["m051","m052"]}
+{"id":"multi-02","category":"multi","project":"atlas","query":"What do I need to know before merging an Atlas pull request that touches payments?","relevant":["m005","m024"]}
+{"id":"multi-03","category":"multi","project":"atlas","query":"Who works on the Atlas mobile client?","relevant":["m025","m040"]}
+{"id":"multi-04","category":"multi","project":"harbor","query":"What went wrong with Rotterdam data?","relevant":["m066","m074","m075"]}
+{"id":"multi-05","category":"multi","project":"atlas","query":"What are Dana's preferences for code style and commits?","relevant":["m004","m027"]}
+{"id":"multi-06","category":"multi","project":"harbor","query":"Where is Harbor data stored?","relevant":["m053","m055","m063"]}
+{"id":"abstain-01","category":"abstain","project":"atlas","query":"What is the Kubernetes cluster name?","relevant":[]}
+{"id":"abstain-02","category":"abstain","project":"atlas","query":"Who is the chief financial officer?","relevant":[]}
+{"id":"abstain-03","category":"abstain","project":"atlas","query":"What is Dana's home address?","relevant":[]}
+{"id":"abstain-04","category":"abstain","project":"atlas","query":"Which GraphQL client library is used?","relevant":[]}
+{"id":"abstain-05","category":"abstain","project":"harbor","query":"What is the Kafka topic naming convention?","relevant":[]}
+{"id":"abstain-06","category":"abstain","project":"harbor","query":"When is Kofi's birthday?","relevant":[]}
+{"id":"abstain-07","category":"abstain","project":"atlas","query":"What is the wifi password for the Lisbon offsite?","relevant":[]}
+{"id":"abstain-08","category":"abstain","project":"atlas","query":"How much does the enterprise plan cost?","relevant":[]}
