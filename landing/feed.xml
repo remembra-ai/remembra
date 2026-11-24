@@ -5,8 +5,19 @@
     <link>https://remembra.dev/blog</link>
     <description>Notes from building Remembra: agent memory, handoffs between AI agents, and how Remembra compares with Mem0 and Zep.</description>
     <language>en-us</language>
-    <lastBuildDate>Fri, 25 Sep 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Tue, 24 Nov 2026 00:00:00 GMT</lastBuildDate>
     <atom:link href="https://remembra.dev/feed.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>When facts change: the part of agent memory that vector search skips</title>
+      <link>https://remembra.dev/blog/agent-memory-when-facts-change</link>
+      <guid isPermaLink="true">https://remembra.dev/blog/agent-memory-when-facts-change</guid>
+      <pubDate>Tue, 24 Nov 2026 00:00:00 GMT</pubDate>
+      <description>Agents fail when an old fact and its replacement both come back. How to store updates so recall returns what is true now, with code you can run.</description>
+      <category>agent memory</category>
+      <category>vector search</category>
+      <category>temporal memory</category>
+      <category>python</category>
+    </item>
     <item>
       <title>Remembra vs Mem0 vs Zep</title>
       <link>https://remembra.dev/blog/remembra-vs-mem0-vs-zep</link>
