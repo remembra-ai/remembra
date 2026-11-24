@@ -35,8 +35,8 @@ def _worker(db: Database) -> SleepTimeWorker:
     return SleepTimeWorker(settings=SimpleNamespace(consolidation_threshold=0.9), memory_service=service)
 
 
-async def _entity(db: Database, name: str, kind: str, user_id: str, project_id: str) -> Entity:
-    entity = Entity(canonical_name=name, type=kind)
+async def _entity(db: Database, name: str, kind: str, user_id: str, project_id: str, aliases: list[str] | None = None) -> Entity:
+    entity = Entity(canonical_name=name, type=kind, aliases=aliases or [])
     await db.save_entity(entity, user_id=user_id, project_id=project_id)
     return entity
 
@@ -95,9 +95,10 @@ async def test_resolution_pass_never_merges_across_projects(tmp_path) -> None:
 async def test_resolution_pass_still_merges_within_a_project(tmp_path) -> None:
     async with secure_app(tmp_path, ROUTERS) as h:
         uid = await h.create_user("b@example.com")
-        full = await _entity(h.db, "John Smith", "person", uid, "p1")
-        short = await _entity(h.db, "John", "person", uid, "p1")
-        other = await _entity(h.db, "John", "person", uid, "p2")
+        # A merge needs the same name or a listed alias; a name inside another is not one.
+        full = await _entity(h.db, "John Smith", "person", uid, "p1", aliases=["Johnny"])
+        short = await _entity(h.db, "Johnny", "person", uid, "p1")
+        other = await _entity(h.db, "Johnny", "person", uid, "p2")
 
         assert await _worker(h.db)._entity_resolution_pass(uid) == 1
 
@@ -110,8 +111,9 @@ async def test_a_merge_never_lands_on_an_entity_an_earlier_merge_removed(tmp_pat
     async with secure_app(tmp_path, ROUTERS) as h:
         uid = await h.create_user("chain@example.com")
         await _entity(h.db, "John Smith", "person", uid, "p1")
-        john = await _entity(h.db, "John", "person", uid, "p1")  # merged into John Smith first
-        johnny = await _entity(h.db, "Johnny", "person", uid, "p1")  # then "John" ~ "Johnny"
+        # merged into John Smith first (same name)
+        john = await _entity(h.db, "john smith", "person", uid, "p1", aliases=["Johnny"])
+        johnny = await _entity(h.db, "Johnny", "person", uid, "p1")  # then matches the removed entity's alias
         await _memory(h.db, "mem-johnny", uid, "p1", johnny)
 
         await _worker(h.db)._entity_resolution_pass(uid)

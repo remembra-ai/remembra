@@ -12,8 +12,9 @@ back 24 hours), up to 100 accounts. For each one it runs these passes in order:
    sends the text of those notes to your embedding provider. With cloud metering on (Remembra Cloud) this pass
    is charged to smart credits and skipped for an account with none left.
 2. **Entity alias resolution.** Merges entities of the same type in the same project when one name equals
-   the other, is one of its aliases, or contains it ("John" and "John Smith"). Links and relationships move
-   to the kept entity; duplicate relationships are closed, not deleted.
+   the other (ignoring case and spacing) or is one of its aliases. A name that only contains the other
+   ("Sam" and "Sam Altman") is not merged. Links, relationships and aliases move to the kept entity;
+   duplicate relationships are closed, not deleted. A merge cannot be undone.
 3. **Importance rescoring.** For each memory a search has returned, adds 0.05 per return (at most 0.3) to its
    stored importance, up to 1.0. This happens on every run.
 4. **Decay cleanup.** Off by default: it deletes nothing unless you turn it on (below).
