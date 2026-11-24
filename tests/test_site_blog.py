@@ -450,8 +450,9 @@ def test_a_generated_post_is_a_complete_page(site: Any) -> None:
         (3, "https://remembra.dev/blog/handoffs-that-work"),
     ]
     # The only executable inline script is the shared theme bootstrap, which the CSP already hashes.
-    scripts = re.findall(r"<script(?![^>]*\b(?:src|type)=)[^>]*>(.*?)</script>", page, re.S)
-    assert scripts == re.findall(r"<script>(.*?)</script>", partials.HEAD, re.S)
+    flags = re.S | re.I  # tags are matched in any case, with or without attributes on the closing tag
+    scripts = re.findall(r"<script(?![^>]*\b(?:src|type)=)[^>]*>(.*?)</script\b[^>]*>", page, flags)
+    assert scripts == re.findall(r"<script\b[^>]*>(.*?)</script\b[^>]*>", partials.HEAD, flags)
     assert not re.search(r"\son[a-z]+=", page)
 
 
