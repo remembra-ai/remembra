@@ -18,7 +18,7 @@ COPY docs-nginx/remembra-headers.conf scripts/docs_csp.py ./
 RUN mkdocs build --strict --site-dir /out \
     && python docs_csp.py /out remembra-headers.conf
 
-FROM nginx:1.30-alpine@sha256:985220252f3863977e468f611ef118ebd01421289dd86ee1ae99cb068c3bce2b
+FROM nginx:1.31-alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae
 COPY docs-nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /src/remembra-headers.conf /etc/nginx/remembra-headers.conf
 # Root-owned and read-only to the nginx user that serves it.
